@@ -41,6 +41,38 @@ binding = "HYPERDRIVE"
 id = "3b23617b1d514a8b8ffc7be84edea907"
 localConnectionString = "postgresql://postgres:postgres@localhost:54322/postgres"
 
+# --- Queue: inbound Telegram messages ---
+[[queues.producers]]
+binding = "TELEGRAM_QUEUE"
+queue = "telegram-inbound"
+
+[[queues.consumers]]
+queue = "telegram-inbound"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 3
+dead_letter_queue = "telegram-dlq"
+
+[[queues.producers]]
+binding = "TELEGRAM_DLQ"
+queue = "telegram-dlq"
+
+# --- Durable Object: ConversationSession ---
+[durable_objects]
+bindings = [
+  { name = "CONVERSATION_SESSION", class_name = "ConversationSession" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ConversationSession"]
+
+# --- Workflow: AgentExecution ---
+[[workflows]]
+name = "agent-execution"
+binding = "AGENT_WORKFLOW"
+class_name = "AgentExecutionWorkflow"
+
 # Local dev
 [dev]
 port = 8787

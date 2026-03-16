@@ -1,12 +1,12 @@
-import { AuthServiceLive } from "@amby/auth"
-import { SandboxServiceLive } from "@amby/computer"
-import { makeDbServiceFromUrl } from "@amby/db"
-import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
-import { MemoryServiceLive } from "@amby/memory"
-import { ModelServiceLive } from "@amby/models"
-import { Layer, ManagedRuntime } from "effect"
+import type { WorkerBindings } from "@amby/env/workers"
 import { Hono } from "hono"
-import { handleTelegramWebhook, TelegramBotLite } from "./telegram"
+import { handleQueueBatch } from "./queue/consumer"
+import type { TelegramQueueMessage } from "./telegram/utils"
+import { verifySecret } from "./telegram/utils"
+
+// Re-export Durable Object and Workflow classes so Cloudflare can discover them
+export { ConversationSession } from "./durable-objects/conversation-session"
+export { AgentExecutionWorkflow } from "./workflows/agent-execution"
 
 type Env = { Bindings: WorkerBindings }
 
@@ -14,41 +14,33 @@ const app = new Hono<Env>()
 
 app.get("/health", (c) => c.json({ status: "ok" }))
 
-/** Build a per-request Effect runtime from Worker env bindings */
-const makeRuntime = (bindings: WorkerBindings) => {
-	const dbUrl = bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? ""
-
-	const SharedLive = Layer.mergeAll(
-		MemoryServiceLive,
-		SandboxServiceLive,
-		ModelServiceLive,
-		AuthServiceLive,
-		TelegramBotLite,
-	).pipe(
-		Layer.provideMerge(makeDbServiceFromUrl(dbUrl)),
-		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
-	)
-
-	return ManagedRuntime.make(SharedLive)
-}
-
+// Webhook handler — verify, enqueue, return 200 immediately
 app.post("/telegram/webhook", async (c) => {
-	const runtime = makeRuntime(c.env)
-	const backgroundTasks: Promise<unknown>[] = []
-	const waitUntil = (promise: Promise<unknown>) => {
-		backgroundTasks.push(promise)
-		c.executionCtx.waitUntil(promise)
+	const headerSecret = c.req.header("X-Telegram-Bot-Api-Secret-Token")
+	const webhookSecret = c.env.TELEGRAM_WEBHOOK_SECRET ?? ""
+
+	if (!verifySecret(headerSecret, webhookSecret)) {
+		return c.json({ error: "Unauthorized" }, 401)
 	}
-	try {
-		return await handleTelegramWebhook(runtime, c, { waitUntil })
-	} finally {
-		if (backgroundTasks.length > 0) {
-			// Defer runtime disposal until background tasks complete
-			c.executionCtx.waitUntil(Promise.allSettled(backgroundTasks).then(() => runtime.dispose()))
-		} else {
-			await runtime.dispose()
-		}
+
+	const update = await c.req.json()
+
+	if (c.env.TELEGRAM_QUEUE) {
+		await c.env.TELEGRAM_QUEUE.send({
+			update,
+			receivedAt: Date.now(),
+		} satisfies TelegramQueueMessage)
+	} else {
+		console.warn("[Webhook] TELEGRAM_QUEUE binding not available — message dropped")
 	}
+
+	return c.json({ ok: true })
 })
 
-export default app
+export default {
+	fetch: app.fetch,
+
+	async queue(batch: MessageBatch<TelegramQueueMessage>, env: WorkerBindings) {
+		await handleQueueBatch(batch, env)
+	},
+}

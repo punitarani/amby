@@ -22,7 +22,7 @@ export type StreamPart =
 	| { type: "tool-result"; toolName: string; result: unknown }
 
 import { CUA_PROMPT, SYSTEM_PROMPT } from "./prompts/system"
-import { createJobTools } from "./tools/messaging"
+import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
 
 export class AgentService extends Context.Tag("AgentService")<
 	AgentService,
@@ -31,6 +31,13 @@ export class AgentService extends Context.Tag("AgentService")<
 			conversationId: string,
 			content: string,
 			metadata?: Record<string, unknown>,
+			onReply?: ReplyFn,
+		) => Effect.Effect<string, AgentError>
+		readonly handleBatchedMessages: (
+			conversationId: string,
+			messages: string[],
+			metadata?: Record<string, unknown>,
+			onReply?: ReplyFn,
 		) => Effect.Effect<string, AgentError>
 		readonly streamMessage: (
 			conversationId: string,
@@ -87,7 +94,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			) =>
 				query((d) => d.insert(schema.messages).values({ conversationId, role, content, metadata }))
 
-			const prepareContext = (conversationId: string) =>
+			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
 				Effect.gen(function* () {
 					const profile = yield* memory.getProfile(userId)
 					const deduped = deduplicateMemories(profile.static, profile.dynamic)
@@ -99,6 +106,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						...createMemoryTools(memory, userId),
 						...computer.tools,
 						...createJobTools(db, userId),
+						...(onReply ? createReplyTools(onReply) : {}),
 						...(enableCua
 							? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 							: {}),
@@ -113,9 +121,9 @@ export const makeAgentServiceLive = (userId: string) =>
 				})
 
 			return {
-				handleMessage: (conversationId, content, metadata) =>
+				handleMessage: (conversationId, content, metadata, onReply) =>
 					Effect.gen(function* () {
-						const { tools, systemPrompt, history } = yield* prepareContext(conversationId)
+						const { tools, systemPrompt, history } = yield* prepareContext(conversationId, onReply)
 
 						const result = yield* Effect.tryPromise({
 							try: () =>
@@ -138,6 +146,43 @@ export const makeAgentServiceLive = (userId: string) =>
 							e instanceof AgentError
 								? e
 								: new AgentError({ message: "Agent message handling failed", cause: e }),
+						),
+					),
+
+				handleBatchedMessages: (conversationId, messages, metadata, onReply) =>
+					Effect.gen(function* () {
+						const { tools, systemPrompt, history } = yield* prepareContext(conversationId, onReply)
+
+						// Each batched message becomes a separate user turn
+						const userMessages = messages.map((content) => ({
+							role: "user" as const,
+							content,
+						}))
+
+						const result = yield* Effect.tryPromise({
+							try: () =>
+								generateText({
+									model,
+									system: systemPrompt,
+									messages: [...history, ...userMessages],
+									tools,
+									stopWhen: stepCountIs(10),
+								}),
+							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
+						})
+
+						// Save each message individually for accurate history
+						for (const content of messages) {
+							yield* saveMessage(conversationId, "user", content, metadata)
+						}
+						yield* saveMessage(conversationId, "assistant", result.text)
+
+						return result.text
+					}).pipe(
+						Effect.mapError((e) =>
+							e instanceof AgentError
+								? e
+								: new AgentError({ message: "Agent batched message handling failed", cause: e }),
 						),
 					),
 
