@@ -8,8 +8,8 @@ compatibility_flags = [
 ]
 upload_source_maps = true
 
-# Disable workers.dev subdomain in production
-workers_dev = false
+# Enable workers.dev subdomain in production
+workers_dev = true
 
 # Smart placement: run near the database
 [placement]
