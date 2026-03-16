@@ -7,9 +7,15 @@ import {
 	MemoryService,
 } from "@amby/memory"
 import { ModelService } from "@amby/models"
-import { generateText, stepCountIs } from "ai"
+import { generateText, stepCountIs, streamText } from "ai"
 import { Context, Effect, Layer } from "effect"
 import { AgentError } from "./errors"
+
+export type StreamPart =
+	| { type: "text-delta"; text: string }
+	| { type: "tool-call"; toolName: string; args: Record<string, unknown> }
+	| { type: "tool-result"; toolName: string; result: unknown }
+
 import { SYSTEM_PROMPT } from "./prompts/system"
 import { createJobTools } from "./tools/messaging"
 
@@ -19,6 +25,11 @@ export class AgentService extends Context.Tag("AgentService")<
 		readonly handleMessage: (
 			conversationId: string,
 			content: string,
+		) => Effect.Effect<string, AgentError>
+		readonly streamMessage: (
+			conversationId: string,
+			content: string,
+			onPart: (part: StreamPart) => void,
 		) => Effect.Effect<string, AgentError>
 		readonly ensureConversation: (channelType?: string) => Effect.Effect<string, AgentError>
 		readonly shutdown: () => Effect.Effect<void, AgentError>
@@ -102,6 +113,69 @@ export const makeAgentServiceLive = (userId: string) =>
 							e instanceof AgentError
 								? e
 								: new AgentError({ message: "Agent message handling failed", cause: e }),
+						),
+					),
+
+				streamMessage: (conversationId, content, onPart) =>
+					Effect.gen(function* () {
+						const profile = yield* memory.getProfile(userId)
+						const deduped = deduplicateMemories(profile.static, profile.dynamic)
+						const memoryContext = buildMemoriesText(deduped)
+
+						const history = yield* loadHistory(conversationId)
+
+						const tools = {
+							...createMemoryTools(memory, userId),
+							...computer.tools,
+							...createJobTools(db, userId),
+						}
+
+						const systemPrompt = memoryContext
+							? `${SYSTEM_PROMPT}\n\n# User Memory Context\n${memoryContext}`
+							: SYSTEM_PROMPT
+
+						const result = yield* Effect.tryPromise({
+							try: async () => {
+								const stream = streamText({
+									model,
+									system: systemPrompt,
+									messages: [...history, { role: "user" as const, content }],
+									tools,
+									stopWhen: stepCountIs(10),
+								})
+
+								for await (const part of stream.fullStream) {
+									switch (part.type) {
+										case "text-delta":
+											onPart({ type: "text-delta", text: part.text })
+											break
+										case "tool-call":
+											onPart({
+												type: "tool-call",
+												toolName: part.toolName,
+												args: part.input as Record<string, unknown>,
+											})
+											break
+										case "tool-result":
+											onPart({ type: "tool-result", toolName: part.toolName, result: part.output })
+											break
+									}
+								}
+
+								return await stream.text
+							},
+							catch: (cause) => new AgentError({ message: "Failed to stream response", cause }),
+						})
+
+						yield* saveMessage(conversationId, "user", content)
+						yield* saveMessage(conversationId, "assistant", result)
+
+						return result
+					}).pipe(
+						Effect.mapError((e) =>
+							e instanceof AgentError
+								? e
+								: new AgentError({ message: "Agent stream handling failed", cause: e }),
 						),
 					),
 

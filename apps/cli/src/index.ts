@@ -69,6 +69,9 @@ const program = Effect.gen(function* () {
 	channel.onMessage(async (msg) =>
 		Effect.runPromise(agent.handleMessage(conversationId, msg.content)),
 	)
+	channel.onStreamingMessage(async (msg, onPart) =>
+		Effect.runPromise(agent.streamMessage(conversationId, msg.content, onPart)),
+	)
 
 	console.log("\nAmby is ready. Type a message or /quit to exit.\n")
 	yield* channel.start()

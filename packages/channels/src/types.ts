@@ -18,10 +18,16 @@ export interface OutgoingMessage {
 
 export type MessageHandler = (message: IncomingMessage) => Promise<string>
 
+export type StreamingMessageHandler = (
+	message: IncomingMessage,
+	onPart: (part: { type: string; [key: string]: unknown }) => void,
+) => Promise<string>
+
 export interface Channel {
 	id: string
 	type: ChannelType
 	onMessage(handler: MessageHandler): void
+	onStreamingMessage?(handler: StreamingMessageHandler): void
 	send(message: OutgoingMessage): Effect.Effect<void, ChannelError>
 	start(): Effect.Effect<void, ChannelError>
 	stop(): Effect.Effect<void, ChannelError>

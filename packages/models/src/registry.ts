@@ -18,7 +18,9 @@ export const ModelServiceLive = Layer.effect(
 	Effect.gen(function* () {
 		const env = yield* EnvService
 		const openrouter = createOpenRouter({ apiKey: env.OPENROUTER_API_KEY })
-		const registry = createProviderRegistry({ openrouter })
+		const registry = createProviderRegistry({
+			openrouter: openrouter as Parameters<typeof createProviderRegistry>[0][string],
+		})
 
 		return {
 			getModel: (id = DEFAULT_MODEL_ID) => registry.languageModel(id as `openrouter:${string}`),

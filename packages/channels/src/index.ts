@@ -7,4 +7,5 @@ export type {
 	IncomingMessage,
 	MessageHandler,
 	OutgoingMessage,
+	StreamingMessageHandler,
 } from "./types"
