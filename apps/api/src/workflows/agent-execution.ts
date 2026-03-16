@@ -71,17 +71,23 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 					try {
 						const runtime = makeRuntimeForConsumer(this.env)
 						try {
+							const sendReply = (text: string) => bot.api.sendMessage(chatId, text).then(() => {})
 							const effect = Effect.gen(function* () {
 								const agent = yield* AgentService
 								const convId = conversationId ?? (yield* agent.ensureConversation("telegram"))
 								conversationId = convId
 
 								if (messageTexts.length > 1) {
-									return yield* agent.handleBatchedMessages(convId, messageTexts, {
-										telegram: { batched: true, messageCount: messageTexts.length },
-									})
+									return yield* agent.handleBatchedMessages(
+										convId,
+										messageTexts,
+										{
+											telegram: { batched: true, messageCount: messageTexts.length },
+										},
+										sendReply,
+									)
 								}
-								return yield* agent.handleMessage(convId, input)
+								return yield* agent.handleMessage(convId, input, undefined, sendReply)
 							}).pipe(Effect.provide(makeAgentServiceLive(finalUserId)))
 
 							return await runtime.runPromise(effect)

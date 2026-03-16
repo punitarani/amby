@@ -3,6 +3,24 @@ import { schema } from "@amby/db"
 import { tool } from "ai"
 import { z } from "zod"
 
+export type ReplyFn = (text: string) => Promise<void>
+
+export function createReplyTools(sendReply: ReplyFn) {
+	return {
+		send_message: tool({
+			description:
+				"Send a message to the user immediately. Use this when you need to send multiple separate messages rather than one combined response.",
+			inputSchema: z.object({
+				text: z.string().describe("The message text to send"),
+			}),
+			execute: async ({ text }) => {
+				await sendReply(text)
+				return { sent: true }
+			},
+		}),
+	}
+}
+
 export type SubAgentSpawner = (task: string, context?: string) => Promise<string>
 
 export function createDelegationTools(spawnSubAgent: SubAgentSpawner) {
