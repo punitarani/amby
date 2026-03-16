@@ -32,6 +32,12 @@ export interface WorkerBindings {
 			id: string,
 		): Promise<{ status(): Promise<unknown>; sendEvent(event: unknown): Promise<void> }>
 	}
+	SANDBOX_WORKFLOW?: {
+		create(options: { id?: string; params?: { userId: string } }): Promise<{ id: string }>
+		get(
+			id: string,
+		): Promise<{ status(): Promise<unknown>; sendEvent(event: unknown): Promise<void> }>
+	}
 }
 
 export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>

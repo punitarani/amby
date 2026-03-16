@@ -7,6 +7,7 @@ import { verifySecret } from "./telegram/utils"
 // Re-export Durable Object and Workflow classes so Cloudflare can discover them
 export { ConversationSession } from "./durable-objects/conversation-session"
 export { AgentExecutionWorkflow } from "./workflows/agent-execution"
+export { SandboxProvisionWorkflow } from "./workflows/sandbox-provision"
 
 type Env = { Bindings: WorkerBindings }
 
