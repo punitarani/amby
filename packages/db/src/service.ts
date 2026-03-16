@@ -32,3 +32,20 @@ export const DbServiceLive = Layer.effect(
 		}
 	}),
 )
+
+export const makeDbServiceFromUrl = (url: string) =>
+	Layer.succeed(
+		DbService,
+		(() => {
+			const client = postgres(url, { prepare: false })
+			const db = drizzle(client, { schema })
+			return {
+				db,
+				query: <T>(fn: (db: Database) => Promise<T>) =>
+					Effect.tryPromise({
+						try: () => fn(db),
+						catch: (cause) => new DbError({ message: "Database query failed", cause }),
+					}),
+			}
+		})(),
+	)
