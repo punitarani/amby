@@ -14,7 +14,7 @@ export const jobs = pgTable("jobs", {
 	schedule: text("schedule"), // cron expression
 	runAt: timestamp("run_at"), // for one-time jobs
 	payload: jsonb("payload").$type<Record<string, unknown>>(),
-	channelType: text("channel_type").notNull().default("cli"),
+	channelType: text("channel_type").$type<"cli" | "telegram">().notNull().default("cli"),
 	lastRunAt: timestamp("last_run_at"),
 	nextRunAt: timestamp("next_run_at"),
 	error: text("error"),

@@ -1,3 +1,4 @@
+import type { ChannelType } from "@amby/channels"
 import { and, DbService, eq, lte, or, schema } from "@amby/db"
 import { Context, Effect, Layer } from "effect"
 import type { AgentError } from "../errors"
@@ -6,7 +7,7 @@ export type JobExecutor = (job: {
 	id: string
 	userId: string
 	payload: Record<string, unknown> | null
-	channelType: string
+	channelType: ChannelType
 }) => Effect.Effect<void, AgentError>
 
 export class JobRunnerService extends Context.Tag("JobRunnerService")<

@@ -17,6 +17,8 @@
 		"seed": "bun run apps/cli/src/seed.ts",
 		"setup": "docker compose up -d && bun install && bun run db:push && bun run seed",
 		"cli": "bun run apps/cli/src/index.ts",
+		"api": "bun run apps/api/src/index.ts",
+		"api:dev": "bun run --hot apps/api/src/index.ts",
 		"computer:build": "./docker/computer/build.sh",
 		"computer:push": "./docker/computer/push.sh"
 	},

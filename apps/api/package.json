@@ -1,25 +1,24 @@
 {
-	"name": "@amby/agent",
+	"name": "@amby/api",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"exports": {
-		".": "./src/index.ts"
-	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"build": "bun build ./src/index.ts --outdir dist --target bun"
+		"build": "bun build ./src/index.ts --outdir dist --target bun",
+		"dev": "bun run --hot src/index.ts",
+		"start": "bun run src/index.ts"
 	},
 	"dependencies": {
-		"@amby/channels": "workspace:*",
+		"@amby/agent": "workspace:*",
+		"@amby/auth": "workspace:*",
 		"@amby/computer": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",
 		"@amby/models": "workspace:*",
-		"@daytonaio/sdk": "^0.151.0",
-		"ai": "^6.0.0",
 		"effect": "^3.19.19",
-		"zod": "^3.24.0"
+		"grammy": "^1.35.0",
+		"hono": "^4.7.0"
 	}
 }
