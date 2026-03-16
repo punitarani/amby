@@ -25,6 +25,7 @@ const EnvConfig = Config.all({
 	BETTER_AUTH_URL: Config.string("BETTER_AUTH_URL").pipe(
 		Config.withDefault("http://localhost:3000"),
 	),
+	ENABLE_CUA: Config.boolean("ENABLE_CUA").pipe(Config.withDefault(false)),
 })
 
 export interface Env {
@@ -40,6 +41,7 @@ export interface Env {
 	readonly DATABASE_URL: string
 	readonly BETTER_AUTH_SECRET: string
 	readonly BETTER_AUTH_URL: string
+	readonly ENABLE_CUA: boolean
 }
 
 export class EnvService extends Context.Tag("EnvService")<EnvService, Env>() {}
@@ -61,6 +63,7 @@ export const EnvServiceLive = Layer.effect(
 			DATABASE_URL: raw.DATABASE_URL,
 			BETTER_AUTH_SECRET: Redacted.value(raw.BETTER_AUTH_SECRET),
 			BETTER_AUTH_URL: raw.BETTER_AUTH_URL,
+			ENABLE_CUA: raw.ENABLE_CUA,
 		}
 	}),
 )
