@@ -6,6 +6,7 @@ import { Context, Effect, Layer } from "effect"
 import { Bot } from "grammy"
 import type { Context as HonoContext } from "hono"
 import { Hono } from "hono"
+import { getPostHogClient } from "../posthog"
 
 interface TelegramFrom {
 	id: number
@@ -147,13 +148,13 @@ const verifySecret = (headerSecret: string | undefined, configuredSecret: string
 
 export const handleTelegramWebhook = async (runtime: Runtime, c: HonoContext) => {
 	const headerSecret = c.req.header("X-Telegram-Bot-Api-Secret-Token")
-	const configuredSecret = await runtime.runPromise(
-		Effect.map(EnvService, (env) => env.TELEGRAM_WEBHOOK_SECRET),
-	)
+	const env = await runtime.runPromise(Effect.map(EnvService, (e) => e))
 
-	if (!verifySecret(headerSecret, configuredSecret)) {
+	if (!verifySecret(headerSecret, env.TELEGRAM_WEBHOOK_SECRET)) {
 		return c.json({ error: "Unauthorized" }, 401)
 	}
+
+	const posthog = getPostHogClient(env.POSTHOG_KEY, env.POSTHOG_HOST)
 
 	const update: TelegramUpdate = await c.req.json()
 	const message = update?.message
@@ -177,6 +178,17 @@ export const handleTelegramWebhook = async (runtime: Runtime, c: HonoContext) =>
 				yield* agent.ensureConversation("telegram")
 			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
 
+			posthog.capture({
+				distinctId: userId,
+				event: "bot_started",
+				properties: {
+					channel: "telegram",
+					username: from.username ?? null,
+					language_code: from.language_code ?? null,
+					is_premium: from.is_premium ?? false,
+				},
+			})
+
 			yield* Effect.tryPromise(() =>
 				bot.api.sendMessage(
 					chatId,
@@ -188,12 +200,24 @@ export const handleTelegramWebhook = async (runtime: Runtime, c: HonoContext) =>
 
 		// Handle /stop
 		if (text === "/stop") {
+			const userId = yield* findOrCreateUser(from, chatId)
+			posthog.capture({
+				distinctId: userId,
+				event: "bot_stopped",
+				properties: { channel: "telegram" },
+			})
 			yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, "Paused. Send /start to resume."))
 			return
 		}
 
 		// Handle /help
 		if (text === "/help") {
+			const userId = yield* findOrCreateUser(from, chatId)
+			posthog.capture({
+				distinctId: userId,
+				event: "help_requested",
+				properties: { channel: "telegram" },
+			})
 			yield* Effect.tryPromise(() =>
 				bot.api.sendMessage(
 					chatId,
@@ -207,6 +231,15 @@ export const handleTelegramWebhook = async (runtime: Runtime, c: HonoContext) =>
 		if (!text) return
 
 		const userId = yield* findOrCreateUser(from, chatId)
+
+		posthog.capture({
+			distinctId: userId,
+			event: "message_sent",
+			properties: {
+				channel: "telegram",
+				message_length: text.length,
+			},
+		})
 
 		const response = yield* Effect.gen(function* () {
 			const agent = yield* AgentService

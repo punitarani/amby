@@ -26,6 +26,7 @@
 		"@amby/models": "workspace:*",
 		"effect": "^3.19.19",
 		"grammy": "^1.35.0",
-		"hono": "^4.7.0"
+		"hono": "^4.7.0",
+		"posthog-node": "^4.0.1"
 	}
 }

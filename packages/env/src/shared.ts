@@ -18,6 +18,8 @@ export interface Env {
 	readonly BETTER_AUTH_SECRET: string
 	readonly BETTER_AUTH_URL: string
 	readonly ENABLE_CUA: boolean
+	readonly POSTHOG_KEY: string
+	readonly POSTHOG_HOST: string
 }
 
 export class EnvService extends Context.Tag("EnvService")<EnvService, Env>() {}
