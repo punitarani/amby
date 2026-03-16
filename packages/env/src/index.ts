@@ -14,6 +14,12 @@ const EnvConfig = Config.all({
 		Config.withDefault("https://app.daytona.io/api"),
 	),
 	DAYTONA_TARGET: Config.string("DAYTONA_TARGET").pipe(Config.withDefault("us")),
+	TELEGRAM_BOT_TOKEN: Config.redacted("TELEGRAM_BOT_TOKEN").pipe(
+		Config.withDefault(Redacted.make("")),
+	),
+	TELEGRAM_WEBHOOK_SECRET: Config.redacted("TELEGRAM_WEBHOOK_SECRET").pipe(
+		Config.withDefault(Redacted.make("")),
+	),
 	DATABASE_URL: Config.string("DATABASE_URL"),
 	BETTER_AUTH_SECRET: Config.redacted("BETTER_AUTH_SECRET"),
 	BETTER_AUTH_URL: Config.string("BETTER_AUTH_URL").pipe(
@@ -29,6 +35,8 @@ export interface Env {
 	readonly DAYTONA_API_KEY: string
 	readonly DAYTONA_API_URL: string
 	readonly DAYTONA_TARGET: string
+	readonly TELEGRAM_BOT_TOKEN: string
+	readonly TELEGRAM_WEBHOOK_SECRET: string
 	readonly DATABASE_URL: string
 	readonly BETTER_AUTH_SECRET: string
 	readonly BETTER_AUTH_URL: string
@@ -48,6 +56,8 @@ export const EnvServiceLive = Layer.effect(
 			DAYTONA_API_KEY: Redacted.value(raw.DAYTONA_API_KEY),
 			DAYTONA_API_URL: raw.DAYTONA_API_URL,
 			DAYTONA_TARGET: raw.DAYTONA_TARGET,
+			TELEGRAM_BOT_TOKEN: Redacted.value(raw.TELEGRAM_BOT_TOKEN),
+			TELEGRAM_WEBHOOK_SECRET: Redacted.value(raw.TELEGRAM_WEBHOOK_SECRET),
 			DATABASE_URL: raw.DATABASE_URL,
 			BETTER_AUTH_SECRET: Redacted.value(raw.BETTER_AUTH_SECRET),
 			BETTER_AUTH_URL: raw.BETTER_AUTH_URL,

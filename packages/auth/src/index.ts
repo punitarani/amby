@@ -1,7 +1,9 @@
 import { DbService } from "@amby/db"
 import { EnvService } from "@amby/env"
+import { apiKey } from "@better-auth/api-key"
 import { type BetterAuthOptions, betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { phoneNumber } from "better-auth/plugins"
 import { Context, Effect, Layer } from "effect"
 
 export class AuthService extends Context.Tag("AuthService")<
@@ -20,6 +22,14 @@ export const AuthServiceLive = Layer.effect(
 			secret: env.BETTER_AUTH_SECRET,
 			baseURL: env.BETTER_AUTH_URL,
 			emailAndPassword: { enabled: true },
-		}) as ReturnType<typeof betterAuth<BetterAuthOptions>>
+			plugins: [
+				apiKey(),
+				phoneNumber({
+					sendOTP: () => {
+						// No-op — OTP not used. Phone numbers are linked manually.
+					},
+				}),
+			],
+		}) as unknown as ReturnType<typeof betterAuth<BetterAuthOptions>>
 	}),
 )

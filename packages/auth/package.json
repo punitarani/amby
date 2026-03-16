@@ -13,6 +13,7 @@
 	"dependencies": {
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
+		"@better-auth/api-key": "^1.5.5",
 		"better-auth": "^1.5.5",
 		"effect": "^3.19.19"
 	}

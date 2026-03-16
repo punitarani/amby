@@ -1,7 +1,7 @@
 import type { Effect } from "effect"
 import type { ChannelError } from "./errors"
 
-export type ChannelType = "cli" | "sms" | "imessage" | "web" | "mobile"
+export type ChannelType = "cli" | "telegram"
 
 export interface IncomingMessage {
 	conversationId: string
