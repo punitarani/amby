@@ -3,7 +3,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import type { LanguageModel } from "ai"
 import { Context, Effect, Layer } from "effect"
 
-export const DEFAULT_MODEL_ID = "anthropic/claude-haiku-4.5" as const
+export const DEFAULT_MODEL_ID = "google/gemini-3.1-flash-lite-preview" as const
 
 export class ModelService extends Context.Tag("ModelService")<
 	ModelService,
