@@ -1,6 +1,7 @@
 # environment variables
 .env
 .env*.local
+.dev.vars*
 
 # dependencies
 node_modules
@@ -24,6 +25,10 @@ yarn-error.log*
 
 # turbo
 .turbo
+
+# cloudflare
+.wrangler
+dist-worker
 
 # vercel
 .vercel

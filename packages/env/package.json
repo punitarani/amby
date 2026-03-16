@@ -4,11 +4,13 @@
 	"private": true,
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/shared.ts",
+		"./local": "./src/local.ts",
+		"./workers": "./src/workers.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"build": "bun build ./src/index.ts --outdir dist --target bun"
+		"build": "bun build ./src/shared.ts ./src/local.ts ./src/workers.ts --outdir dist --target bun"
 	},
 	"dependencies": {
 		"effect": "^3.19.19"

@@ -7,7 +7,14 @@
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
 		"dev": "bun run --hot src/index.ts",
+		"dev:worker": "wrangler dev",
+		"deploy": "wrangler deploy",
+		"cf-typegen": "wrangler types --env-interface CloudflareBindings",
 		"start": "bun run src/index.ts"
+	},
+	"devDependencies": {
+		"wrangler": "^4.0.0",
+		"@cloudflare/workers-types": "^4.20241218.0"
 	},
 	"dependencies": {
 		"@amby/agent": "workspace:*",

@@ -4,6 +4,7 @@ import { and, DbService, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { Context, Effect, Layer } from "effect"
 import { Bot } from "grammy"
+import type { Context as HonoContext } from "hono"
 import { Hono } from "hono"
 
 interface TelegramFrom {
@@ -54,6 +55,18 @@ export const TelegramBotLive = Layer.effect(
 		)
 
 		return bot
+	}),
+)
+
+/** Lightweight TelegramBot layer that skips setMyCommands — suitable for per-request use in Workers */
+export const TelegramBotLite = Layer.effect(
+	TelegramBot,
+	Effect.gen(function* () {
+		const env = yield* EnvService
+		if (!env.TELEGRAM_BOT_TOKEN) {
+			throw new Error("TELEGRAM_BOT_TOKEN is not set")
+		}
+		return new Bot(env.TELEGRAM_BOT_TOKEN)
 	}),
 )
 
@@ -130,101 +143,101 @@ const verifySecret = (headerSecret: string | undefined, configuredSecret: string
 	}
 }
 
+// --- Shared webhook handler ---
+
+export const handleTelegramWebhook = async (runtime: Runtime, c: HonoContext) => {
+	const headerSecret = c.req.header("X-Telegram-Bot-Api-Secret-Token")
+	const configuredSecret = await runtime.runPromise(
+		Effect.map(EnvService, (env) => env.TELEGRAM_WEBHOOK_SECRET),
+	)
+
+	if (!verifySecret(headerSecret, configuredSecret)) {
+		return c.json({ error: "Unauthorized" }, 401)
+	}
+
+	const update: TelegramUpdate = await c.req.json()
+	const message = update?.message
+	const from = message?.from
+	const text = message?.text
+	const chatId = message?.chat?.id
+
+	if (!from || !chatId) {
+		return c.json({ ok: true })
+	}
+
+	const effect = Effect.gen(function* () {
+		const bot = yield* TelegramBot
+
+		// Handle /start
+		if (text === "/start") {
+			const userId = yield* findOrCreateUser(from, chatId)
+
+			yield* Effect.gen(function* () {
+				const agent = yield* AgentService
+				yield* agent.ensureConversation("telegram")
+			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
+
+			yield* Effect.tryPromise(() =>
+				bot.api.sendMessage(
+					chatId,
+					`Welcome to Amby, ${from.first_name}! I'm your personal ambient assistant. Just send me a message and I'll help you out.`,
+				),
+			)
+			return
+		}
+
+		// Handle /stop
+		if (text === "/stop") {
+			yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, "Paused. Send /start to resume."))
+			return
+		}
+
+		// Handle /help
+		if (text === "/help") {
+			yield* Effect.tryPromise(() =>
+				bot.api.sendMessage(
+					chatId,
+					"Available commands:\n/start — Start or resume the assistant\n/stop — Pause the assistant\n/help — Show this help message\n\nOr just send me any text message!",
+				),
+			)
+			return
+		}
+
+		// Regular text messages -> agent
+		if (!text) return
+
+		const userId = yield* findOrCreateUser(from, chatId)
+
+		const response = yield* Effect.gen(function* () {
+			const agent = yield* AgentService
+			const conversationId = yield* agent.ensureConversation("telegram")
+			// Pass raw Telegram message as metadata for zero data loss
+			const messageMetadata = message ? { telegram: message } : undefined
+			return yield* agent.handleMessage(conversationId, text, messageMetadata)
+		}).pipe(Effect.provide(makeAgentServiceLive(userId)))
+
+		yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, response))
+	}).pipe(
+		Effect.catchAllCause((cause) =>
+			Effect.gen(function* () {
+				const bot = yield* TelegramBot
+				console.error("Telegram webhook error:", cause)
+				yield* Effect.tryPromise(() =>
+					bot.api.sendMessage(chatId, "Sorry, something went wrong. Please try again."),
+				).pipe(Effect.catchAll(() => Effect.void))
+			}),
+		),
+	)
+
+	await runtime.runPromise(effect)
+	// Always return ok to prevent Telegram retries
+	return c.json({ ok: true })
+}
+
 // --- Router ---
 
 export const createTelegramRouter = (runtime: Runtime) => {
 	const router = new Hono()
-
-	router.post("/webhook", async (c) => {
-		const headerSecret = c.req.header("X-Telegram-Bot-Api-Secret-Token")
-		const configuredSecret = await runtime.runPromise(
-			Effect.map(EnvService, (env) => env.TELEGRAM_WEBHOOK_SECRET),
-		)
-
-		if (!verifySecret(headerSecret, configuredSecret)) {
-			return c.json({ error: "Unauthorized" }, 401)
-		}
-
-		const update: TelegramUpdate = await c.req.json()
-		const message = update?.message
-		const from = message?.from
-		const text = message?.text
-		const chatId = message?.chat?.id
-
-		if (!from || !chatId) {
-			return c.json({ ok: true })
-		}
-
-		const effect = Effect.gen(function* () {
-			const bot = yield* TelegramBot
-
-			// Handle /start
-			if (text === "/start") {
-				const userId = yield* findOrCreateUser(from, chatId)
-
-				yield* Effect.gen(function* () {
-					const agent = yield* AgentService
-					yield* agent.ensureConversation("telegram")
-				}).pipe(Effect.provide(makeAgentServiceLive(userId)))
-
-				yield* Effect.tryPromise(() =>
-					bot.api.sendMessage(
-						chatId,
-						`Welcome to Amby, ${from.first_name}! I'm your personal ambient assistant. Just send me a message and I'll help you out.`,
-					),
-				)
-				return
-			}
-
-			// Handle /stop
-			if (text === "/stop") {
-				yield* Effect.tryPromise(() =>
-					bot.api.sendMessage(chatId, "Paused. Send /start to resume."),
-				)
-				return
-			}
-
-			// Handle /help
-			if (text === "/help") {
-				yield* Effect.tryPromise(() =>
-					bot.api.sendMessage(
-						chatId,
-						"Available commands:\n/start — Start or resume the assistant\n/stop — Pause the assistant\n/help — Show this help message\n\nOr just send me any text message!",
-					),
-				)
-				return
-			}
-
-			// Regular text messages -> agent
-			if (!text) return
-
-			const userId = yield* findOrCreateUser(from, chatId)
-
-			const response = yield* Effect.gen(function* () {
-				const agent = yield* AgentService
-				const conversationId = yield* agent.ensureConversation("telegram")
-				// Pass raw Telegram message as metadata for zero data loss
-				const messageMetadata = message ? { telegram: message } : undefined
-				return yield* agent.handleMessage(conversationId, text, messageMetadata)
-			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
-
-			yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, response))
-		}).pipe(
-			Effect.catchAllCause((cause) =>
-				Effect.gen(function* () {
-					const bot = yield* TelegramBot
-					console.error("Telegram webhook error:", cause)
-					yield* Effect.tryPromise(() =>
-						bot.api.sendMessage(chatId, "Sorry, something went wrong. Please try again."),
-					).pipe(Effect.catchAll(() => Effect.void))
-				}),
-			),
-		)
-
-		await runtime.runPromise(effect)
-		// Always return ok to prevent Telegram retries
-		return c.json({ ok: true })
-	})
-
+	router.post("/webhook", (c) => handleTelegramWebhook(runtime, c))
 	return router
 }

@@ -7,7 +7,7 @@ import {
 import { CLIChannel } from "@amby/channels"
 import { SandboxService, SandboxServiceLive } from "@amby/computer"
 import { DbService, DbServiceLive, eq, schema } from "@amby/db"
-import { EnvServiceLive } from "@amby/env"
+import { EnvServiceLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
 import { ModelServiceLive } from "@amby/models"
 import { Effect, Layer } from "effect"

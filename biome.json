@@ -40,10 +40,7 @@
 	},
 	"files": {
 		"includes": [
-			"packages/**/*.ts",
-			"apps/**/*.ts",
-			"packages/**/package.json",
-			"apps/**/package.json",
+			"{packages,apps}/**/*.{ts,json,jsonc}",
 			"package.json",
 			"tsconfig.base.json",
 			"turbo.json",

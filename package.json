@@ -19,6 +19,7 @@
 		"cli": "bun run apps/cli/src/index.ts",
 		"api": "bun run apps/api/src/index.ts",
 		"api:dev": "bun run --hot apps/api/src/index.ts",
+		"api:dev:worker": "bun run --filter @amby/api dev:worker",
 		"computer:build": "./docker/computer/build.sh",
 		"computer:push": "./docker/computer/push.sh"
 	},

@@ -1,0 +1,17 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "amby-api",
+	"main": "src/worker.ts",
+	"compatibility_date": "2024-12-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"hyperdrive": [
+		{
+			"binding": "HYPERDRIVE",
+			"id": "<HYPERDRIVE_CONFIG_ID>",
+			"localConnectionString": "postgresql://postgres:postgres@localhost:54322/postgres"
+		}
+	],
+	"dev": {
+		"port": 8787
+	}
+}

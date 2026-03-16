@@ -1,5 +1,5 @@
 import { DbService, DbServiceLive, eq, schema } from "@amby/db"
-import { EnvServiceLive } from "@amby/env"
+import { EnvServiceLive } from "@amby/env/local"
 import { Effect, Layer } from "effect"
 
 const SEED_USERS = [{ id: "demo", name: "Demo User", email: "demo@amby.local" }] as const
