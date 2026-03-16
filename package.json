@@ -1,0 +1,34 @@
+{
+	"name": "amby",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Amby - your personal ambient assistant",
+	"scripts": {
+		"format": "bunx @biomejs/biome format --write .",
+		"format:check": "bunx @biomejs/biome format .",
+		"lint": "bunx @biomejs/biome check .",
+		"lint:fix": "bunx @biomejs/biome check --fix .",
+		"typecheck": "turbo typecheck",
+		"build": "turbo build",
+		"dev": "turbo dev",
+		"db:generate": "turbo db:generate --filter=@amby/db",
+		"db:migrate": "turbo db:migrate --filter=@amby/db",
+		"db:push": "turbo db:push --filter=@amby/db",
+		"seed": "bun run apps/cli/src/seed.ts",
+		"setup": "docker compose up -d && bun install && bun run db:push && bun run seed",
+		"cli": "bun run apps/cli/src/index.ts",
+		"computer:build": "./docker/computer/build.sh",
+		"computer:push": "./docker/computer/push.sh"
+	},
+	"packageManager": "bun@1.3.0",
+	"workspaces": [
+		"apps/*",
+		"packages/*"
+	],
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.7",
+		"bun-types": "^1.3.10",
+		"turbo": "^2.5.0",
+		"typescript": "^5.8.0"
+	}
+}

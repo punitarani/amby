@@ -1,0 +1,27 @@
+{
+	"name": "@amby/db",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./schema": "./src/schema/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/index.ts --outdir dist --target bun",
+		"db:generate": "bun --env-file=../../.env drizzle-kit generate",
+		"db:migrate": "bun --env-file=../../.env drizzle-kit migrate",
+		"db:push": "bun --env-file=../../.env drizzle-kit push",
+		"db:studio": "bun --env-file=../../.env drizzle-kit studio"
+	},
+	"dependencies": {
+		"@amby/env": "workspace:*",
+		"drizzle-orm": "^0.45.1",
+		"effect": "^3.19.19",
+		"postgres": "^3.4.7"
+	},
+	"devDependencies": {
+		"drizzle-kit": "^0.31.0"
+	}
+}

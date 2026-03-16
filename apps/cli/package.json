@@ -1,0 +1,22 @@
+{
+	"name": "@amby/cli",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/index.ts --outdir dist --target bun",
+		"dev": "bun run src/index.ts",
+		"start": "bun run src/index.ts"
+	},
+	"dependencies": {
+		"@amby/agent": "workspace:*",
+		"@amby/channels": "workspace:*",
+		"@amby/computer": "workspace:*",
+		"@amby/db": "workspace:*",
+		"@amby/env": "workspace:*",
+		"@amby/memory": "workspace:*",
+		"@amby/models": "workspace:*",
+		"effect": "^3.19.19"
+	}
+}

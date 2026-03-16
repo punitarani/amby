@@ -1,0 +1,17 @@
+{
+	"name": "@amby/channels",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/index.ts --outdir dist --target bun"
+	},
+	"dependencies": {
+		"@amby/env": "workspace:*",
+		"effect": "^3.19.19"
+	}
+}
