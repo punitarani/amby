@@ -18,6 +18,20 @@ export interface WorkerBindings {
 	HYPERDRIVE?: { connectionString: string }
 	POSTHOG_KEY?: string
 	POSTHOG_HOST?: string
+
+	// Cloudflare primitives — typed structurally for portability
+	TELEGRAM_QUEUE?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
+	TELEGRAM_DLQ?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
+	CONVERSATION_SESSION?: {
+		idFromName(name: string): { toString(): string }
+		get(id: { toString(): string }): { ingestMessage(msg: unknown): Promise<void> }
+	}
+	AGENT_WORKFLOW?: {
+		create(options: { id?: string; params?: unknown }): Promise<{ id: string }>
+		get(
+			id: string,
+		): Promise<{ status(): Promise<unknown>; sendEvent(event: unknown): Promise<void> }>
+	}
 }
 
 export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>

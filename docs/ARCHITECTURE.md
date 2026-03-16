@@ -384,6 +384,7 @@ The agent is built on Vercel AI SDK primitives (`generateText` / `streamText` wi
 | `read_file`       | `@amby/computer` | Read a file from the sandbox              |
 | `write_file`      | `@amby/computer` | Write a file to the sandbox               |
 | `schedule_job`    | `@amby/agent`    | Schedule a future task or reminder        |
+| `delegate_task`   | `@amby/agent`    | Delegate a sub-task to a child workflow   |
 | `send_message`    | `@amby/channels` | Proactively message the user on a channel |
 
 Tools are defined using the Vercel AI SDK `tool()` helper with Zod input schemas. The agent decides which tools to use
@@ -603,6 +604,63 @@ Primary model provider via Codex OAuth:
 - **Default model:** `openai-codex/gpt-5.4`
 - **Fallback:** Standard API key auth (`openai/` prefix)
 
+### Cloudflare Workers (Production API)
+
+The production API runs on Cloudflare Workers with three durability primitives for async Telegram processing:
+
+```
+Telegram POST /webhook
+       │
+       ▼
+ [Worker: verify + enqueue]  ──▶ return 200 (~5ms)
+       │
+       ▼
+ [Queue: telegram-inbound]
+       │
+       ▼
+ [Queue Consumer]
+       │
+       ├── /start, /stop, /help ──▶ handle inline (fast, stateless)
+       │
+       └── text message ──▶ Durable Object (by chatId)
+                               │
+                               ├── buffer messages, debounce via alarm (3s)
+                               ├── on alarm: launch Workflow
+                               └── forward interrupts to running Workflow
+                               │
+                               ▼
+                        [Workflow: AgentExecution]
+                        durable, retryable, multi-step
+                             │
+                             ├── step: typing indicator
+                             ├── step: resolve user
+                             ├── step: agent loop (LLM + tools)
+                             ├── step: send response(s)
+                             └── step: notify DO complete
+```
+
+| Concern | Primitive | Why |
+|---|---|---|
+| Webhook decoupling | **Queue** | Instant ack, built-in retry + DLQ |
+| Message debouncing | **Durable Object** | Singleton per chatId, alarm API resets on new messages |
+| Agent execution | **Workflow** | Durable steps survive failures, retryable with backoff |
+
+**Key files:**
+
+- `apps/api/src/worker.ts` — Entrypoint. Slim webhook (verify + enqueue), queue consumer, re-exports DO and Workflow classes.
+- `apps/api/src/queue/consumer.ts` — Routes messages: commands handled inline, text messages sent to DO.
+- `apps/api/src/durable-objects/conversation-session.ts` — One instance per Telegram chat. Buffers rapid messages, debounces with a 3s alarm, launches workflows, forwards interrupts.
+- `apps/api/src/workflows/agent-execution.ts` — Durable agent execution. Each step is retryable and persisted. Handles user resolution, agent LLM loop, Telegram response splitting, and DO notification.
+- `apps/api/src/queue/runtime.ts` — Shared Effect runtime factory for queue consumer and workflows.
+- `apps/api/src/telegram/utils.ts` — Extracted utilities: `verifySecret`, `findOrCreateUser`, `handleCommand`, `splitTelegramMessage`.
+- `apps/api/src/telegram/index.ts` — `TelegramBot` Effect service tag and layers (`TelegramBotLive`, `TelegramBotLite`).
+
+**Error handling:** Queue retries 3x then dead-letters. Workflow steps retry with exponential backoff. On final failure, the workflow sends an error message to the user and resets the DO to idle.
+
+**Multi-message batching:** When a user sends several messages in quick succession, the DO buffers them during the 3s debounce window. The workflow receives the batch and uses `handleBatchedMessages` to present each as a separate user turn to the LLM.
+
+**User interrupts (Phase 4):** If a message arrives while the agent is processing, the DO forwards it to the running workflow via `sendEvent`. The workflow checks for these between LLM rounds via `waitForEvent`.
+
 ---
 
 ## Project Structure
@@ -610,6 +668,21 @@ Primary model provider via Codex OAuth:
 ```
 amby/
 ├── apps/
+│   ├── api/                        ← Production API (Cloudflare Workers)
+│   │   ├── wrangler.toml           ← Queue, DO, Workflow bindings
+│   │   └── src/
+│   │       ├── worker.ts           ← Worker entrypoint (webhook + queue handler)
+│   │       ├── index.ts            ← Local dev server (synchronous fallback)
+│   │       ├── queue/
+│   │       │   ├── consumer.ts     ← Queue batch handler
+│   │       │   └── runtime.ts      ← Shared Effect runtime factory
+│   │       ├── durable-objects/
+│   │       │   └── conversation-session.ts  ← Per-chat debouncing + workflow coordination
+│   │       ├── workflows/
+│   │       │   └── agent-execution.ts       ← Durable agent execution steps
+│   │       └── telegram/
+│   │           ├── index.ts        ← TelegramBot service tag + layers
+│   │           └── utils.ts        ← Extracted Telegram utilities
 │   └── cli/                        ← MVP CLI runner
 │       ├── package.json
 │       ├── tsconfig.json
@@ -702,7 +775,7 @@ amby/
 │           ├── tools/
 │           │   ├── memory.ts       ← search_memories, save_memory
 │           │   ├── computer.ts     ← execute_command, read_file, write_file
-│           │   ├── messaging.ts    ← send_message, schedule_job
+│           │   ├── messaging.ts    ← schedule_job, delegate_task
 │           │   └── index.ts
 │           ├── jobs/
 │           │   ├── scheduler.ts    ← Job scheduling logic

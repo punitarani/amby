@@ -32,6 +32,11 @@ export class AgentService extends Context.Tag("AgentService")<
 			content: string,
 			metadata?: Record<string, unknown>,
 		) => Effect.Effect<string, AgentError>
+		readonly handleBatchedMessages: (
+			conversationId: string,
+			messages: string[],
+			metadata?: Record<string, unknown>,
+		) => Effect.Effect<string, AgentError>
 		readonly streamMessage: (
 			conversationId: string,
 			content: string,
@@ -138,6 +143,43 @@ export const makeAgentServiceLive = (userId: string) =>
 							e instanceof AgentError
 								? e
 								: new AgentError({ message: "Agent message handling failed", cause: e }),
+						),
+					),
+
+				handleBatchedMessages: (conversationId, messages, metadata) =>
+					Effect.gen(function* () {
+						const { tools, systemPrompt, history } = yield* prepareContext(conversationId)
+
+						// Each batched message becomes a separate user turn
+						const userMessages = messages.map((content) => ({
+							role: "user" as const,
+							content,
+						}))
+
+						const result = yield* Effect.tryPromise({
+							try: () =>
+								generateText({
+									model,
+									system: systemPrompt,
+									messages: [...history, ...userMessages],
+									tools,
+									stopWhen: stepCountIs(10),
+								}),
+							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
+						})
+
+						// Save each message individually for accurate history
+						for (const content of messages) {
+							yield* saveMessage(conversationId, "user", content, metadata)
+						}
+						yield* saveMessage(conversationId, "assistant", result.text)
+
+						return result.text
+					}).pipe(
+						Effect.mapError((e) =>
+							e instanceof AgentError
+								? e
+								: new AgentError({ message: "Agent batched message handling failed", cause: e }),
 						),
 					),
 

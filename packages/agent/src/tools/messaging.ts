@@ -3,6 +3,24 @@ import { schema } from "@amby/db"
 import { tool } from "ai"
 import { z } from "zod"
 
+export type SubAgentSpawner = (task: string, context?: string) => Promise<string>
+
+export function createDelegationTools(spawnSubAgent: SubAgentSpawner) {
+	return {
+		delegate_task: tool({
+			description: "Delegate a complex sub-task to a specialized sub-agent",
+			inputSchema: z.object({
+				task: z.string().describe("The sub-task to delegate"),
+				context: z.string().optional().describe("Additional context for the sub-agent"),
+			}),
+			execute: async ({ task, context }) => {
+				const result = await spawnSubAgent(task, context)
+				return { completed: true, result }
+			},
+		}),
+	}
+}
+
 export function createJobTools(db: Database, userId: string) {
 	return {
 		schedule_job: tool({
