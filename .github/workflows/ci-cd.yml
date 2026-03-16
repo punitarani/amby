@@ -6,6 +6,23 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  CARTESIA_API_KEY: ${{ secrets.CARTESIA_API_KEY }}
+  BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+  BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
+  DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+  DAYTONA_API_URL: ${{ secrets.DAYTONA_API_URL }}
+  DAYTONA_TARGET: ${{ secrets.DAYTONA_TARGET }}
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+  POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+  POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+  ENABLE_CUA: ${{ secrets.ENABLE_CUA }}
+  CI: "1"
+
 jobs:
   format:
     name: Format
@@ -118,6 +135,8 @@ jobs:
           DAYTONA_TARGET: ${{ secrets.DAYTONA_TARGET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
           ENABLE_CUA: ${{ secrets.ENABLE_CUA }}
 
       - name: Extract Version ID
