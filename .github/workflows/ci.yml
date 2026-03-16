@@ -68,7 +68,7 @@ jobs:
           bun-version: "1.3.0"
       - run: bun install --frozen-lockfile
       - name: Run migrations
-        run: bun run db:migrate
+        run: cd packages/db && bunx drizzle-kit migrate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
