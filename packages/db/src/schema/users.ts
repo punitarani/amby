@@ -1,4 +1,4 @@
-import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core"
+import { boolean, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 
 export const users = pgTable("users", {
 	id: text("id").primaryKey(),
@@ -39,6 +39,7 @@ export const accounts = pgTable("accounts", {
 	scope: text("scope"),
 	idToken: text("id_token"),
 	password: text("password"),
+	metadata: jsonb("metadata").$type<Record<string, unknown>>(),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 })

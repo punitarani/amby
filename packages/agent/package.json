@@ -11,8 +11,10 @@
 		"build": "bun build ./src/index.ts --outdir dist --target bun"
 	},
 	"dependencies": {
+		"@amby/channels": "workspace:*",
 		"@amby/computer": "workspace:*",
 		"@amby/db": "workspace:*",
+		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",
 		"@amby/models": "workspace:*",
 		"@daytonaio/sdk": "^0.151.0",

@@ -1,3 +1,4 @@
+import type { ChannelType } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService } from "@amby/computer"
 import { DbService, desc, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
@@ -26,13 +27,14 @@ export class AgentService extends Context.Tag("AgentService")<
 		readonly handleMessage: (
 			conversationId: string,
 			content: string,
+			metadata?: Record<string, unknown>,
 		) => Effect.Effect<string, AgentError>
 		readonly streamMessage: (
 			conversationId: string,
 			content: string,
 			onPart: (part: StreamPart) => void,
 		) => Effect.Effect<string, AgentError>
-		readonly ensureConversation: (channelType?: string) => Effect.Effect<string, AgentError>
+		readonly ensureConversation: (channelType?: ChannelType) => Effect.Effect<string, AgentError>
 		readonly shutdown: () => Effect.Effect<void, AgentError>
 	}
 >() {}
@@ -74,7 +76,9 @@ export const makeAgentServiceLive = (userId: string) =>
 				conversationId: string,
 				role: "user" | "assistant" | "system" | "tool",
 				content: string,
-			) => query((d) => d.insert(schema.messages).values({ conversationId, role, content }))
+				metadata?: Record<string, unknown>,
+			) =>
+				query((d) => d.insert(schema.messages).values({ conversationId, role, content, metadata }))
 
 			const prepareContext = (conversationId: string) =>
 				Effect.gen(function* () {
@@ -102,7 +106,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				})
 
 			return {
-				handleMessage: (conversationId, content) =>
+				handleMessage: (conversationId, content, metadata) =>
 					Effect.gen(function* () {
 						const { tools, systemPrompt, history } = yield* prepareContext(conversationId)
 
@@ -118,7 +122,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
 
-						yield* saveMessage(conversationId, "user", content)
+						yield* saveMessage(conversationId, "user", content, metadata)
 						yield* saveMessage(conversationId, "assistant", result.text)
 
 						return result.text

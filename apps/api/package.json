@@ -12,7 +12,6 @@
 	"dependencies": {
 		"@amby/agent": "workspace:*",
 		"@amby/auth": "workspace:*",
-		"@amby/channels": "workspace:*",
 		"@amby/computer": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",

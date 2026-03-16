@@ -16,7 +16,6 @@
       "dependencies": {
         "@amby/agent": "workspace:*",
         "@amby/auth": "workspace:*",
-        "@amby/channels": "workspace:*",
         "@amby/computer": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
@@ -45,8 +44,10 @@
       "name": "@amby/agent",
       "version": "0.1.0",
       "dependencies": {
+        "@amby/channels": "workspace:*",
         "@amby/computer": "workspace:*",
         "@amby/db": "workspace:*",
+        "@amby/env": "workspace:*",
         "@amby/memory": "workspace:*",
         "@amby/models": "workspace:*",
         "@daytonaio/sdk": "^0.151.0",

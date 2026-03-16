@@ -6,7 +6,7 @@ import { MemoryServiceLive } from "@amby/memory"
 import { ModelServiceLive } from "@amby/models"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
-import { createTelegramRouter } from "./telegram"
+import { createTelegramRouter, TelegramBotLive } from "./telegram"
 
 // Shared layers — constructed once at startup
 const SharedLive = Layer.mergeAll(
@@ -14,6 +14,7 @@ const SharedLive = Layer.mergeAll(
 	SandboxServiceLive,
 	ModelServiceLive,
 	AuthServiceLive,
+	TelegramBotLive,
 ).pipe(Layer.provideMerge(DbServiceLive), Layer.provideMerge(EnvServiceLive))
 
 const runtime = ManagedRuntime.make(SharedLive)
