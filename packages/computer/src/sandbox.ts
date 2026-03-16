@@ -71,6 +71,7 @@ export class SandboxService extends Context.Tag("SandboxService")<
 	SandboxService,
 	{
 		readonly enabled: boolean
+		readonly provision: (userId: string) => Effect.Effect<void, SandboxError>
 		readonly ensure: (userId: string) => Effect.Effect<Sandbox, SandboxError>
 		readonly exec: (
 			sandbox: Sandbox,
@@ -102,6 +103,7 @@ export const SandboxServiceLive = Layer.effect(
 		if (!env.DAYTONA_API_KEY) {
 			return {
 				enabled: false,
+				provision: () => Effect.void,
 				ensure: () => notConfigured,
 				exec: () => notConfigured,
 				readFile: () => notConfigured,
@@ -126,6 +128,39 @@ export const SandboxServiceLive = Layer.effect(
 
 		return {
 			enabled: true,
+
+			provision: (userId) =>
+				Effect.tryPromise({
+					try: async () => {
+						const name = sandboxName(userId)
+
+						// If sandbox already exists, nothing to do
+						try {
+							await daytona.get(name)
+							return
+						} catch {
+							// Not found — create it
+						}
+
+						const sandbox = await daytona.create(
+							{
+								name,
+								image: sandboxImage,
+								resources: { cpu: 2, memory: 4, disk: 5 },
+								autoStopInterval: AUTO_STOP_MINUTES,
+								autoArchiveInterval: AUTO_ARCHIVE_MINUTES,
+								labels: sandboxLabels(userId),
+								user: AGENT_USER,
+							},
+							{ timeout: 300 },
+						)
+
+						// Stop and archive so it's ready to start later without rebuilding
+						await sandbox.stop()
+						await sandbox.archive()
+					},
+					catch: (cause) => new SandboxError({ message: "Failed to provision sandbox", cause }),
+				}),
 
 			ensure: (userId) =>
 				Effect.tryPromise({

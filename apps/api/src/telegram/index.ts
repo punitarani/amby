@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto"
 import { AgentService, makeAgentServiceLive } from "@amby/agent"
+import { SandboxService } from "@amby/computer"
 import { and, DbService, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { Context, Effect, Layer } from "effect"
@@ -146,7 +147,11 @@ const verifySecret = (headerSecret: string | undefined, configuredSecret: string
 
 // --- Shared webhook handler ---
 
-export const handleTelegramWebhook = async (runtime: Runtime, c: HonoContext) => {
+export const handleTelegramWebhook = async (
+	runtime: Runtime,
+	c: HonoContext,
+	options?: { waitUntil?: (promise: Promise<unknown>) => void },
+) => {
 	const headerSecret = c.req.header("X-Telegram-Bot-Api-Secret-Token")
 	const env = await runtime.runPromise(Effect.map(EnvService, (e) => e))
 
@@ -177,6 +182,17 @@ export const handleTelegramWebhook = async (runtime: Runtime, c: HonoContext) =>
 				const agent = yield* AgentService
 				yield* agent.ensureConversation("telegram")
 			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
+
+			// Fire-and-forget: pre-provision sandbox so it's ready when needed
+			const sandboxService = yield* SandboxService
+			if (sandboxService.enabled) {
+				const provisionPromise = Effect.runPromise(sandboxService.provision(userId)).catch((err) =>
+					console.error("[Sandbox] Pre-provision failed:", err),
+				)
+				if (options?.waitUntil) {
+					options.waitUntil(provisionPromise)
+				}
+			}
 
 			posthog.capture({
 				distinctId: userId,

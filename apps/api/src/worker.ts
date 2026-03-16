@@ -34,10 +34,20 @@ const makeRuntime = (bindings: WorkerBindings) => {
 
 app.post("/telegram/webhook", async (c) => {
 	const runtime = makeRuntime(c.env)
+	const backgroundTasks: Promise<unknown>[] = []
+	const waitUntil = (promise: Promise<unknown>) => {
+		backgroundTasks.push(promise)
+		c.executionCtx.waitUntil(promise)
+	}
 	try {
-		return await handleTelegramWebhook(runtime, c)
+		return await handleTelegramWebhook(runtime, c, { waitUntil })
 	} finally {
-		await runtime.dispose()
+		if (backgroundTasks.length > 0) {
+			// Defer runtime disposal until background tasks complete
+			c.executionCtx.waitUntil(Promise.allSettled(backgroundTasks).then(() => runtime.dispose()))
+		} else {
+			await runtime.dispose()
+		}
 	}
 })
 
