@@ -1,3 +1,4 @@
+import type { LanguageModelV3 } from "@ai-sdk/provider"
 import type { ChannelType } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService } from "@amby/computer"
 import { DbService, desc, eq, schema } from "@amby/db"
@@ -9,8 +10,10 @@ import {
 	MemoryService,
 } from "@amby/memory"
 import { ModelService } from "@amby/models"
+import { withTracing } from "@posthog/ai"
 import { generateText, stepCountIs, streamText } from "ai"
 import { Context, Effect, Layer } from "effect"
+import { PostHog } from "posthog-node"
 import { AgentError } from "./errors"
 
 export type StreamPart =
@@ -49,7 +52,11 @@ export const makeAgentServiceLive = (userId: string) =>
 			const sandbox = yield* SandboxService
 			const env = yield* EnvService
 			const enableCua = env.ENABLE_CUA
-			const model = models.getModel()
+			const phClient = new PostHog(env.POSTHOG_KEY, { host: env.POSTHOG_HOST })
+			const baseModel = models.getModel()
+			const model = withTracing(baseModel as LanguageModelV3, phClient, {
+				posthogDistinctId: userId,
+			})
 
 			const computer = createComputerTools(sandbox, userId)
 
@@ -217,6 +224,10 @@ export const makeAgentServiceLive = (userId: string) =>
 
 				shutdown: () =>
 					Effect.gen(function* () {
+						yield* Effect.tryPromise({
+							try: () => phClient.shutdown(),
+							catch: (cause) => new AgentError({ message: "Failed to shutdown PostHog", cause }),
+						})
 						const instance = computer.getSandbox()
 						if (instance) {
 							yield* sandbox
