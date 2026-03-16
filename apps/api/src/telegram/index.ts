@@ -271,25 +271,24 @@ export const handleTelegramWebhook = async (
 			bot.api.sendChatAction(chatId, "typing").catch(() => {})
 		}, 4000)
 
-		const response = yield* Effect.gen(function* () {
-			const agent = yield* AgentService
-			const conversationId = yield* agent.ensureConversation("telegram")
-			// Pass raw Telegram message as metadata for zero data loss
-			const messageMetadata = message ? { telegram: message } : undefined
-			return yield* agent.handleMessage(conversationId, text, messageMetadata)
-		}).pipe(
-			Effect.provide(makeAgentServiceLive(userId)),
-			Effect.ensuring(Effect.sync(() => clearInterval(typingInterval))),
-		)
+		yield* Effect.gen(function* () {
+			const response = yield* Effect.gen(function* () {
+				const agent = yield* AgentService
+				const conversationId = yield* agent.ensureConversation("telegram")
+				// Pass raw Telegram message as metadata for zero data loss
+				const messageMetadata = message ? { telegram: message } : undefined
+				return yield* agent.handleMessage(conversationId, text, messageMetadata)
+			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
 
-		// Ensure minimum typing duration elapsed before sending
-		const elapsed = Date.now() - typingStartedAt
-		const remaining = minTypingDuration - elapsed
-		if (remaining > 0) {
-			yield* Effect.sleep(remaining)
-		}
+			// Ensure minimum typing duration elapsed before sending
+			const elapsed = Date.now() - typingStartedAt
+			const remaining = minTypingDuration - elapsed
+			if (remaining > 0) {
+				yield* Effect.sleep(remaining)
+			}
 
-		yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, response))
+			yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, response))
+		}).pipe(Effect.ensuring(Effect.sync(() => clearInterval(typingInterval))))
 	}).pipe(
 		Effect.catchAllCause((cause) =>
 			Effect.gen(function* () {
