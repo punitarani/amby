@@ -4,11 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Load .env
-set -a
-source "$PROJECT_ROOT/.env"
-set +a
-
 # Validate prerequisites
 if ! command -v ngrok &>/dev/null; then
   echo "Error: ngrok not found."
@@ -18,17 +13,17 @@ if ! command -v ngrok &>/dev/null; then
 fi
 
 if [ -z "${NGROK_DOMAIN:-}" ]; then
-  echo "Error: NGROK_DOMAIN is not set in .env"
+  echo "Error: NGROK_DOMAIN is not set"
   echo ""
   echo "To get a free static domain:"
   echo "  1. Go to https://dashboard.ngrok.com/domains"
   echo "  2. Claim your free static domain"
-  echo "  3. Add to .env: NGROK_DOMAIN=your-domain.ngrok-free.app"
+  echo "  3. Add NGROK_DOMAIN=your-domain.ngrok-free.app to Doppler"
   exit 1
 fi
 
 if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
-  echo "Error: TELEGRAM_BOT_TOKEN is not set in .env"
+  echo "Error: TELEGRAM_BOT_TOKEN is not set"
   exit 1
 fi
 
