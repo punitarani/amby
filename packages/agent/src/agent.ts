@@ -1,5 +1,6 @@
-import { createComputerTools, SandboxService } from "@amby/computer"
+import { createComputerTools, createCuaTools, SandboxService } from "@amby/computer"
 import { DbService, desc, eq, schema } from "@amby/db"
+import { EnvService } from "@amby/env"
 import {
 	buildMemoriesText,
 	createMemoryTools,
@@ -16,7 +17,7 @@ export type StreamPart =
 	| { type: "tool-call"; toolName: string; args: Record<string, unknown> }
 	| { type: "tool-result"; toolName: string; result: unknown }
 
-import { SYSTEM_PROMPT } from "./prompts/system"
+import { CUA_PROMPT, SYSTEM_PROMPT } from "./prompts/system"
 import { createJobTools } from "./tools/messaging"
 
 export class AgentService extends Context.Tag("AgentService")<
@@ -44,6 +45,8 @@ export const makeAgentServiceLive = (userId: string) =>
 			const models = yield* ModelService
 			const memory = yield* MemoryService
 			const sandbox = yield* SandboxService
+			const env = yield* EnvService
+			const enableCua = env.ENABLE_CUA
 			const model = models.getModel()
 
 			const computer = createComputerTools(sandbox, userId)
@@ -73,24 +76,35 @@ export const makeAgentServiceLive = (userId: string) =>
 				content: string,
 			) => query((d) => d.insert(schema.messages).values({ conversationId, role, content }))
 
+			const prepareContext = (conversationId: string) =>
+				Effect.gen(function* () {
+					const profile = yield* memory.getProfile(userId)
+					const deduped = deduplicateMemories(profile.static, profile.dynamic)
+					const memoryContext = buildMemoriesText(deduped)
+
+					const history = yield* loadHistory(conversationId)
+
+					const tools = {
+						...createMemoryTools(memory, userId),
+						...computer.tools,
+						...createJobTools(db, userId),
+						...(enableCua
+							? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
+							: {}),
+					}
+
+					const basePrompt = enableCua ? `${SYSTEM_PROMPT}\n\n${CUA_PROMPT}` : SYSTEM_PROMPT
+					const systemPrompt = memoryContext
+						? `${basePrompt}\n\n# User Memory Context\n${memoryContext}`
+						: basePrompt
+
+					return { tools, systemPrompt, history }
+				})
+
 			return {
 				handleMessage: (conversationId, content) =>
 					Effect.gen(function* () {
-						const profile = yield* memory.getProfile(userId)
-						const deduped = deduplicateMemories(profile.static, profile.dynamic)
-						const memoryContext = buildMemoriesText(deduped)
-
-						const history = yield* loadHistory(conversationId)
-
-						const tools = {
-							...createMemoryTools(memory, userId),
-							...computer.tools,
-							...createJobTools(db, userId),
-						}
-
-						const systemPrompt = memoryContext
-							? `${SYSTEM_PROMPT}\n\n# User Memory Context\n${memoryContext}`
-							: SYSTEM_PROMPT
+						const { tools, systemPrompt, history } = yield* prepareContext(conversationId)
 
 						const result = yield* Effect.tryPromise({
 							try: () =>
@@ -118,21 +132,7 @@ export const makeAgentServiceLive = (userId: string) =>
 
 				streamMessage: (conversationId, content, onPart) =>
 					Effect.gen(function* () {
-						const profile = yield* memory.getProfile(userId)
-						const deduped = deduplicateMemories(profile.static, profile.dynamic)
-						const memoryContext = buildMemoriesText(deduped)
-
-						const history = yield* loadHistory(conversationId)
-
-						const tools = {
-							...createMemoryTools(memory, userId),
-							...computer.tools,
-							...createJobTools(db, userId),
-						}
-
-						const systemPrompt = memoryContext
-							? `${SYSTEM_PROMPT}\n\n# User Memory Context\n${memoryContext}`
-							: SYSTEM_PROMPT
+						const { tools, systemPrompt, history } = yield* prepareContext(conversationId)
 
 						const result = yield* Effect.tryPromise({
 							try: async () => {

@@ -24,3 +24,11 @@ export const SYSTEM_PROMPT = `You are Amby, a personal ambient assistant. You ar
 - Use save_memory with category "static" for permanent facts (name, preferences, location)
 - Use save_memory with category "dynamic" for temporary context (current projects, recent events)
 `
+
+export const CUA_PROMPT = `## Computer Use (CUA)
+- You can interact with the desktop GUI: take screenshots, click, type, scroll
+- Always call cua_start first to begin a session, and cua_end when done
+- Take a screenshot after each action to verify the result
+- Only one CUA session can be active at a time across all channels
+- If another session is active, inform the user and share what task is running
+- Use cua_screenshot frequently to see the current screen state`
