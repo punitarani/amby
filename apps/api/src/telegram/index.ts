@@ -257,13 +257,37 @@ export const handleTelegramWebhook = async (
 			},
 		})
 
+		// Natural pre-delay before typing (250ms - 1500ms)
+		const preDelay = Math.floor(Math.random() * 1250) + 250
+		yield* Effect.sleep(preDelay)
+
+		// Start typing indicator
+		yield* Effect.tryPromise(() => bot.api.sendChatAction(chatId, "typing"))
+		const typingStartedAt = Date.now()
+		const minTypingDuration = Math.floor(Math.random() * 4000) + 1000 // 1-5s
+
+		// Keep typing alive for long-running requests (Telegram expires at 5s)
+		const typingInterval = setInterval(() => {
+			bot.api.sendChatAction(chatId, "typing").catch(() => {})
+		}, 4000)
+
 		const response = yield* Effect.gen(function* () {
 			const agent = yield* AgentService
 			const conversationId = yield* agent.ensureConversation("telegram")
 			// Pass raw Telegram message as metadata for zero data loss
 			const messageMetadata = message ? { telegram: message } : undefined
 			return yield* agent.handleMessage(conversationId, text, messageMetadata)
-		}).pipe(Effect.provide(makeAgentServiceLive(userId)))
+		}).pipe(
+			Effect.provide(makeAgentServiceLive(userId)),
+			Effect.ensuring(Effect.sync(() => clearInterval(typingInterval))),
+		)
+
+		// Ensure minimum typing duration elapsed before sending
+		const elapsed = Date.now() - typingStartedAt
+		const remaining = minTypingDuration - elapsed
+		if (remaining > 0) {
+			yield* Effect.sleep(remaining)
+		}
 
 		yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, response))
 	}).pipe(
