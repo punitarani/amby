@@ -54,21 +54,41 @@ jobs:
       - name: Worker dry run
         run: cd apps/api && npx wrangler deploy --dry-run --outdir dist-worker
 
-  db-migrate:
-    name: Database Migration
+  db-check:
+    name: Validate Migrations (PR)
     runs-on: ubuntu-latest
     needs: [build]
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.0"
       - run: bun install --frozen-lockfile
-      - name: Validate migrations (PRs only)
-        if: github.ref != 'refs/heads/main'
+      - name: Check migration consistency
         run: cd packages/db && bunx drizzle-kit check
+      - name: Verify schema is up to date
+        run: |
+          cd packages/db
+          bunx drizzle-kit generate 2>&1 || true
+          if [[ -n "$(git status --porcelain drizzle/)" ]]; then
+            echo "::error::Schema changes detected without a migration. Run 'bun run db:generate' locally."
+            git diff drizzle/
+            exit 1
+          fi
+
+  db-migrate:
+    name: Run Migrations
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.0"
+      - run: bun install --frozen-lockfile
       - name: Run migrations
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: bun run db:migrate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
