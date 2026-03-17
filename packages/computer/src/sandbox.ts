@@ -1,3 +1,5 @@
+import type { Database } from "@amby/db"
+import { DbService, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Daytona, Image } from "@daytonaio/sdk"
@@ -9,6 +11,8 @@ const AGENT_WORKDIR = "/home/agent/workspace"
 export const AUTO_STOP_MINUTES = 15
 export const AUTO_ARCHIVE_MINUTES = 60
 export const SANDBOX_RESOURCES = { cpu: 2, memory: 4, disk: 5 } as const
+
+type SandboxStatus = "creating" | "running" | "stopped" | "archived" | "error"
 
 export const sandboxName = (userId: string, isDev: boolean) =>
 	`computer-v1-${userId}${isDev ? "-dev" : ""}`
@@ -107,10 +111,26 @@ const notConfigured = Effect.fail(
 	}),
 )
 
+/** Upsert a sandbox record in the DB */
+const upsertSandbox = (
+	db: Database,
+	userId: string,
+	daytonaSandboxId: string,
+	status: SandboxStatus,
+) =>
+	db
+		.insert(schema.sandboxes)
+		.values({ userId, daytonaSandboxId, status })
+		.onConflictDoUpdate({
+			target: schema.sandboxes.userId,
+			set: { daytonaSandboxId, status, lastActivityAt: new Date() },
+		})
+
 export const SandboxServiceLive = Layer.effect(
 	SandboxService,
 	Effect.gen(function* () {
 		const env = yield* EnvService
+		const { db } = yield* DbService
 
 		if (!env.DAYTONA_API_KEY) {
 			return {
@@ -131,6 +151,17 @@ export const SandboxServiceLive = Layer.effect(
 		const cache = new Map<string, Sandbox>()
 		const isDev = env.NODE_ENV !== "production"
 
+		/** Get a Daytona sandbox by name, start if needed, cache it */
+		const getAndStart = async (name: string, userId: string): Promise<Sandbox> => {
+			const existing = await daytona.get(name)
+			await existing.refreshData()
+			if (existing.state !== "started") {
+				await existing.start(60)
+			}
+			cache.set(userId, existing)
+			return existing
+		}
+
 		return {
 			enabled: true,
 
@@ -139,49 +170,76 @@ export const SandboxServiceLive = Layer.effect(
 					try: async () => {
 						const name = sandboxName(userId, isDev)
 
-						// Return cached instance if still running
+						// Fast path: return cached instance if still running
 						const cached = cache.get(userId)
 						if (cached) {
-							await cached.refreshData()
-							if (cached.state === "started") return cached
-							if (cached.state === "stopped" || cached.state === "error") {
-								await cached.start(60)
-								return cached
+							try {
+								await cached.refreshData()
+								if (cached.state === "started") return cached
+								if (cached.state === "stopped" || cached.state === "error") {
+									await cached.start(60)
+									await upsertSandbox(db, userId, cached.id, "running")
+									return cached
+								}
+							} catch {
+								cache.delete(userId)
 							}
 						}
 
-						// Try to find an existing sandbox by name
+						// Check DB for an existing sandbox record
+						const [record] = await db
+							.select()
+							.from(schema.sandboxes)
+							.where(eq(schema.sandboxes.userId, userId))
+							.limit(1)
+
+						if (record) {
+							try {
+								const sandbox = await getAndStart(name, userId)
+								await upsertSandbox(db, userId, sandbox.id, "running")
+								return sandbox
+							} catch {
+								if (record.status === "creating") {
+									throw new SandboxError({
+										message:
+											"Your sandbox is being set up — this usually takes a few minutes. Please try again shortly.",
+									})
+								}
+								// Stale record (sandbox deleted externally) — clear and recreate
+								await db.delete(schema.sandboxes).where(eq(schema.sandboxes.userId, userId))
+							}
+						}
+
+						// No sandbox exists — create one
+						await upsertSandbox(db, userId, "pending", "creating")
 						try {
-							const existing = await daytona.get(name)
-							await existing.refreshData()
-							if (existing.state !== "started") {
-								await existing.start(60)
-							}
-							cache.set(userId, existing)
-							return existing
-						} catch {
-							// Not found — create a new one
+							const sandbox = await daytona.create(
+								{
+									name,
+									image: sandboxImage,
+									resources: SANDBOX_RESOURCES,
+									autoStopInterval: AUTO_STOP_MINUTES,
+									autoArchiveInterval: AUTO_ARCHIVE_MINUTES,
+									labels: sandboxLabels(userId, isDev),
+									user: AGENT_USER,
+								},
+								{ timeout: 300 },
+							)
+							cache.set(userId, sandbox)
+							await upsertSandbox(db, userId, sandbox.id, "running")
+							return sandbox
+						} catch (cause) {
+							await upsertSandbox(db, userId, "pending", "error")
+							throw cause
 						}
-
-						// TODO: Switch to snapshot-based creation when Daytona plan allows:
-						//   { name, snapshot: "amby-computer:0.1.0", ... }
-						// Using Image builder for now (builds on Daytona infra each time)
-						const sandbox = await daytona.create(
-							{
-								name,
-								image: sandboxImage,
-								resources: SANDBOX_RESOURCES,
-								autoStopInterval: AUTO_STOP_MINUTES,
-								autoArchiveInterval: AUTO_ARCHIVE_MINUTES,
-								labels: sandboxLabels(userId, isDev),
-								user: AGENT_USER,
-							},
-							{ timeout: 300 },
-						)
-						cache.set(userId, sandbox)
-						return sandbox
 					},
-					catch: (cause) => new SandboxError({ message: "Failed to ensure sandbox", cause }),
+					catch: (cause) =>
+						cause instanceof SandboxError
+							? cause
+							: new SandboxError({
+									message: `Failed to ensure sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
+									cause,
+								}),
 				}),
 
 			exec: (sandbox, command, cwd?) =>
