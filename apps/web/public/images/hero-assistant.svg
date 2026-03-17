@@ -1,0 +1,32 @@
+<svg width="960" height="1200" viewBox="0 0 960 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="60" x2="820" y2="1120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8F4EC"/>
+      <stop offset="1" stop-color="#E8E1D5"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="180" y1="160" x2="780" y2="1040" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.56"/>
+      <stop offset="1" stop-color="#F5EEE3" stop-opacity="0.18"/>
+    </linearGradient>
+    <filter id="blurA" x="-120" y="-120" width="1200" height="1440" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="70"/>
+    </filter>
+    <filter id="blurB" x="0" y="0" width="960" height="1200" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+  </defs>
+  <rect width="960" height="1200" rx="88" fill="url(#bg)"/>
+  <g filter="url(#blurA)" opacity="0.88">
+    <ellipse cx="314" cy="348" rx="168" ry="210" transform="rotate(8 314 348)" fill="#C6B49A"/>
+    <ellipse cx="648" cy="356" rx="176" ry="214" transform="rotate(-11 648 356)" fill="#F9F7F1"/>
+    <ellipse cx="606" cy="782" rx="236" ry="274" transform="rotate(18 606 782)" fill="#B9C4B1"/>
+    <ellipse cx="300" cy="822" rx="172" ry="244" transform="rotate(-15 300 822)" fill="#DCCDB7"/>
+    <ellipse cx="500" cy="554" rx="148" ry="212" fill="#F4EEE3"/>
+  </g>
+  <rect x="116" y="88" width="728" height="1024" rx="84" fill="url(#panel)"/>
+  <g filter="url(#blurB)">
+    <rect x="274" y="236" width="412" height="728" rx="164" fill="#FFFFFF" fill-opacity="0.26"/>
+    <rect x="368" y="404" width="224" height="392" rx="112" fill="#FFFFFF" fill-opacity="0.48"/>
+  </g>
+  <rect x="364" y="400" width="232" height="400" rx="116" fill="#FFF8EE" fill-opacity="0.34"/>
+</svg>
