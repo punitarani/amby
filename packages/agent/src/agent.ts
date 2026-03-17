@@ -236,32 +236,27 @@ export const makeAgentServiceLive = (userId: string) =>
 					),
 
 				ensureConversation: (channelType = "cli") =>
-					Effect.gen(function* () {
-						const existing = yield* query((d) =>
-							d
+					query((d) =>
+						d.transaction(async (tx) => {
+							const existing = await tx
 								.select({ id: schema.conversations.id })
 								.from(schema.conversations)
 								.where(eq(schema.conversations.userId, userId))
 								.orderBy(desc(schema.conversations.updatedAt))
-								.limit(1),
-						)
+								.limit(1)
 
-						if (existing[0]) return existing[0].id
+							if (existing[0]) return existing[0].id
 
-						const rows = yield* query((d) =>
-							d
+							const rows = await tx
 								.insert(schema.conversations)
 								.values({ userId, channelType })
-								.returning({ id: schema.conversations.id }),
-						)
-						const row = rows[0]
-						if (!row) {
-							return yield* Effect.fail(
-								new AgentError({ message: "Failed to create conversation" }),
-							)
-						}
-						return row.id
-					}).pipe(
+								.returning({ id: schema.conversations.id })
+
+							const row = rows[0]
+							if (!row) throw new Error("Failed to create conversation")
+							return row.id
+						}),
+					).pipe(
 						Effect.mapError(
 							(e) =>
 								new AgentError({
