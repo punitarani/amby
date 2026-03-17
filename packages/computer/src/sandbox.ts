@@ -4,16 +4,26 @@ import { Daytona, Image } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
 import { SandboxError } from "./errors"
 
-const AGENT_USER = "agent"
+export const AGENT_USER = "agent"
 const AGENT_WORKDIR = "/home/agent/workspace"
-const AUTO_STOP_MINUTES = 15
-const AUTO_ARCHIVE_MINUTES = 60
+export const AUTO_STOP_MINUTES = 15
+export const AUTO_ARCHIVE_MINUTES = 60
+export const SANDBOX_RESOURCES = { cpu: 2, memory: 4, disk: 5 } as const
+
+export const sandboxName = (userId: string, isDev: boolean) =>
+	`computer-v1-${userId}${isDev ? "-dev" : ""}`
+
+export const sandboxLabels = (userId: string, isDev: boolean) => ({
+	userId,
+	app: "amby",
+	environment: isDev ? "dev" : "production",
+})
 
 // TODO: Once Daytona plan supports snapshot push, switch to:
 //   snapshot: "amby-computer:0.1.0"
 // The Dockerfile at docker/computer/Dockerfile is the source of truth.
 // Build & push with: bun run computer:build && bun run computer:push
-const sandboxImage = Image.base("ubuntu:24.04")
+export const sandboxImage = Image.base("ubuntu:24.04")
 	.runCommands(
 		"apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
 			"curl wget git ca-certificates gnupg sudo " +
@@ -67,11 +77,13 @@ const sandboxImage = Image.base("ubuntu:24.04")
 	})
 	.workdir(AGENT_WORKDIR)
 
+export const createDaytonaClient = (opts: { apiKey: string; apiUrl?: string; target?: string }) =>
+	new Daytona(opts)
+
 export class SandboxService extends Context.Tag("SandboxService")<
 	SandboxService,
 	{
 		readonly enabled: boolean
-		readonly provision: (userId: string) => Effect.Effect<void, SandboxError>
 		readonly ensure: (userId: string) => Effect.Effect<Sandbox, SandboxError>
 		readonly exec: (
 			sandbox: Sandbox,
@@ -103,7 +115,6 @@ export const SandboxServiceLive = Layer.effect(
 		if (!env.DAYTONA_API_KEY) {
 			return {
 				enabled: false,
-				provision: () => Effect.void,
 				ensure: () => notConfigured,
 				exec: () => notConfigured,
 				readFile: () => notConfigured,
@@ -119,53 +130,14 @@ export const SandboxServiceLive = Layer.effect(
 		})
 		const cache = new Map<string, Sandbox>()
 		const isDev = env.NODE_ENV !== "production"
-		const sandboxName = (userId: string) => `computer-v1-${userId}${isDev ? "-dev" : ""}`
-		const sandboxLabels = (userId: string) => ({
-			userId,
-			app: "amby",
-			environment: isDev ? "dev" : "production",
-		})
 
 		return {
 			enabled: true,
 
-			provision: (userId) =>
-				Effect.tryPromise({
-					try: async () => {
-						const name = sandboxName(userId)
-
-						// If sandbox already exists, nothing to do
-						try {
-							await daytona.get(name)
-							return
-						} catch {
-							// Not found — create it
-						}
-
-						const sandbox = await daytona.create(
-							{
-								name,
-								image: sandboxImage,
-								resources: { cpu: 2, memory: 4, disk: 5 },
-								autoStopInterval: AUTO_STOP_MINUTES,
-								autoArchiveInterval: AUTO_ARCHIVE_MINUTES,
-								labels: sandboxLabels(userId),
-								user: AGENT_USER,
-							},
-							{ timeout: 300 },
-						)
-
-						// Stop and archive so it's ready to start later without rebuilding
-						await sandbox.stop()
-						await sandbox.archive()
-					},
-					catch: (cause) => new SandboxError({ message: "Failed to provision sandbox", cause }),
-				}),
-
 			ensure: (userId) =>
 				Effect.tryPromise({
 					try: async () => {
-						const name = sandboxName(userId)
+						const name = sandboxName(userId, isDev)
 
 						// Return cached instance if still running
 						const cached = cache.get(userId)
@@ -198,10 +170,10 @@ export const SandboxServiceLive = Layer.effect(
 							{
 								name,
 								image: sandboxImage,
-								resources: { cpu: 2, memory: 4, disk: 5 },
+								resources: SANDBOX_RESOURCES,
 								autoStopInterval: AUTO_STOP_MINUTES,
 								autoArchiveInterval: AUTO_ARCHIVE_MINUTES,
-								labels: sandboxLabels(userId),
+								labels: sandboxLabels(userId, isDev),
 								user: AGENT_USER,
 							},
 							{ timeout: 300 },

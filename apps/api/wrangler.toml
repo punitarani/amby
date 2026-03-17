@@ -75,6 +75,11 @@ name = "agent-execution"
 binding = "AGENT_WORKFLOW"
 class_name = "AgentExecutionWorkflow"
 
+[[workflows]]
+name = "sandbox-provision"
+binding = "SANDBOX_WORKFLOW"
+class_name = "SandboxProvisionWorkflow"
+
 # Local dev
 [dev]
 port = 8787

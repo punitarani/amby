@@ -26,7 +26,9 @@ export async function handleQueueBatch(
 			// Handle simple commands inline — fast, stateless
 			const runtime = makeRuntimeForConsumer(env)
 			try {
-				await runtime.runPromise(handleCommand(text, from, chatId))
+				await runtime.runPromise(
+					handleCommand(text, from, chatId, { sandboxWorkflow: env.SANDBOX_WORKFLOW }),
+				)
 			} catch (err) {
 				console.error(`[Queue] Command ${text} failed for chat ${chatId}:`, err)
 			} finally {

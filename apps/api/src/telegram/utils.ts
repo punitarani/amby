@@ -1,8 +1,8 @@
 import { timingSafeEqual } from "node:crypto"
 import { AgentService, makeAgentServiceLive } from "@amby/agent"
-import { SandboxService } from "@amby/computer"
 import { and, DbService, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
+import type { WorkerBindings } from "@amby/env/workers"
 import { Effect } from "effect"
 import { getPostHogClient } from "../posthog"
 import { TelegramBot } from "./index"
@@ -128,7 +128,7 @@ export const handleCommand = (
 	command: string,
 	from: TelegramFrom,
 	chatId: number,
-	options?: { waitUntil?: (promise: Promise<unknown>) => void },
+	options?: { sandboxWorkflow?: WorkerBindings["SANDBOX_WORKFLOW"] },
 ) =>
 	Effect.gen(function* () {
 		const bot = yield* TelegramBot
@@ -143,15 +143,14 @@ export const handleCommand = (
 					yield* agent.ensureConversation("telegram")
 				}).pipe(Effect.provide(makeAgentServiceLive(userId)))
 
-				// Fire-and-forget: pre-provision sandbox so it's ready when needed
-				const sandboxService = yield* SandboxService
-				if (sandboxService.enabled) {
-					const provisionPromise = Effect.runPromise(sandboxService.provision(userId)).catch(
-						(err) => console.error("[Sandbox] Pre-provision failed:", err),
-					)
-					if (options?.waitUntil) {
-						options.waitUntil(provisionPromise)
-					}
+				// Kick off sandbox provisioning via durable workflow
+				if (options?.sandboxWorkflow) {
+					options.sandboxWorkflow
+						.create({
+							id: `sandbox-provision-${userId}`,
+							params: { userId },
+						})
+						.catch((err) => console.error("[Sandbox] Provision workflow:", err))
 				}
 
 				posthog.capture({
