@@ -43,6 +43,47 @@ export interface BufferedMessage {
 	date: number
 }
 
+/**
+ * Best-effort timezone inference from Telegram's language_code.
+ * Returns an IANA timezone or undefined if no confident mapping exists.
+ * This is a rough heuristic — the system prompt will ask users on UTC to confirm.
+ */
+const inferTimezoneFromLanguageCode = (code?: string): string | undefined => {
+	if (!code) return undefined
+	const map: Record<string, string> = {
+		"en-US": "America/New_York",
+		"en-GB": "Europe/London",
+		"en-AU": "Australia/Sydney",
+		de: "Europe/Berlin",
+		fr: "Europe/Paris",
+		es: "Europe/Madrid",
+		it: "Europe/Rome",
+		pt: "America/Sao_Paulo",
+		"pt-BR": "America/Sao_Paulo",
+		ru: "Europe/Moscow",
+		ja: "Asia/Tokyo",
+		ko: "Asia/Seoul",
+		zh: "Asia/Shanghai",
+		"zh-TW": "Asia/Taipei",
+		ar: "Asia/Riyadh",
+		hi: "Asia/Kolkata",
+		tr: "Europe/Istanbul",
+		pl: "Europe/Warsaw",
+		nl: "Europe/Amsterdam",
+		uk: "Europe/Kyiv",
+		th: "Asia/Bangkok",
+		vi: "Asia/Ho_Chi_Minh",
+		id: "Asia/Jakarta",
+		sv: "Europe/Stockholm",
+		da: "Europe/Copenhagen",
+		fi: "Europe/Helsinki",
+		nb: "Europe/Oslo",
+		he: "Asia/Jerusalem",
+	}
+	const base = code.split("-")[0]
+	return map[code] ?? (base ? map[base] : undefined)
+}
+
 // --- Utilities ---
 
 export const verifySecret = (
@@ -106,7 +147,13 @@ export const findOrCreateUser = (from: TelegramFrom, chatId: number) =>
 				const userId = crypto.randomUUID()
 				const name = [from.first_name, from.last_name].filter(Boolean).join(" ")
 
-				await tx.insert(schema.users).values({ id: userId, name })
+				const inferredTz = inferTimezoneFromLanguageCode(from.language_code)
+
+				await tx.insert(schema.users).values({
+					id: userId,
+					name,
+					...(inferredTz ? { timezone: inferredTz } : {}),
+				})
 				await tx.insert(schema.accounts).values({
 					id: crypto.randomUUID(),
 					userId,

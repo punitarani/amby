@@ -13,6 +13,6 @@ export const sandboxes = pgTable("sandboxes", {
 		.$type<"creating" | "running" | "stopped" | "archived" | "error">()
 		.notNull()
 		.default("creating"),
-	lastActivityAt: timestamp("last_activity_at").notNull().defaultNow(),
-	createdAt: timestamp("created_at").notNull().defaultNow(),
+	lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
+	createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })

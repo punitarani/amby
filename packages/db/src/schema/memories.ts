@@ -32,8 +32,8 @@ export const memories = pgTable(
 		parentId: uuid("parent_id").references((): AnyPgColumn => memories.id, {
 			onDelete: "set null",
 		}),
-		createdAt: timestamp("created_at").notNull().defaultNow(),
-		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(t) => [index("memories_user_active_idx").on(t.userId, t.isActive)],
 )

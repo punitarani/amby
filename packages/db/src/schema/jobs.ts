@@ -14,14 +14,14 @@ export const jobs = pgTable(
 			.notNull()
 			.default("active"),
 		schedule: text("schedule"), // cron expression
-		runAt: timestamp("run_at"), // for one-time jobs
+		runAt: timestamp("run_at", { withTimezone: true }), // for one-time jobs
 		payload: jsonb("payload").$type<Record<string, unknown>>(),
 		channelType: text("channel_type").$type<"cli" | "telegram">().notNull().default("cli"),
-		lastRunAt: timestamp("last_run_at"),
-		nextRunAt: timestamp("next_run_at"),
+		lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+		nextRunAt: timestamp("next_run_at", { withTimezone: true }),
 		error: text("error"),
-		createdAt: timestamp("created_at").notNull().defaultNow(),
-		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(t) => [
 		index("jobs_user_id_idx").on(t.userId),

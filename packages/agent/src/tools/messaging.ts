@@ -1,6 +1,7 @@
 import type { Database } from "@amby/db"
-import { schema } from "@amby/db"
+import { eq, schema } from "@amby/db"
 import { tool } from "ai"
+import { CronExpressionParser } from "cron-parser"
 import { z } from "zod"
 
 export type ReplyFn = (text: string) => Promise<void>
@@ -39,7 +40,7 @@ export function createDelegationTools(spawnSubAgent: SubAgentSpawner) {
 	}
 }
 
-export function createJobTools(db: Database, userId: string) {
+export function createJobTools(db: Database, userId: string, userTimezone?: string) {
 	return {
 		schedule_job: tool({
 			description:
@@ -57,6 +58,13 @@ export function createJobTools(db: Database, userId: string) {
 					.describe("Cron expression for recurring jobs (e.g., 0 8 * * * for daily 8am)"),
 			}),
 			execute: async ({ description, type, runAt, schedule }) => {
+				let nextRunAt: Date | null = runAt ? new Date(runAt) : null
+				if (type === "cron" && schedule) {
+					const tz = userTimezone ?? "UTC"
+					const interval = CronExpressionParser.parse(schedule, { tz })
+					nextRunAt = interval.next().toDate()
+				}
+
 				const rows = await db
 					.insert(schema.jobs)
 					.values({
@@ -65,14 +73,34 @@ export function createJobTools(db: Database, userId: string) {
 						status: "active",
 						runAt: runAt ? new Date(runAt) : null,
 						schedule: schedule ?? null,
-						nextRunAt: runAt ? new Date(runAt) : null,
-						payload: { description },
+						nextRunAt,
+						payload: { description, timezone: userTimezone ?? "UTC" },
 					})
 					.returning({ id: schema.jobs.id })
 
 				const job = rows[0]
 				if (!job) throw new Error("Failed to insert job")
 				return { scheduled: true, jobId: job.id, type, runAt, schedule }
+			},
+		}),
+
+		set_timezone: tool({
+			description:
+				"Set the user's timezone. Use IANA timezone format (e.g., America/New_York, Europe/London).",
+			inputSchema: z.object({
+				timezone: z.string().describe("IANA timezone identifier"),
+			}),
+			execute: async ({ timezone }) => {
+				try {
+					Intl.DateTimeFormat(undefined, { timeZone: timezone })
+				} catch {
+					return { updated: false, error: `Invalid IANA timezone identifier: ${timezone}` }
+				}
+				await db
+					.update(schema.users)
+					.set({ timezone, updatedAt: new Date() })
+					.where(eq(schema.users.id, userId))
+				return { updated: true, timezone }
 			},
 		}),
 	}

@@ -1,5 +1,6 @@
 import type { ChannelType } from "@amby/channels"
 import { and, DbService, eq, lte, or, schema } from "@amby/db"
+import { CronExpressionParser } from "cron-parser"
 import { Context, Effect, Layer } from "effect"
 import type { AgentError } from "../errors"
 
@@ -60,7 +61,18 @@ export const JobRunnerServiceLive = Layer.effect(
 							channelType: job.channelType,
 						})
 
-						const nextStatus = job.type === "cron" ? "active" : "completed"
+						let nextStatus: string = job.type === "cron" ? "active" : "completed"
+						let nextRunAt: Date | undefined
+						if (job.type === "cron" && job.schedule) {
+							const jobTz = ((job.payload as Record<string, unknown>)?.timezone as string) ?? "UTC"
+							try {
+								const interval = CronExpressionParser.parse(job.schedule, { tz: jobTz })
+								nextRunAt = interval.next().toDate()
+							} catch {
+								// No future occurrences — treat as completed
+								nextStatus = "completed"
+							}
+						}
 						yield* query((db) =>
 							db
 								.update(schema.jobs)
@@ -68,9 +80,7 @@ export const JobRunnerServiceLive = Layer.effect(
 									status: nextStatus,
 									lastRunAt: now,
 									updatedAt: now,
-									...(job.type === "cron" && job.nextRunAt
-										? { nextRunAt: new Date(now.getTime() + 24 * 60 * 60 * 1000) }
-										: {}),
+									...(nextRunAt ? { nextRunAt } : {}),
 								})
 								.where(eq(schema.jobs.id, job.id)),
 						)

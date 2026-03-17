@@ -26,7 +26,7 @@ const verifyUser = Effect.gen(function* () {
 
 	const rows = yield* query((db) =>
 		db
-			.select({ id: schema.users.id, name: schema.users.name })
+			.select({ id: schema.users.id, name: schema.users.name, timezone: schema.users.timezone })
 			.from(schema.users)
 			.where(eq(schema.users.id, userId)),
 	)
@@ -36,6 +36,19 @@ const verifyUser = Effect.gen(function* () {
 		console.error(`User "${userId}" not found. Run \`bun run seed\` first.`)
 		process.exit(1)
 	}
+
+	// Auto-detect system timezone and update if user is still on the default
+	const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+	if (user.timezone === "UTC" && systemTimezone && systemTimezone !== "UTC") {
+		yield* query((db) =>
+			db
+				.update(schema.users)
+				.set({ timezone: systemTimezone, updatedAt: new Date() })
+				.where(eq(schema.users.id, userId)),
+		)
+		console.log(`Timezone auto-detected: ${systemTimezone}`)
+	}
+
 	return user
 })
 

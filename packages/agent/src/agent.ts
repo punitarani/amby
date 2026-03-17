@@ -21,7 +21,7 @@ export type StreamPart =
 	| { type: "tool-call"; toolName: string; args: Record<string, unknown> }
 	| { type: "tool-result"; toolName: string; result: unknown }
 
-import { CUA_PROMPT, SYSTEM_PROMPT } from "./prompts/system"
+import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
 
 export class AgentService extends Context.Tag("AgentService")<
@@ -96,6 +96,21 @@ export const makeAgentServiceLive = (userId: string) =>
 
 			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
 				Effect.gen(function* () {
+					const userRow = yield* query((d) =>
+						d
+							.select({ timezone: schema.users.timezone })
+							.from(schema.users)
+							.where(eq(schema.users.id, userId))
+							.limit(1),
+					)
+					const userTimezone = userRow[0]?.timezone ?? "UTC"
+
+					const formatted = new Intl.DateTimeFormat("en-US", {
+						timeZone: userTimezone,
+						dateStyle: "full",
+						timeStyle: "long",
+					}).format(new Date())
+
 					const profile = yield* memory.getProfile(userId)
 					const deduped = deduplicateMemories(profile.static, profile.dynamic)
 					const memoryContext = buildMemoriesText(deduped)
@@ -105,14 +120,16 @@ export const makeAgentServiceLive = (userId: string) =>
 					const tools = {
 						...createMemoryTools(memory, userId),
 						...computer.tools,
-						...createJobTools(db, userId),
+						...createJobTools(db, userId, userTimezone),
 						...(onReply ? createReplyTools(onReply) : {}),
 						...(enableCua
 							? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 							: {}),
 					}
 
-					const basePrompt = enableCua ? `${SYSTEM_PROMPT}\n\n${CUA_PROMPT}` : SYSTEM_PROMPT
+					const basePrompt = enableCua
+						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
+						: buildSystemPrompt(formatted, userTimezone)
 					const systemPrompt = memoryContext
 						? `${basePrompt}\n\n# User Memory Context\n${memoryContext}`
 						: basePrompt

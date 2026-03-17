@@ -11,8 +11,8 @@ export const conversations = pgTable(
 		channelType: text("channel_type").notNull().default("cli"),
 		title: text("title"),
 		metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-		createdAt: timestamp("created_at").notNull().defaultNow(),
-		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(t) => [index("conversations_user_updated_idx").on(t.userId, t.updatedAt)],
 )
@@ -29,7 +29,7 @@ export const messages = pgTable(
 		toolCalls: jsonb("tool_calls"),
 		toolResults: jsonb("tool_results"),
 		metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-		createdAt: timestamp("created_at").notNull().defaultNow(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
 	(t) => [index("messages_conversation_created_idx").on(t.conversationId, t.createdAt)],
 )
