@@ -5,7 +5,7 @@ export { type JobExecutor, JobRunnerService, JobRunnerServiceLive } from "./jobs
 export { buildSystemPrompt } from "./prompts/system"
 export {
 	createDelegationTools,
-	createReplyTools,
+	createReplyToolDefs,
 	type ReplyFn,
 	type SubAgentSpawner,
 } from "./tools/messaging"

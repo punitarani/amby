@@ -102,7 +102,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			)
 
 			// Step 4: Send response to Telegram (split if >4096 chars)
-			if (!isSubAgent) {
+			if (!isSubAgent && response.trim()) {
 				await step.do("reply", async () => {
 					for (const chunk of splitTelegramMessage(response)) {
 						await bot.api.sendMessage(chatId, chunk)

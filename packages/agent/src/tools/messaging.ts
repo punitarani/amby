@@ -6,18 +6,21 @@ import { z } from "zod"
 
 export type ReplyFn = (text: string) => Promise<void>
 
-export function createReplyTools(sendReply: ReplyFn) {
+/**
+ * Creates the send_message tool definition WITHOUT an execute function.
+ * This makes it a "client-side" tool: when the model calls it, the AI SDK
+ * stops its internal loop and returns the tool call for manual execution.
+ * The agent loop in agent.ts handles execution sequentially, ensuring
+ * messages are delivered in order.
+ */
+export function createReplyToolDefs() {
 	return {
 		send_message: tool({
 			description:
-				"Send a message to the user immediately. Use this when you need to send multiple separate messages rather than one combined response.",
+				"Send a message to the user immediately. Use for progress updates or when delivering content as multiple separate messages (e.g. counting, listing items individually). Can be called once per message — the agent loop ensures they arrive in order. After sending all content via send_message, keep your final text response empty or a brief confirmation.",
 			inputSchema: z.object({
 				text: z.string().describe("The message text to send"),
 			}),
-			execute: async ({ text }) => {
-				await sendReply(text)
-				return { sent: true }
-			},
 		}),
 	}
 }

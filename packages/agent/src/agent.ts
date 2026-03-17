@@ -11,6 +11,7 @@ import {
 } from "@amby/memory"
 import { ModelService } from "@amby/models"
 import { withTracing } from "@posthog/ai"
+import type { ModelMessage, ToolModelMessage, ToolSet } from "ai"
 import { generateText, stepCountIs, streamText } from "ai"
 import { Context, Effect, Layer } from "effect"
 import { PostHog } from "posthog-node"
@@ -22,7 +23,79 @@ export type StreamPart =
 	| { type: "tool-result"; toolName: string; result: unknown }
 
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
-import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
+import { createJobTools, createReplyToolDefs, type ReplyFn } from "./tools/messaging"
+
+const MAX_AGENT_STEPS = 10
+
+/**
+ * Manual agent loop that gives us control over tool execution ordering.
+ *
+ * Tools WITH `execute` (memory, sandbox, jobs, etc.) are handled automatically
+ * by the AI SDK's internal loop. Tools WITHOUT `execute` (send_message) cause
+ * the SDK to stop and return the pending tool calls.
+ *
+ * When the SDK stops for send_message calls, we execute them one-by-one in
+ * order, feed the results back into the conversation, and let the model
+ * continue thinking. This creates a natural think → message → think → message
+ * flow instead of firing all messages concurrently.
+ */
+async function runAgentLoop(opts: {
+	model: Parameters<typeof generateText>[0]["model"]
+	system: string
+	messages: ModelMessage[]
+	tools: ToolSet
+	onReply?: ReplyFn
+}): Promise<string> {
+	const { model, system, tools, onReply } = opts
+	const messages: ModelMessage[] = [...opts.messages]
+	let stepsUsed = 0
+
+	while (stepsUsed < MAX_AGENT_STEPS) {
+		const remainingSteps = MAX_AGENT_STEPS - stepsUsed
+
+		const result = await generateText({
+			model,
+			system,
+			messages,
+			tools,
+			stopWhen: stepCountIs(remainingSteps),
+		})
+
+		stepsUsed += result.steps.length
+
+		// Check if the last step has unresolved send_message tool calls
+		const lastStep = result.steps[result.steps.length - 1]
+		const pendingSends = lastStep?.toolCalls.filter((tc) => tc.toolName === "send_message") ?? []
+
+		if (pendingSends.length === 0) {
+			// Model finished naturally — no pending sends
+			return result.text
+		}
+
+		// Execute send_message calls sequentially to preserve order
+		for (const tc of pendingSends) {
+			if (onReply) {
+				await onReply((tc.input as { text: string }).text)
+			}
+		}
+
+		// Continue the conversation: append the SDK's response messages,
+		// then our manual tool results for the send_message calls
+		messages.push(...result.response.messages)
+		const toolResultMessage: ToolModelMessage = {
+			role: "tool",
+			content: pendingSends.map((tc) => ({
+				type: "tool-result" as const,
+				toolCallId: tc.toolCallId,
+				toolName: "send_message",
+				output: { type: "json" as const, value: { sent: true } },
+			})),
+		}
+		messages.push(toolResultMessage)
+	}
+
+	return ""
+}
 
 export class AgentService extends Context.Tag("AgentService")<
 	AgentService,
@@ -94,7 +167,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			) =>
 				query((d) => d.insert(schema.messages).values({ conversationId, role, content, metadata }))
 
-			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
+			const prepareContext = (conversationId: string, opts?: { includeMessaging?: boolean }) =>
 				Effect.gen(function* () {
 					const userRow = yield* query((d) =>
 						d
@@ -121,7 +194,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						...createMemoryTools(memory, userId),
 						...computer.tools,
 						...createJobTools(db, userId, userTimezone),
-						...(onReply ? createReplyTools(onReply) : {}),
+						...(opts?.includeMessaging ? createReplyToolDefs() : {}),
 						...(enableCua
 							? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 							: {}),
@@ -140,24 +213,26 @@ export const makeAgentServiceLive = (userId: string) =>
 			return {
 				handleMessage: (conversationId, content, metadata, onReply) =>
 					Effect.gen(function* () {
-						const { tools, systemPrompt, history } = yield* prepareContext(conversationId, onReply)
+						const { tools, systemPrompt, history } = yield* prepareContext(conversationId, {
+							includeMessaging: !!onReply,
+						})
 
-						const result = yield* Effect.tryPromise({
+						const text = yield* Effect.tryPromise({
 							try: () =>
-								generateText({
+								runAgentLoop({
 									model,
 									system: systemPrompt,
 									messages: [...history, { role: "user" as const, content }],
 									tools,
-									stopWhen: stepCountIs(10),
+									onReply,
 								}),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
 
 						yield* saveMessage(conversationId, "user", content, metadata)
-						yield* saveMessage(conversationId, "assistant", result.text)
+						yield* saveMessage(conversationId, "assistant", text)
 
-						return result.text
+						return text
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
@@ -168,7 +243,9 @@ export const makeAgentServiceLive = (userId: string) =>
 
 				handleBatchedMessages: (conversationId, messages, metadata, onReply) =>
 					Effect.gen(function* () {
-						const { tools, systemPrompt, history } = yield* prepareContext(conversationId, onReply)
+						const { tools, systemPrompt, history } = yield* prepareContext(conversationId, {
+							includeMessaging: !!onReply,
+						})
 
 						// Each batched message becomes a separate user turn
 						const userMessages = messages.map((content) => ({
@@ -176,14 +253,14 @@ export const makeAgentServiceLive = (userId: string) =>
 							content,
 						}))
 
-						const result = yield* Effect.tryPromise({
+						const text = yield* Effect.tryPromise({
 							try: () =>
-								generateText({
+								runAgentLoop({
 									model,
 									system: systemPrompt,
 									messages: [...history, ...userMessages],
 									tools,
-									stopWhen: stepCountIs(10),
+									onReply,
 								}),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
@@ -192,9 +269,9 @@ export const makeAgentServiceLive = (userId: string) =>
 						for (const content of messages) {
 							yield* saveMessage(conversationId, "user", content, metadata)
 						}
-						yield* saveMessage(conversationId, "assistant", result.text)
+						yield* saveMessage(conversationId, "assistant", text)
 
-						return result.text
+						return text
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
