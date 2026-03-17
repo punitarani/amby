@@ -10,10 +10,10 @@
 	"scripts": {
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
-		"db:generate": "bun --env-file=../../.env drizzle-kit generate",
-		"db:migrate": "bun --env-file=../../.env drizzle-kit migrate",
-		"db:push": "bun --env-file=../../.env drizzle-kit push",
-		"db:studio": "bun --env-file=../../.env drizzle-kit studio"
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "drizzle-kit migrate",
+		"db:push": "drizzle-kit push",
+		"db:studio": "drizzle-kit studio"
 	},
 	"dependencies": {
 		"@amby/env": "workspace:*",
