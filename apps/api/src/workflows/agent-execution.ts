@@ -35,8 +35,9 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 				await step.do("typing", () => sendTyping())
 			}
 
-			// Step 2: Resolve user if needed
-			if (!userId && from) {
+			// Step 2: Always resolve user from Telegram identity to ensure the ID is valid
+			// (the DO may cache a stale userId if the DB was reset)
+			if (from) {
 				userId = await step.do("resolve-user", async () => {
 					const runtime = makeRuntimeForConsumer(this.env)
 					try {

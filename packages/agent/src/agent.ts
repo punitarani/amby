@@ -263,7 +263,11 @@ export const makeAgentServiceLive = (userId: string) =>
 						return row.id
 					}).pipe(
 						Effect.mapError(
-							(e) => new AgentError({ message: "Failed to ensure conversation", cause: e }),
+							(e) =>
+								new AgentError({
+									message: `Failed to ensure conversation: ${e instanceof Error ? e.message : String(e)}`,
+									cause: e,
+								}),
 						),
 					),
 

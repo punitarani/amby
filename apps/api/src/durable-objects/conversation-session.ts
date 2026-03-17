@@ -55,11 +55,8 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 			this.state.chatId = payload.chatId
 		}
 
-		// Lazily resolve userId on first message
-		if (!this.state.userId) {
-			// We need to resolve the user — store from info for later use
-			await this.ctx.storage.put("pendingFrom", payload.from)
-		}
+		// Always store from info so the workflow can re-resolve the user if needed
+		await this.ctx.storage.put("pendingFrom", payload.from)
 
 		// Buffer the message
 		this.state.buffer.push({

@@ -1,6 +1,6 @@
 import { AuthServiceLive } from "@amby/auth"
 import { SandboxServiceLive } from "@amby/computer"
-import { makeDbServiceFromUrl } from "@amby/db"
+import { makeDbServiceFromHyperdrive } from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
 import { MemoryServiceLive } from "@amby/memory"
 import { ModelServiceLive } from "@amby/models"
@@ -9,7 +9,12 @@ import { TelegramBotLite } from "../telegram"
 
 /** Build a per-request Effect runtime from Worker env bindings (reusable by queue consumer and workflows) */
 export const makeRuntimeForConsumer = (bindings: WorkerBindings) => {
-	const dbUrl = bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? ""
+	const connectionString = bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? ""
+	if (!connectionString) {
+		console.error(
+			"[Runtime] No database connection string — HYPERDRIVE and DATABASE_URL both missing",
+		)
+	}
 
 	const SharedLive = Layer.mergeAll(
 		MemoryServiceLive,
@@ -18,7 +23,7 @@ export const makeRuntimeForConsumer = (bindings: WorkerBindings) => {
 		AuthServiceLive,
 		TelegramBotLite,
 	).pipe(
-		Layer.provideMerge(makeDbServiceFromUrl(dbUrl)),
+		Layer.provideMerge(makeDbServiceFromHyperdrive(connectionString)),
 		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
 	)
 

@@ -15,6 +15,7 @@ export class DbService extends Context.Tag("DbService")<
 	}
 >() {}
 
+/** For CLI / non-Worker environments — reads DATABASE_URL from EnvService */
 export const DbServiceLive = Layer.effect(
 	DbService,
 	Effect.gen(function* () {
@@ -27,24 +28,41 @@ export const DbServiceLive = Layer.effect(
 			query: <T>(fn: (db: Database) => Promise<T>) =>
 				Effect.tryPromise({
 					try: () => fn(db),
-					catch: (cause) => new DbError({ message: "Database query failed", cause }),
+					catch: (cause) =>
+						new DbError({
+							message: `Database query failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+							cause,
+						}),
 				}),
 		}
 	}),
 )
 
-export const makeDbServiceFromUrl = (url: string) =>
+/**
+ * For Cloudflare Workers — pass `env.HYPERDRIVE.connectionString` directly.
+ * Follows Cloudflare's recommended Hyperdrive + postgres.js configuration:
+ * - max: 5 to stay within Workers' concurrent connection limits
+ * - fetch_types: false to skip unnecessary round-trip
+ */
+export const makeDbServiceFromHyperdrive = (connectionString: string) =>
 	Layer.succeed(
 		DbService,
 		(() => {
-			const client = postgres(url, { prepare: false })
+			const client = postgres(connectionString, {
+				max: 5,
+				fetch_types: false,
+			})
 			const db = drizzle(client, { schema })
 			return {
 				db,
 				query: <T>(fn: (db: Database) => Promise<T>) =>
 					Effect.tryPromise({
 						try: () => fn(db),
-						catch: (cause) => new DbError({ message: "Database query failed", cause }),
+						catch: (cause) =>
+							new DbError({
+								message: `Database query failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+								cause,
+							}),
 					}),
 			}
 		})(),
