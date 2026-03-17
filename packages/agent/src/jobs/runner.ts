@@ -1,5 +1,5 @@
 import type { ChannelType } from "@amby/channels"
-import { and, DbService, eq, lte, or, schema } from "@amby/db"
+import { and, DbService, eq, type JobStatus, lte, or, schema } from "@amby/db"
 import { CronExpressionParser } from "cron-parser"
 import { Context, Effect, Layer } from "effect"
 import type { AgentError } from "../errors"
@@ -61,7 +61,7 @@ export const JobRunnerServiceLive = Layer.effect(
 							channelType: job.channelType,
 						})
 
-						let nextStatus: string = job.type === "cron" ? "active" : "completed"
+						let nextStatus: JobStatus = job.type === "cron" ? "active" : "completed"
 						let nextRunAt: Date | undefined
 						if (job.type === "cron" && job.schedule) {
 							const jobTz = ((job.payload as Record<string, unknown>)?.timezone as string) ?? "UTC"

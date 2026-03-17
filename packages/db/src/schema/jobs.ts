@@ -28,3 +28,5 @@ export const jobs = pgTable(
 		index("jobs_status_next_run_idx").on(t.status, t.nextRunAt),
 	],
 )
+
+export type JobStatus = typeof jobs.$inferSelect.status

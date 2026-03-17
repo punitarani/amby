@@ -1,5 +1,5 @@
 export { conversations, messages } from "./conversations"
-export { jobs } from "./jobs"
+export { type JobStatus, jobs } from "./jobs"
 export { memories } from "./memories"
 export { sandboxes } from "./sandboxes"
 export { accounts, sessions, users, verifications } from "./users"
