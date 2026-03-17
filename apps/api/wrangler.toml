@@ -40,7 +40,7 @@ binding = "CF_VERSION_METADATA"
 # Hyperdrive connection pooling
 [[hyperdrive]]
 binding = "HYPERDRIVE"
-id = "3b23617b1d514a8b8ffc7be84edea907"
+id = "5b4f5571613141edbb3545c17bd44cdf"
 localConnectionString = "postgresql://postgres:postgres@localhost:54322/postgres"
 
 # --- Queue: inbound Telegram messages ---

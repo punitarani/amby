@@ -51,6 +51,7 @@ export const makeDbServiceFromHyperdrive = (connectionString: string) =>
 			const client = postgres(connectionString, {
 				max: 5,
 				fetch_types: false,
+				prepare: false,
 			})
 			const db = drizzle(client, { schema })
 			return {
