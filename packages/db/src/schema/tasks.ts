@@ -23,6 +23,9 @@ export const tasks = pgTable(
 		authMode: text("auth_mode").$type<"api_key" | "chatgpt_account">().notNull().default("api_key"),
 		status: text("status").$type<TaskStatus>().notNull().default("pending"),
 		prompt: text("prompt").notNull(),
+		// Stored as text "true"/"false" because Drizzle's boolean doesn't support
+		// the .$type<>() branded-text pattern used for other enum-like columns,
+		// and D1/Hyperdrive compatibility requires consistent column types.
 		needsBrowser: text("needs_browser").$type<"true" | "false">().notNull().default("false"),
 		sandboxId: text("sandbox_id"),
 		sessionId: text("session_id"),

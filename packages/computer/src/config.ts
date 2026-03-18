@@ -32,6 +32,12 @@ export const DEFAULT_TASK_TIMEOUT_SECONDS = 300
 export const HEARTBEAT_INTERVAL_MS = 60_000
 export const POLL_INTERVAL_MS = 2_000
 export const MAX_WAIT_SECONDS = 15
+export const MAX_ACTIVE_TASKS_PER_USER = 5
+
+// ── Codex auth URLs ───────────────────────────────────────────────────
+
+export const CODEX_DEVICE_AUTH_SETTINGS_URL = "https://chatgpt.com/#settings/Security"
+export const CODEX_DEVICE_AUTH_URL = "https://auth.openai.com/codex/device"
 
 // ── CUA ────────────────────────────────────────────────────────────────
 

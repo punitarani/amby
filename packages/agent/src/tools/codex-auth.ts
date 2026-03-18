@@ -1,13 +1,11 @@
 import type { CodexAuthSummary, TaskSupervisor } from "@amby/computer"
+import { CODEX_DEVICE_AUTH_SETTINGS_URL, CODEX_DEVICE_AUTH_URL } from "@amby/computer"
 import { tool } from "ai"
 import type { Context } from "effect"
 import { Effect } from "effect"
 import { z } from "zod"
 
 type Supervisor = Context.Tag.Service<typeof TaskSupervisor>
-
-const CODEX_DEVICE_AUTH_SETTINGS_URL = "https://chatgpt.com/#settings/Security"
-const CODEX_DEVICE_AUTH_URL = "https://auth.openai.com/codex/device"
 
 const withUserMessages = (summary: CodexAuthSummary) =>
 	summary.status === "pending" && summary.pending?.type === "device_code"

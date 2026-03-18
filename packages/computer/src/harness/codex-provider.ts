@@ -51,15 +51,16 @@ export class CodexProvider implements TaskProvider {
 		const envContent = `CODEX_HOME=${CODEX_HOME}`
 		await sandbox.fs.uploadFile(Buffer.from(envContent), `${taskDir}/.env`)
 
-		const codexFlags = ["--full-auto", "--output-last-message", "-o ../artifacts/result.md"].join(
-			" ",
-		)
+		// Use a wrapper script to avoid shell injection from prompt content
+		const runScript = [
+			"#!/bin/sh",
+			"cd workspace",
+			"prompt=$(cat prompt.txt)",
+			'exec env $(cat ../.env | xargs) codex exec --full-auto --output-last-message -o ../artifacts/result.md "$prompt" 2>../artifacts/stderr.log',
+		].join("\n")
+		await sandbox.fs.uploadFile(Buffer.from(runScript), `${taskDir}/run.sh`)
 
-		return (
-			`cd ${workspaceDir} && ` +
-			`env $(cat ${taskDir}/.env | xargs) codex exec ${codexFlags} "$(cat prompt.txt)" ` +
-			`2>${artifactsDir}/stderr.log`
-		)
+		return `cd ${taskDir} && sh run.sh`
 	}
 
 	async collectResult(sandbox: Sandbox, artifactRoot: string): Promise<TaskResult> {

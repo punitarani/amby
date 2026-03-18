@@ -1,5 +1,5 @@
 import type { TaskStatus } from "@amby/db"
-import { DbService, eq, schema } from "@amby/db"
+import { and, DbService, eq, inArray, schema } from "@amby/db"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
 import {
@@ -7,6 +7,7 @@ import {
 	CODEX_HOME,
 	DEFAULT_TASK_TIMEOUT_SECONDS,
 	HEARTBEAT_INTERVAL_MS,
+	MAX_ACTIVE_TASKS_PER_USER,
 	MAX_WAIT_SECONDS,
 	POLL_INTERVAL_MS,
 	taskSessionId,
@@ -14,6 +15,7 @@ import {
 import { SandboxError } from "../errors"
 import { SandboxService } from "../sandbox/service"
 import {
+	asRecord,
 	type CodexAuthCache,
 	type CodexAuthSummary,
 	clearCodexAuth,
@@ -42,9 +44,6 @@ interface ActiveTask {
 	startedAt: number
 	timeoutSeconds: number
 }
-
-const asRecord = (value: unknown): Record<string, unknown> =>
-	typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {}
 
 const stripAnsi = (value: string) => {
 	let clean = ""
@@ -174,6 +173,7 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 		}) => Effect.Effect<{ taskId: string; status: string }, SandboxError>
 		readonly getTask: (
 			taskId: string,
+			userId: string,
 			waitSeconds?: number,
 		) => Effect.Effect<TaskRecord | null, SandboxError>
 		readonly shutdown: () => Effect.Effect<void>
@@ -426,7 +426,7 @@ export const TaskSupervisorLive = Layer.effect(
 			}
 		}
 
-		recoverRunning().catch(() => {})
+		recoverRunning().catch((err) => console.error("[TaskSupervisor] recovery failed:", err))
 
 		return {
 			getCodexAuthStatus: (userId) =>
@@ -624,6 +624,35 @@ export const TaskSupervisorLive = Layer.effect(
 						)
 					}
 
+					// Enforce per-user active task limit
+					const activeCount = yield* Effect.tryPromise({
+						try: async () => {
+							const rows = await db
+								.select({ id: schema.tasks.id })
+								.from(schema.tasks)
+								.where(
+									and(
+										eq(schema.tasks.userId, userId),
+										inArray(schema.tasks.status, ["preparing", "running"]),
+									),
+								)
+							return rows.length
+						},
+						catch: (error) =>
+							new SandboxError({
+								message: `Failed to check active tasks: ${error instanceof Error ? error.message : String(error)}`,
+								cause: error,
+							}),
+					})
+
+					if (activeCount >= MAX_ACTIVE_TASKS_PER_USER) {
+						return yield* Effect.fail(
+							new SandboxError({
+								message: `You already have ${activeCount} active tasks. Wait for some to finish before starting another (limit: ${MAX_ACTIVE_TASKS_PER_USER}).`,
+							}),
+						)
+					}
+
 					const rows = yield* query((d) =>
 						d
 							.insert(schema.tasks)
@@ -652,96 +681,87 @@ export const TaskSupervisorLive = Layer.effect(
 						return yield* Effect.fail(new SandboxError({ message: "Failed to insert task record" }))
 					}
 
-					const command = yield* Effect.tryPromise({
-						try: () =>
-							provider.prepareAndBuildCommand(sandbox, {
-								taskId,
-								prompt,
-								authMode,
-								needsBrowser,
-								timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
-							}),
+					// Wrap post-insert steps so failures mark the task as failed and clean up
+					let sessionId: string | undefined
+					const launchResult = yield* Effect.tryPromise({
+						try: async () => {
+							try {
+								const command = await provider.prepareAndBuildCommand(sandbox, {
+									taskId,
+									prompt,
+									authMode,
+									needsBrowser,
+									timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
+								})
+
+								sessionId = taskSessionId(taskId)
+								await sandbox.process.createSession(sessionId)
+
+								const execResult = await sandbox.process.executeSessionCommand(sessionId, {
+									command,
+									runAsync: true,
+								})
+
+								const now = new Date()
+								await db
+									.update(schema.tasks)
+									.set({
+										status: "running",
+										artifactRoot: provider.getArtifactRoot(taskId),
+										sessionId,
+										commandId: execResult.cmdId,
+										startedAt: now,
+										heartbeatAt: now,
+										updatedAt: now,
+									})
+									.where(eq(schema.tasks.id, taskId))
+
+								activeTasks.set(taskId, {
+									taskId,
+									sandbox,
+									sessionId,
+									commandId: execResult.cmdId,
+									startedAt: now.getTime(),
+									timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
+								})
+
+								return { taskId, status: "running" as const }
+							} catch (cause) {
+								// Roll back: mark as failed and clean up the session
+								await db
+									.update(schema.tasks)
+									.set({
+										status: "failed",
+										error: cause instanceof Error ? cause.message : String(cause),
+										completedAt: new Date(),
+										updatedAt: new Date(),
+									})
+									.where(eq(schema.tasks.id, taskId))
+								await deletePendingSession(sandbox, sessionId)
+								throw cause
+							}
+						},
 						catch: (cause) =>
 							new SandboxError({
-								message: `Failed to prepare task workspace: ${cause instanceof Error ? cause.message : String(cause)}`,
+								message: `Task startup failed: ${cause instanceof Error ? cause.message : String(cause)}`,
 								cause,
 							}),
 					})
 
-					const sessionId = taskSessionId(taskId)
-
-					yield* Effect.tryPromise({
-						try: () => sandbox.process.createSession(sessionId),
-						catch: (cause) =>
-							new SandboxError({
-								message: `Failed to create session: ${cause instanceof Error ? cause.message : String(cause)}`,
-								cause,
-							}),
-					})
-
-					const execResult = yield* Effect.tryPromise({
-						try: () =>
-							sandbox.process.executeSessionCommand(sessionId, {
-								command,
-								runAsync: true,
-							}),
-						catch: (cause) =>
-							new SandboxError({
-								message: `Failed to execute command: ${cause instanceof Error ? cause.message : String(cause)}`,
-								cause,
-							}),
-					})
-
-					const now = new Date()
-					yield* query((d) =>
-						d
-							.update(schema.tasks)
-							.set({
-								status: "running",
-								artifactRoot: provider.getArtifactRoot(taskId),
-								sessionId,
-								commandId: execResult.cmdId,
-								startedAt: now,
-								heartbeatAt: now,
-								updatedAt: now,
-							})
-							.where(eq(schema.tasks.id, taskId)),
-					).pipe(
-						Effect.mapError(
-							(error) =>
-								new SandboxError({
-									message: `Failed to update task status: ${error instanceof Error ? error.message : String(error)}`,
-									cause: error,
-								}),
-						),
-					)
-
-					activeTasks.set(taskId, {
-						taskId,
-						sandbox,
-						sessionId,
-						commandId: execResult.cmdId,
-						startedAt: now.getTime(),
-						timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
-					})
-
-					return { taskId, status: "running" }
+					return launchResult
 				}),
 
-			getTask: (taskId, waitSeconds) =>
+			getTask: (taskId, userId, waitSeconds) =>
 				Effect.gen(function* () {
 					const cappedWait = waitSeconds ? Math.min(waitSeconds, MAX_WAIT_SECONDS) : 0
+					const taskFilter = and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId))
 
 					if (cappedWait > 0) {
 						const result = yield* Effect.tryPromise({
 							try: async () => {
 								const deadline = Date.now() + cappedWait * 1000
 								while (Date.now() < deadline) {
-									const rows = await db
-										.select()
-										.from(schema.tasks)
-										.where(eq(schema.tasks.id, taskId))
-										.limit(1)
+									const rows = await db.select().from(schema.tasks).where(taskFilter).limit(1)
 									const task = rows[0]
 									if (!task) return null
 									if (TERMINAL_STATUSES.includes(task.status as TaskStatus)) {
@@ -749,11 +769,7 @@ export const TaskSupervisorLive = Layer.effect(
 									}
 									await wait(POLL_INTERVAL_MS)
 								}
-								const rows = await db
-									.select()
-									.from(schema.tasks)
-									.where(eq(schema.tasks.id, taskId))
-									.limit(1)
+								const rows = await db.select().from(schema.tasks).where(taskFilter).limit(1)
 								return rows[0] ?? null
 							},
 							catch: (error) =>
@@ -765,9 +781,7 @@ export const TaskSupervisorLive = Layer.effect(
 						return result
 					}
 
-					return yield* query((d) =>
-						d.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1),
-					).pipe(
+					return yield* query((d) => d.select().from(schema.tasks).where(taskFilter).limit(1)).pipe(
 						Effect.map((rows) => rows[0] ?? null),
 						Effect.mapError(
 							(error) =>

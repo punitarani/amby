@@ -45,7 +45,7 @@ export interface CodexAuthSummary {
 	pending?: Pick<CodexPendingDeviceAuth, "type" | "verificationUri" | "userCode" | "startedAt">
 }
 
-const asRecord = (value: unknown): Record<string, unknown> =>
+export const asRecord = (value: unknown): Record<string, unknown> =>
 	typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {}
 
 export const readHarnessAuthConfig = (value: unknown): HarnessAuthConfig => {

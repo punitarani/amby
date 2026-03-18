@@ -49,7 +49,7 @@ export function createSandboxDelegationTools(
 					.describe("Seconds to wait for completion (max 15). Omit for immediate check."),
 			}),
 			execute: async ({ taskId, waitSeconds }) => {
-				const task = await Effect.runPromise(supervisor.getTask(taskId, waitSeconds))
+				const task = await Effect.runPromise(supervisor.getTask(taskId, userId, waitSeconds))
 				if (!task) return { error: "Task not found" }
 				return {
 					taskId: task.id,

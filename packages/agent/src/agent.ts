@@ -102,7 +102,8 @@ export const makeAgentServiceLive = (userId: string) =>
 			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
 				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
 
-			const readToolUserMessages = (result: {
+			/** Scans tool results from last to first, returning the first `userMessages` array found. */
+			const extractLastToolUserMessages = (result: {
 				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
 			}): string[] | undefined => {
 				for (let i = result.toolResults.length - 1; i >= 0; i -= 1) {
@@ -200,7 +201,7 @@ export const makeAgentServiceLive = (userId: string) =>
 								}),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
-						const toolUserMessages = onReply ? readToolUserMessages(result) : undefined
+						const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
 						if (toolUserMessages && onReply) {
 							yield* Effect.tryPromise(async () => {
 								for (const message of toolUserMessages) {
@@ -243,7 +244,7 @@ export const makeAgentServiceLive = (userId: string) =>
 								}),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
-						const toolUserMessages = onReply ? readToolUserMessages(result) : undefined
+						const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
 						if (toolUserMessages && onReply) {
 							yield* Effect.tryPromise(async () => {
 								for (const message of toolUserMessages) {
