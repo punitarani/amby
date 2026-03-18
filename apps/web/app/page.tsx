@@ -167,6 +167,7 @@ export default function HomePage() {
 						<motion.div className="mt-7 flex flex-wrap gap-3.5" variants={revealVariants}>
 							<motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.99 }}>
 								<MarketingActionLink
+									analyticsPlacement="home_hero_primary"
 									href={marketingLinks.telegram}
 									rel="noreferrer"
 									size="large"
@@ -179,6 +180,7 @@ export default function HomePage() {
 							</motion.div>
 							<motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.99 }}>
 								<MarketingActionLink
+									analyticsPlacement="home_hero_secondary"
 									href={marketingLinks.github}
 									rel="noreferrer"
 									size="large"
@@ -529,7 +531,12 @@ export default function HomePage() {
 								app.
 							</p>
 							<div className="mt-7">
-								<MarketingActionLink href="/vision" size="default" variant="secondary">
+								<MarketingActionLink
+									analyticsPlacement="home_vision_secondary"
+									href="/vision"
+									size="default"
+									variant="secondary"
+								>
 									Read the full vision
 								</MarketingActionLink>
 							</div>
@@ -562,6 +569,7 @@ export default function HomePage() {
 						<div className="mt-9 flex flex-wrap justify-center gap-4">
 							<motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.99 }}>
 								<MarketingActionLink
+									analyticsPlacement="home_access_primary"
 									href={marketingLinks.telegram}
 									rel="noreferrer"
 									size="large"
@@ -573,6 +581,7 @@ export default function HomePage() {
 							</motion.div>
 							<motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.99 }}>
 								<MarketingActionLink
+									analyticsPlacement="home_access_secondary"
 									href={marketingLinks.github}
 									rel="noreferrer"
 									size="large"

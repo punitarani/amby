@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import { Crimson_Pro, Instrument_Serif, Inter } from "next/font/google"
-
+import { Providers } from "@/app/providers"
 import { APP_URL } from "@/lib/app-url"
 
 import "./globals.css"
@@ -55,7 +55,9 @@ type RootLayoutProps = Readonly<{
 export default function RootLayout({ children }: RootLayoutProps) {
 	return (
 		<html className={`${inter.variable} ${crimson.variable} ${instrument.variable}`} lang="en">
-			<body>{children}</body>
+			<body>
+				<Providers>{children}</Providers>
+			</body>
 		</html>
 	)
 }

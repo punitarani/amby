@@ -78,6 +78,7 @@ export default function VisionPage() {
 						</p>
 						<div className="mt-8 flex flex-wrap gap-4">
 							<MarketingActionLink
+								analyticsPlacement="vision_hero_primary"
 								href={marketingLinks.telegram}
 								rel="noreferrer"
 								size="large"
@@ -87,6 +88,7 @@ export default function VisionPage() {
 								Open Telegram Bot
 							</MarketingActionLink>
 							<MarketingActionLink
+								analyticsPlacement="vision_hero_secondary"
 								href={marketingLinks.github}
 								rel="noreferrer"
 								size="large"

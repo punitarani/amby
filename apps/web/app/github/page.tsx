@@ -57,6 +57,7 @@ export default function GitHubPage() {
 						</p>
 						<div className="mt-8 flex flex-wrap gap-4">
 							<MarketingActionLink
+								analyticsPlacement="github_hero_primary"
 								href={marketingLinks.github}
 								rel="noreferrer"
 								size="large"
@@ -65,7 +66,12 @@ export default function GitHubPage() {
 								<GitHubIcon className="size-3.5" />
 								Review the codebase
 							</MarketingActionLink>
-							<MarketingActionLink href="/vision" size="large" variant="secondary">
+							<MarketingActionLink
+								analyticsPlacement="github_hero_secondary"
+								href="/vision"
+								size="large"
+								variant="secondary"
+							>
 								Read the vision
 							</MarketingActionLink>
 						</div>
@@ -145,6 +151,7 @@ export default function GitHubPage() {
 						</p>
 						<div className="mt-7">
 							<MarketingActionLink
+								analyticsPlacement="github_final_primary"
 								href={marketingLinks.github}
 								rel="noreferrer"
 								size="large"

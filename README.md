@@ -34,7 +34,7 @@ bun run setup           # starts Postgres, installs deps, runs migrations + seed
 bun run cli             # start the REPL
 ```
 
-Only `OPENROUTER_API_KEY` is required to get started. Sandbox computer access is optional — add `DAYTONA_API_KEY` to enable it (sign up at [daytona.io](https://app.daytona.io)).
+Only `OPENROUTER_API_KEY` is required to get started. Sandbox computer access is optional — add `DAYTONA_API_KEY` to enable it (sign up at [daytona.io](https://app.daytona.io)). If you set `POSTHOG_KEY`, both the API and `apps/web` send analytics to the same PostHog project, and the web app proxies browser traffic through `/_a`.
 
 ## Scripts
 

@@ -60,6 +60,7 @@ export default function TelegramAccessPage() {
 						</p>
 						<div className="mt-8 flex flex-wrap gap-3">
 							<MarketingActionLink
+								analyticsPlacement="telegram_hero_primary"
 								href={marketingLinks.telegram}
 								rel="noreferrer"
 								size="large"
@@ -68,7 +69,12 @@ export default function TelegramAccessPage() {
 								<TelegramIcon className="size-3.5" />
 								Open Telegram Bot
 							</MarketingActionLink>
-							<MarketingActionLink href="/vision" size="large" variant="secondary">
+							<MarketingActionLink
+								analyticsPlacement="telegram_hero_secondary"
+								href="/vision"
+								size="large"
+								variant="secondary"
+							>
 								Read the vision
 							</MarketingActionLink>
 						</div>
@@ -144,6 +150,7 @@ export default function TelegramAccessPage() {
 						</div>
 						<div className="flex flex-wrap gap-3 lg:justify-end">
 							<MarketingActionLink
+								analyticsPlacement="telegram_final_primary"
 								href={marketingLinks.telegram}
 								rel="noreferrer"
 								size="large"
@@ -153,6 +160,7 @@ export default function TelegramAccessPage() {
 								Open Telegram Bot
 							</MarketingActionLink>
 							<MarketingActionLink
+								analyticsPlacement="telegram_final_secondary"
 								href={marketingLinks.github}
 								rel="noreferrer"
 								size="large"
