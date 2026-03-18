@@ -7,7 +7,7 @@ import { Context, Effect, Layer } from "effect"
 import { SandboxError } from "./errors"
 
 export const AGENT_USER = "agent"
-const AGENT_WORKDIR = "/home/agent/workspace"
+const AGENT_WORKDIR = "/home/user/Desktop"
 export const AUTO_STOP_MINUTES = 15
 export const AUTO_ARCHIVE_MINUTES = 60
 export const SANDBOX_RESOURCES = { cpu: 2, memory: 4, disk: 5 } as const
@@ -60,7 +60,7 @@ export const sandboxImage = Image.base("ubuntu:24.04")
 	// agent — tool-calling user for the AI agent
 	.runCommands(
 		"useradd -m -s /bin/bash -d /home/agent agent " +
-			"&& mkdir -p /home/agent/workspace /home/agent/data /home/agent/.local/bin " +
+			"&& mkdir -p /home/agent/data /home/agent/.local/bin " +
 			"&& chown -R agent:agent /home/agent",
 	)
 	// agent can read user's home (not write)

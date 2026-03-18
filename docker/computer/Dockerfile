@@ -53,7 +53,7 @@ RUN useradd -m -s /bin/bash -d /home/user user \
 #   Access: everything user has + workspace, data, /opt/amby
 #   Can sudo as user (for browser/GUI tasks) and install packages as root
 RUN useradd -m -s /bin/bash -d /home/agent agent \
-	&& mkdir -p /home/agent/workspace /home/agent/data /home/agent/.local/bin \
+	&& mkdir -p /home/agent/data /home/agent/.local/bin \
 	&& chown -R agent:agent /home/agent
 
 # agent can read user's home (not write)
@@ -77,7 +77,7 @@ ENV LANG=en_US.UTF-8 \
 	HOME=/home/agent \
 	PATH="/home/agent/.local/bin:/usr/local/bin:${PATH}"
 
-WORKDIR /home/agent/workspace
+WORKDIR /home/user/Desktop
 
 USER agent
 
