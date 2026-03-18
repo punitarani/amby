@@ -13,6 +13,11 @@ workers_dev = true
 # Disable preview deployments
 preview_urls = false
 
+# Custom domain routing
+[[routes]]
+pattern = "api.hiamby.com"
+custom_domain = true
+
 # Smart placement: run near the database
 [placement]
 mode = "smart"
