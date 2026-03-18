@@ -32,6 +32,14 @@
 			"semicolons": "asNeeded"
 		}
 	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		},
+		"formatter": {
+			"enabled": true
+		}
+	},
 	"json": {
 		"formatter": {
 			"indentStyle": "tab",
@@ -40,7 +48,13 @@
 	},
 	"files": {
 		"includes": [
-			"{packages,apps}/**/*.{ts,json,jsonc}",
+			"{packages,apps}/**/*.{ts,tsx,js,jsx,json,jsonc,css,mjs}",
+			"!{packages,apps}/**/.next",
+			"!{packages,apps}/**/.wrangler",
+			"!{packages,apps}/**/dist",
+			"!{packages,apps}/**/dist-worker",
+			"!{packages,apps}/**/coverage",
+			"!{packages,apps}/**/next-env.d.ts",
 			"package.json",
 			"tsconfig.base.json",
 			"turbo.json",

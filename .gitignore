@@ -10,6 +10,9 @@ node_modules
 
 # build
 dist
+.next
+out
+output
 
 # testing
 coverage
@@ -35,3 +38,6 @@ dist-worker
 
 # ide
 .idea
+
+# tools
+.playwright-cli

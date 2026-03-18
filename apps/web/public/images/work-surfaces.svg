@@ -1,0 +1,58 @@
+<svg width="1200" height="900" viewBox="0 0 1200 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="80" y1="70" x2="1080" y2="840" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FAF6EF"/>
+      <stop offset="1" stop-color="#ECE5D8"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="420" y2="320" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFDFC"/>
+      <stop offset="1" stop-color="#F4EDE0"/>
+    </linearGradient>
+    <filter id="shadow" x="40" y="120" width="1120" height="700" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="20" stdDeviation="30" flood-color="#867D6B" flood-opacity="0.14"/>
+    </filter>
+    <filter id="glow" x="226" y="182" width="740" height="584" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="36"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="900" rx="72" fill="url(#bg)"/>
+  <g filter="url(#glow)" opacity="0.7">
+    <ellipse cx="600" cy="454" rx="248" ry="166" fill="#FFFFFF"/>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="224" y="454" width="252" height="166" rx="28" fill="url(#card)"/>
+    <rect x="394" y="268" width="436" height="286" rx="34" fill="url(#card)"/>
+    <rect x="688" y="434" width="292" height="202" rx="30" fill="url(#card)"/>
+  </g>
+  <text x="260" y="502" fill="#2D312E" font-family="Crimson Pro, serif" font-size="42">Inbox</text>
+  <circle cx="280" cy="542" r="12" fill="#9DB09E"/>
+  <rect x="304" y="530" width="128" height="18" rx="9" fill="#D8D5CF"/>
+  <rect x="260" y="568" width="170" height="14" rx="7" fill="#E4E0DA"/>
+  <rect x="260" y="594" width="140" height="14" rx="7" fill="#E4E0DA"/>
+
+  <text x="438" y="334" fill="#2D312E" font-family="Crimson Pro, serif" font-size="48">Calendar</text>
+  <g fill="#E7E2DB">
+    <rect x="436" y="374" width="54" height="16" rx="8"/>
+    <rect x="502" y="374" width="54" height="16" rx="8"/>
+    <rect x="568" y="374" width="54" height="16" rx="8"/>
+    <rect x="634" y="374" width="54" height="16" rx="8"/>
+  </g>
+  <g fill="#EEE8DF">
+    <rect x="438" y="416" width="56" height="56" rx="14"/>
+    <rect x="506" y="416" width="56" height="56" rx="14"/>
+    <rect x="574" y="416" width="56" height="56" rx="14"/>
+    <rect x="642" y="416" width="56" height="56" rx="14"/>
+    <rect x="710" y="416" width="56" height="56" rx="14"/>
+    <rect x="438" y="484" width="56" height="56" rx="14"/>
+    <rect x="506" y="484" width="56" height="56" rx="14"/>
+    <rect x="574" y="484" width="56" height="56" rx="14"/>
+    <rect x="642" y="484" width="56" height="56" rx="14"/>
+    <rect x="710" y="484" width="56" height="56" rx="14"/>
+  </g>
+  <rect x="708" y="416" width="58" height="58" rx="15" fill="#9DB09E"/>
+
+  <text x="726" y="484" fill="#2D312E" font-family="Crimson Pro, serif" font-size="44">Notes</text>
+  <rect x="726" y="518" width="194" height="16" rx="8" fill="#DAD6CF"/>
+  <rect x="726" y="548" width="172" height="16" rx="8" fill="#E7E2DB"/>
+  <rect x="726" y="578" width="182" height="16" rx="8" fill="#E7E2DB"/>
+</svg>
