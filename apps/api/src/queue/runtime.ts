@@ -7,8 +7,7 @@ import { ModelServiceLive } from "@amby/models"
 import { Layer, ManagedRuntime } from "effect"
 import { TelegramBotLite } from "../telegram"
 
-/** Build a per-request Effect runtime from Worker env bindings (reusable by queue consumer and workflows) */
-export const makeRuntimeForConsumer = (bindings: WorkerBindings) => {
+const makeBaseLive = (bindings: WorkerBindings) => {
 	const connectionString = bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? ""
 	if (!connectionString) {
 		console.error(
@@ -16,17 +15,20 @@ export const makeRuntimeForConsumer = (bindings: WorkerBindings) => {
 		)
 	}
 
-	const SharedLive = Layer.mergeAll(
-		MemoryServiceLive,
-		TaskSupervisorLive,
-		ModelServiceLive,
-		AuthServiceLive,
-		TelegramBotLite,
-	).pipe(
+	return Layer.mergeAll(MemoryServiceLive, ModelServiceLive, AuthServiceLive, TelegramBotLite).pipe(
 		Layer.provideMerge(SandboxServiceLive),
 		Layer.provideMerge(makeDbServiceFromHyperdrive(connectionString)),
 		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
 	)
+}
 
-	return ManagedRuntime.make(SharedLive)
+/** Lightweight runtime for queue consumers and workflows that don't need TaskSupervisor */
+export const makeRuntimeForConsumer = (bindings: WorkerBindings) =>
+	ManagedRuntime.make(makeBaseLive(bindings))
+
+/** Runtime that includes TaskSupervisor — use only for agent execution contexts.
+ *  The supervisor's heartbeat interval is cleaned up automatically on dispose(). */
+export const makeAgentRuntimeForConsumer = (bindings: WorkerBindings) => {
+	const base = makeBaseLive(bindings)
+	return ManagedRuntime.make(TaskSupervisorLive.pipe(Layer.provideMerge(base)))
 }

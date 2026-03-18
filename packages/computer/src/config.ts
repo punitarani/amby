@@ -33,6 +33,7 @@ export const HEARTBEAT_INTERVAL_MS = 60_000
 export const POLL_INTERVAL_MS = 2_000
 export const MAX_WAIT_SECONDS = 15
 export const MAX_ACTIVE_TASKS_PER_USER = 5
+export const MAX_HEARTBEAT_FAILURES = 3
 
 // ── Codex auth URLs ───────────────────────────────────────────────────
 

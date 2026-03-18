@@ -8,6 +8,7 @@ import {
 	DEFAULT_TASK_TIMEOUT_SECONDS,
 	HEARTBEAT_INTERVAL_MS,
 	MAX_ACTIVE_TASKS_PER_USER,
+	MAX_HEARTBEAT_FAILURES,
 	MAX_WAIT_SECONDS,
 	POLL_INTERVAL_MS,
 	taskSessionId,
@@ -43,6 +44,7 @@ interface ActiveTask {
 	commandId: string
 	startedAt: number
 	timeoutSeconds: number
+	consecutiveFailures: number
 }
 
 const stripAnsi = (value: string) => {
@@ -180,7 +182,7 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 	}
 >() {}
 
-export const TaskSupervisorLive = Layer.effect(
+export const TaskSupervisorLive = Layer.scoped(
 	TaskSupervisor,
 	Effect.gen(function* () {
 		const sandboxService = yield* SandboxService
@@ -336,6 +338,8 @@ export const TaskSupervisorLive = Layer.effect(
 						.set({ heartbeatAt: new Date(), updatedAt: new Date() })
 						.where(eq(schema.tasks.id, task.taskId))
 
+					task.consecutiveFailures = 0
+
 					if (cmd.exitCode != null) {
 						await finalizeTask(task, cmd.exitCode)
 						continue
@@ -345,12 +349,20 @@ export const TaskSupervisorLive = Layer.effect(
 					if (elapsed > task.timeoutSeconds) {
 						await timeoutTask(task)
 					}
-				} catch {
-					await db
-						.update(schema.tasks)
-						.set({ status: "lost", updatedAt: new Date() })
-						.where(eq(schema.tasks.id, task.taskId))
-					activeTasks.delete(task.taskId)
+				} catch (err) {
+					task.consecutiveFailures += 1
+					console.error(
+						`[TaskSupervisor] heartbeat failed for ${task.taskId} (${task.consecutiveFailures}/${MAX_HEARTBEAT_FAILURES}):`,
+						err,
+					)
+
+					if (task.consecutiveFailures >= MAX_HEARTBEAT_FAILURES) {
+						await db
+							.update(schema.tasks)
+							.set({ status: "lost", updatedAt: new Date() })
+							.where(eq(schema.tasks.id, task.taskId))
+						activeTasks.delete(task.taskId)
+					}
 				}
 			}
 		}, HEARTBEAT_INTERVAL_MS)
@@ -416,6 +428,7 @@ export const TaskSupervisorLive = Layer.effect(
 						commandId: task.commandId,
 						startedAt: task.startedAt?.getTime() ?? Date.now(),
 						timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
+						consecutiveFailures: 0,
 					})
 				} catch {
 					await db
@@ -427,6 +440,8 @@ export const TaskSupervisorLive = Layer.effect(
 		}
 
 		recoverRunning().catch((err) => console.error("[TaskSupervisor] recovery failed:", err))
+
+		yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(heartbeatInterval)))
 
 		return {
 			getCodexAuthStatus: (userId) =>
@@ -723,6 +738,7 @@ export const TaskSupervisorLive = Layer.effect(
 									commandId: execResult.cmdId,
 									startedAt: now.getTime(),
 									timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
+									consecutiveFailures: 0,
 								})
 
 								return { taskId, status: "running" as const }
