@@ -12,7 +12,7 @@ export { ConversationSession } from "./durable-objects/conversation-session"
 export { AgentExecutionWorkflow } from "./workflows/agent-execution"
 export { SandboxProvisionWorkflow } from "./workflows/sandbox-provision"
 
-type Env = { Bindings: WorkerBindings }
+type Env = { Bindings: WorkerBindings; Variables: { posthogDistinctId?: string } }
 
 const app = new Hono<Env>()
 
@@ -25,7 +25,7 @@ app.onError(async (err, c) => {
 	if (status >= 500 && posthogKey) {
 		try {
 			const posthog = getPostHogClient(posthogKey, c.env.POSTHOG_HOST ?? "https://us.i.posthog.com")
-			posthog.captureException(err, undefined, {
+			posthog.captureException(err, c.get("posthogDistinctId"), {
 				framework: "hono",
 				runtime: "cloudflare-worker",
 				status,
@@ -36,7 +36,11 @@ app.onError(async (err, c) => {
 				content_type: c.req.header("content-type") ?? null,
 				user_agent: c.req.header("user-agent") ?? null,
 			})
-			await posthog.flush()
+			c.executionCtx.waitUntil(
+				posthog.flush().catch((flushError) => {
+					console.error("[API] Failed to flush PostHog exception:", flushError)
+				}),
+			)
 		} catch (captureError) {
 			console.error("[API] Failed to capture exception in PostHog:", captureError)
 		}
@@ -62,6 +66,10 @@ app.post("/telegram/webhook", async (c) => {
 	}
 
 	const update = await c.req.json()
+	const distinctId = update?.message?.from?.id
+	if (distinctId) {
+		c.set("posthogDistinctId", String(distinctId))
+	}
 
 	if (c.env.TELEGRAM_QUEUE) {
 		await c.env.TELEGRAM_QUEUE.send({

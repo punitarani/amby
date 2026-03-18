@@ -59,6 +59,7 @@ jobs:
           cd apps/api
           rm -rf dist-worker
           npx wrangler versions upload --dry-run --outdir dist-worker
+          test -f dist-worker/worker.js
           npx wrangler versions upload dist-worker/worker.js --no-bundle --upload-source-maps --dry-run
 
   # --- Production only (push to main) ---
@@ -123,6 +124,7 @@ jobs:
           cd apps/api
           rm -rf dist-worker
           npx wrangler versions upload --dry-run --outdir dist-worker
+          test -f dist-worker/worker.js
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -131,6 +133,8 @@ jobs:
         run: |
           doppler run -- bash -lc '
             cd apps/api
+            # PostHog inject intentionally mutates the built worker.js bundle to stamp chunk IDs.
+            # The injected dist-worker artifact is the exact bundle deployed below with --no-bundle.
             npx @posthog/cli sourcemap inject \
               --directory dist-worker \
               --release-name amby-api \
@@ -149,6 +153,7 @@ jobs:
         id: upload
         run: |
           cd apps/api
+          test -f dist-worker/worker.js
           OUTPUT=$(npx wrangler versions upload dist-worker/worker.js \
             --no-bundle \
             --upload-source-maps \
