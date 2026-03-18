@@ -1,6 +1,6 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import type { ChannelType } from "@amby/channels"
-import { createComputerTools, createCuaTools, SandboxService } from "@amby/computer"
+import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
 import { DbService, desc, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import {
@@ -22,6 +22,7 @@ export type StreamPart =
 	| { type: "tool-result"; toolName: string; result: unknown }
 
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
+import { createSandboxDelegationTools } from "./tools/delegation"
 import { createSubagentTools } from "./subagents/spawner"
 import { buildToolGroups } from "./subagents/tool-groups"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
@@ -59,6 +60,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			const models = yield* ModelService
 			const memory = yield* MemoryService
 			const sandbox = yield* SandboxService
+			const taskSupervisor = yield* TaskSupervisor
 			const env = yield* EnvService
 			const enableCua = env.ENABLE_CUA
 			const phClient = new PostHog(env.POSTHOG_KEY, { host: env.POSTHOG_HOST })
@@ -120,6 +122,9 @@ export const makeAgentServiceLive = (userId: string) =>
 					const history = yield* loadHistory(conversationId)
 
 					const memoryTools = createMemoryTools(memory, userId)
+          const sandboxTools = sandbox.enabled
+            ? createSandboxDelegationTools(taskSupervisor, userId)
+            : undefined
 					const cuaTools = enableCua
 						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 						: undefined
@@ -301,6 +306,7 @@ export const makeAgentServiceLive = (userId: string) =>
 
 				shutdown: () =>
 					Effect.gen(function* () {
+						yield* taskSupervisor.shutdown()
 						yield* Effect.tryPromise({
 							try: () => phClient.shutdown(),
 							catch: (cause) => new AgentError({ message: "Failed to shutdown PostHog", cause }),
