@@ -4,24 +4,21 @@ import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Daytona, Image } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
-import { SandboxError } from "./errors"
-
-export const AGENT_USER = "agent"
-const AGENT_WORKDIR = "/home/user/Desktop"
-export const AUTO_STOP_MINUTES = 15
-export const AUTO_ARCHIVE_MINUTES = 60
-export const SANDBOX_RESOURCES = { cpu: 2, memory: 4, disk: 5 } as const
+import {
+	AGENT_USER,
+	AGENT_WORKDIR,
+	AUTO_ARCHIVE_MINUTES,
+	AUTO_STOP_MINUTES,
+	COMMAND_EXEC_TIMEOUT,
+	SANDBOX_CREATE_TIMEOUT,
+	SANDBOX_RESOURCES,
+	SANDBOX_START_TIMEOUT,
+	sandboxLabels,
+	sandboxName,
+} from "../config"
+import { SandboxError } from "../errors"
 
 type SandboxStatus = "creating" | "running" | "stopped" | "archived" | "error"
-
-export const sandboxName = (userId: string, isDev: boolean) =>
-	`computer-v1-${userId}${isDev ? "-dev" : ""}`
-
-export const sandboxLabels = (userId: string, isDev: boolean) => ({
-	userId,
-	app: "amby",
-	environment: isDev ? "dev" : "production",
-})
 
 // TODO: Once Daytona plan supports snapshot push, switch to:
 //   snapshot: "amby-computer:0.1.0"
@@ -156,7 +153,7 @@ export const SandboxServiceLive = Layer.effect(
 			const existing = await daytona.get(name)
 			await existing.refreshData()
 			if (existing.state !== "started") {
-				await existing.start(60)
+				await existing.start(SANDBOX_START_TIMEOUT)
 			}
 			cache.set(userId, existing)
 			return existing
@@ -177,7 +174,7 @@ export const SandboxServiceLive = Layer.effect(
 								await cached.refreshData()
 								if (cached.state === "started") return cached
 								if (cached.state === "stopped" || cached.state === "error") {
-									await cached.start(60)
+									await cached.start(SANDBOX_START_TIMEOUT)
 									await upsertSandbox(db, userId, cached.id, "running")
 									return cached
 								}
@@ -223,7 +220,7 @@ export const SandboxServiceLive = Layer.effect(
 									labels: sandboxLabels(userId, isDev),
 									user: AGENT_USER,
 								},
-								{ timeout: 300 },
+								{ timeout: SANDBOX_CREATE_TIMEOUT },
 							)
 							cache.set(userId, sandbox)
 							await upsertSandbox(db, userId, sandbox.id, "running")
@@ -250,7 +247,7 @@ export const SandboxServiceLive = Layer.effect(
 							command,
 							cwd ?? AGENT_WORKDIR,
 							undefined,
-							30,
+							COMMAND_EXEC_TIMEOUT,
 						)
 						return { stdout: result.result, exitCode: result.exitCode }
 					},

@@ -3,7 +3,8 @@ import { tool } from "ai"
 import type { Context } from "effect"
 import { Effect } from "effect"
 import { z } from "zod"
-import type { SandboxService } from "./sandbox"
+import { CUA_LOCK_PATH, CUA_STALE_MINUTES } from "../config"
+import type { SandboxService } from "./service"
 
 type SandboxOps = Context.Tag.Service<typeof SandboxService>
 
@@ -14,12 +15,9 @@ interface CuaLock {
 	lastActivity: string
 }
 
-const LOCK_PATH = "/tmp/amby-cua.lock"
-const STALE_MINUTES = 15
-
 async function readLock(instance: Sandbox): Promise<CuaLock | null> {
 	try {
-		const buf = await instance.fs.downloadFile(LOCK_PATH)
+		const buf = await instance.fs.downloadFile(CUA_LOCK_PATH)
 		return JSON.parse(buf.toString("utf-8")) as CuaLock
 	} catch {
 		return null
@@ -27,11 +25,11 @@ async function readLock(instance: Sandbox): Promise<CuaLock | null> {
 }
 
 async function writeLock(instance: Sandbox, lock: CuaLock): Promise<void> {
-	await instance.fs.uploadFile(Buffer.from(JSON.stringify(lock)), LOCK_PATH)
+	await instance.fs.uploadFile(Buffer.from(JSON.stringify(lock)), CUA_LOCK_PATH)
 }
 
 async function deleteLock(instance: Sandbox): Promise<void> {
-	await instance.process.executeCommand(`rm -f ${LOCK_PATH}`)
+	await instance.process.executeCommand(`rm -f ${CUA_LOCK_PATH}`)
 }
 
 async function requireLock(instance: Sandbox, channelId: string): Promise<string | null> {
@@ -41,7 +39,7 @@ async function requireLock(instance: Sandbox, channelId: string): Promise<string
 	}
 
 	const lastActivity = new Date(lock.lastActivity).getTime()
-	const isStale = Date.now() - lastActivity > STALE_MINUTES * 60 * 1000
+	const isStale = Date.now() - lastActivity > CUA_STALE_MINUTES * 60 * 1000
 
 	if (lock.channel !== channelId) {
 		if (isStale) {
@@ -96,7 +94,7 @@ export function createCuaTools(
 					const existingLock = await readLock(instance)
 					if (existingLock) {
 						const lastActivity = new Date(existingLock.lastActivity).getTime()
-						const isStale = Date.now() - lastActivity > STALE_MINUTES * 60 * 1000
+						const isStale = Date.now() - lastActivity > CUA_STALE_MINUTES * 60 * 1000
 
 						if (existingLock.channel === channelId) {
 							existingLock.lastActivity = new Date().toISOString()

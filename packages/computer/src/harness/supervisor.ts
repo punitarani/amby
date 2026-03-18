@@ -4,19 +4,21 @@ import { EnvService } from "@amby/env"
 import { getValidAccessToken } from "@amby/models"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
-import { SandboxError } from "./errors"
-import { CodexInstaller } from "./installers/codex"
-import { CodexProvider } from "./providers/codex"
-import { SandboxService } from "./sandbox"
+import {
+	DEFAULT_TASK_TIMEOUT_SECONDS,
+	HEARTBEAT_INTERVAL_MS,
+	MAX_WAIT_SECONDS,
+	POLL_INTERVAL_MS,
+	taskSessionId,
+} from "../config"
+import { SandboxError } from "../errors"
+import { SandboxService } from "../sandbox/service"
+import { CodexInstaller } from "./codex-installer"
+import { CodexProvider } from "./codex-provider"
 
 type TaskRecord = typeof schema.tasks.$inferSelect
 
 const TERMINAL_STATUSES: TaskStatus[] = ["succeeded", "failed", "cancelled", "timed_out", "lost"]
-
-const DEFAULT_TIMEOUT_SECONDS = 300
-const HEARTBEAT_INTERVAL_MS = 60_000
-const POLL_INTERVAL_MS = 2_000
-const MAX_WAIT_SECONDS = 15
 
 interface ActiveTask {
 	taskId: string
@@ -185,7 +187,7 @@ export const TaskSupervisorLive = Layer.effect(
 						sessionId: task.sessionId,
 						commandId: task.commandId,
 						startedAt: task.startedAt?.getTime() ?? Date.now(),
-						timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+						timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
 					})
 				} catch {
 					await db
@@ -268,7 +270,7 @@ export const TaskSupervisorLive = Layer.effect(
 								apiKey,
 								authMode,
 								needsBrowser,
-								timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+								timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
 							}),
 						catch: (cause) =>
 							new SandboxError({
@@ -278,7 +280,7 @@ export const TaskSupervisorLive = Layer.effect(
 					})
 
 					// Create session and execute async
-					const sessionId = `task-${taskId}`
+					const sessionId = taskSessionId(taskId)
 
 					yield* Effect.tryPromise({
 						try: () => sandbox.process.createSession(sessionId),
@@ -332,7 +334,7 @@ export const TaskSupervisorLive = Layer.effect(
 						sessionId,
 						commandId: execResult.cmdId,
 						startedAt: now.getTime(),
-						timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+						timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
 					})
 
 					return { taskId, status: "running" }

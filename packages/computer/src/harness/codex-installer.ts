@@ -1,7 +1,6 @@
 import type { Sandbox } from "@daytonaio/sdk"
-import type { HarnessInstaller, InstallResult } from "../harness-installer"
-
-const MANIFEST_PATH = "/.amby/harnesses.json"
+import { MANIFEST_PATH, NPM_INSTALL_TIMEOUT } from "../config"
+import type { HarnessInstaller, InstallResult } from "./installer"
 
 interface HarnessManifest {
 	codex?: { version: string; installedAt: string }
@@ -32,7 +31,7 @@ export class CodexInstaller implements HarnessInstaller {
 				"npm install -g @openai/codex",
 				undefined,
 				undefined,
-				120,
+				NPM_INSTALL_TIMEOUT,
 			)
 			if (install.exitCode !== 0) {
 				return { installed: false }
