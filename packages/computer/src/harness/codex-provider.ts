@@ -1,7 +1,6 @@
 import type { Sandbox } from "@daytonaio/sdk"
-import type { TaskConfig, TaskProvider, TaskResult } from "../task-provider"
-
-const TASK_BASE = "/home/agent/workspace/tasks"
+import { CODEX_HOME, TASK_BASE } from "../config"
+import type { TaskConfig, TaskProvider, TaskResult } from "./provider"
 
 const AGENTS_MD = `# Task Instructions
 
@@ -49,7 +48,7 @@ export class CodexProvider implements TaskProvider {
 		await sandbox.fs.uploadFile(Buffer.from(config.prompt), `${workspaceDir}/prompt.txt`)
 
 		// Write env vars to file (avoids shell injection)
-		const envContent = `CODEX_API_KEY=${config.apiKey}\nCODEX_HOME=/home/agent/.codex`
+		const envContent = `CODEX_API_KEY=${config.apiKey}\nCODEX_HOME=${CODEX_HOME}`
 		await sandbox.fs.uploadFile(Buffer.from(envContent), `${taskDir}/.env`)
 
 		const codexFlags = ["--full-auto", "--output-last-message", "-o ../artifacts/result.md"].join(
