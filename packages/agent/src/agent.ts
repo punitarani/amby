@@ -99,6 +99,26 @@ export const makeAgentServiceLive = (userId: string) =>
 			) =>
 				query((d) => d.insert(schema.messages).values({ conversationId, role, content, metadata }))
 
+			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
+				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
+
+			const readToolUserMessages = (result: {
+				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
+			}): string[] | undefined => {
+				for (let i = result.toolResults.length - 1; i >= 0; i -= 1) {
+					const output = result.toolResults[i]?.output
+					if (
+						typeof output === "object" &&
+						output !== null &&
+						"userMessages" in output &&
+						Array.isArray(output.userMessages) &&
+						output.userMessages.every((message) => typeof message === "string" && message.trim())
+					) {
+						return output.userMessages
+					}
+				}
+			}
+
 			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
 				Effect.gen(function* () {
 					const userRow = yield* query((d) =>
@@ -180,11 +200,20 @@ export const makeAgentServiceLive = (userId: string) =>
 								}),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
+						const toolUserMessages = onReply ? readToolUserMessages(result) : undefined
+						if (toolUserMessages && onReply) {
+							yield* Effect.tryPromise(async () => {
+								for (const message of toolUserMessages) {
+									await onReply(message)
+								}
+							})
+						}
+						const finalText = toolUserMessages ? "" : result.text
 
 						yield* saveMessage(conversationId, "user", content, metadata)
-						yield* saveMessage(conversationId, "assistant", result.text)
+						yield* maybeSaveAssistantMessage(conversationId, finalText)
 
-						return result.text
+						return finalText
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
@@ -214,14 +243,23 @@ export const makeAgentServiceLive = (userId: string) =>
 								}),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
+						const toolUserMessages = onReply ? readToolUserMessages(result) : undefined
+						if (toolUserMessages && onReply) {
+							yield* Effect.tryPromise(async () => {
+								for (const message of toolUserMessages) {
+									await onReply(message)
+								}
+							})
+						}
+						const finalText = toolUserMessages ? "" : result.text
 
 						// Save each message individually for accurate history
 						for (const content of messages) {
 							yield* saveMessage(conversationId, "user", content, metadata)
 						}
-						yield* saveMessage(conversationId, "assistant", result.text)
+						yield* maybeSaveAssistantMessage(conversationId, finalText)
 
-						return result.text
+						return finalText
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError

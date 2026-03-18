@@ -1,4 +1,4 @@
-import type { TaskSupervisor } from "@amby/computer"
+import type { CodexAuthSummary, TaskSupervisor } from "@amby/computer"
 import { tool } from "ai"
 import type { Context } from "effect"
 import { Effect } from "effect"
@@ -6,13 +6,29 @@ import { z } from "zod"
 
 type Supervisor = Context.Tag.Service<typeof TaskSupervisor>
 
+const CODEX_DEVICE_AUTH_SETTINGS_URL = "https://chatgpt.com/#settings/Security"
+const CODEX_DEVICE_AUTH_URL = "https://auth.openai.com/codex/device"
+
+const withUserMessages = (summary: CodexAuthSummary) =>
+	summary.status === "pending" && summary.pending?.type === "device_code"
+		? {
+				...summary,
+				userMessages: [
+					`Toggle on "Enable device code authorization for Codex" in ${CODEX_DEVICE_AUTH_SETTINGS_URL}`,
+					`Go to ${CODEX_DEVICE_AUTH_URL} and enter this code`,
+					summary.pending.userCode,
+				],
+			}
+		: summary
+
 export function createCodexAuthTools(supervisor: Supervisor, userId: string) {
 	return {
 		get_codex_auth_status: tool({
 			description:
 				"Check whether the Codex background worker is connected, whether setup is incomplete, and whether the user should finish ChatGPT login or provide an API key.",
 			inputSchema: z.object({}),
-			execute: async () => Effect.runPromise(supervisor.getCodexAuthStatus(userId)),
+			execute: async () =>
+				withUserMessages(await Effect.runPromise(supervisor.getCodexAuthStatus(userId))),
 		}),
 
 		set_codex_api_key: tool({
@@ -28,7 +44,8 @@ export function createCodexAuthTools(supervisor: Supervisor, userId: string) {
 			description:
 				"Start ChatGPT device-code login for Codex inside the user's sandbox. Prefer this for Telegram, remote, VM, or other headless flows.",
 			inputSchema: z.object({}),
-			execute: async () => Effect.runPromise(supervisor.startCodexChatgptAuth(userId)),
+			execute: async () =>
+				withUserMessages(await Effect.runPromise(supervisor.startCodexChatgptAuth(userId))),
 		}),
 
 		import_codex_chatgpt_auth_json: tool({

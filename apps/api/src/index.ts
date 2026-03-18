@@ -69,7 +69,9 @@ app.post("/telegram/webhook", async (c) => {
 			return yield* agent.handleMessage(conversationId, text, { telegram: message }, sendReply)
 		}).pipe(Effect.provide(makeAgentServiceLive(userId)))
 
-		yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, response))
+		if (response.trim()) {
+			yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, response))
+		}
 	}).pipe(
 		Effect.catchAllCause((cause) =>
 			Effect.gen(function* () {
