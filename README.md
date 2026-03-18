@@ -44,3 +44,11 @@ bun run lint            # lint (biome)
 bun run typecheck       # type-check all packages (tsc)
 bun run build           # build all packages (bun build)
 ```
+
+## Production API Logging
+
+The deployed API runs as a Cloudflare Worker from `apps/api/src/worker.ts`. Production logs are exported to PostHog through Cloudflare Workers Observability OTLP export, with the Worker config expecting a dashboard destination named `posthog-logs`.
+
+Use `${POSTHOG_HOST}/i/v1/logs` for the logs destination with `Authorization: Bearer <POSTHOG_KEY>` using the PostHog project token (`phc_...`).
+
+This is separate from the existing `posthog-node` usage in the repo, which is used for analytics/event capture and application-level agent tracing rather than as the transport for production API Worker logs.
