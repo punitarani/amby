@@ -1,5 +1,7 @@
 import { DurableObject } from "cloudflare:workers"
 import type { WorkerBindings } from "@amby/env/workers"
+import * as Sentry from "@sentry/cloudflare"
+import { setTelegramScope, setWorkerScope } from "../sentry"
 import type { BufferedMessage, TelegramFrom } from "../telegram/utils"
 
 interface SessionState {
@@ -49,6 +51,18 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 
 	async ingestMessage(payload: IngestPayload): Promise<void> {
 		await this.hydrate()
+		setTelegramScope({
+			component: "conversation-session.ingest",
+			chatId: payload.chatId,
+			from: payload.from,
+			userId: this.state.userId,
+			conversationId: this.state.conversationId,
+			attributes: {
+				telegram_message_id: payload.messageId,
+				buffered_message_count: this.state.buffer.length + 1,
+				session_status: this.state.status,
+			},
+		})
 
 		// Initialize chatId on first message
 		if (this.state.chatId === 0) {
@@ -70,11 +84,20 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 			if (this.state.activeWorkflowId && this.env.AGENT_WORKFLOW) {
 				try {
 					const instance = await this.env.AGENT_WORKFLOW.get(this.state.activeWorkflowId)
-					await instance.sendEvent({
-						type: "user-message",
-						payload: { text: payload.text, messageId: payload.messageId },
-					})
+					await Sentry.startSpan(
+						{
+							op: "workflow.event",
+							name: "AgentExecutionWorkflow.sendEvent",
+						},
+						async () => {
+							await instance.sendEvent({
+								type: "user-message",
+								payload: { text: payload.text, messageId: payload.messageId },
+							})
+						},
+					)
 				} catch (err) {
+					Sentry.captureException(err)
 					console.error("[DO] Failed to send event to workflow:", err)
 				}
 			}
@@ -90,6 +113,25 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 
 	async alarm(): Promise<void> {
 		await this.hydrate()
+		const pendingFrom = await this.ctx.storage.get<TelegramFrom>("pendingFrom")
+		if (this.state.chatId) {
+			setTelegramScope({
+				component: "conversation-session.alarm",
+				chatId: this.state.chatId,
+				from: pendingFrom ?? null,
+				userId: this.state.userId,
+				conversationId: this.state.conversationId,
+				attributes: {
+					buffered_message_count: this.state.buffer.length,
+					session_status: this.state.status,
+				},
+			})
+		} else {
+			setWorkerScope("conversation-session.alarm", {
+				buffered_message_count: this.state.buffer.length,
+				session_status: this.state.status,
+			})
+		}
 
 		if (this.state.buffer.length === 0) {
 			this.state.status = "idle"
@@ -99,7 +141,6 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 
 		// Resolve userId if not yet resolved
 		if (!this.state.userId) {
-			const pendingFrom = await this.ctx.storage.get<TelegramFrom>("pendingFrom")
 			if (pendingFrom) {
 				// userId resolution requires Effect runtime — we'll do it in the workflow
 				// For now, store the from data and let the workflow resolve it
@@ -114,18 +155,33 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		// Launch the workflow
 		if (this.env.AGENT_WORKFLOW) {
 			try {
-				const pendingFrom = await this.ctx.storage.get<TelegramFrom>("pendingFrom")
-				const instance = await this.env.AGENT_WORKFLOW.create({
-					id: crypto.randomUUID(),
-					params: {
-						chatId: this.state.chatId,
-						messages,
-						userId: this.state.userId,
-						from: pendingFrom ?? null,
+				const instance = await Sentry.startSpan(
+					{
+						op: "workflow.start",
+						name: "AgentExecutionWorkflow.create",
 					},
-				})
+					async () =>
+						this.env.AGENT_WORKFLOW?.create({
+							id: crypto.randomUUID(),
+							params: {
+								chatId: this.state.chatId,
+								messages,
+								userId: this.state.userId,
+								from: pendingFrom ?? null,
+							},
+						}),
+				)
+				if (!instance) {
+					throw new Error("AGENT_WORKFLOW binding not available")
+				}
 				this.state.activeWorkflowId = instance.id
+				Sentry.logger.info("Conversation workflow started", {
+					telegram_chat_id: this.state.chatId,
+					buffered_message_count: messages.length,
+					workflow_id: instance.id,
+				})
 			} catch (err) {
+				Sentry.captureException(err)
 				console.error("[DO] Failed to launch workflow:", err)
 				// Put messages back in buffer and retry
 				this.state.buffer = [...messages, ...this.state.buffer]
@@ -142,6 +198,16 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 
 	async completeExecution(result: { userId?: string; conversationId?: string }): Promise<void> {
 		await this.hydrate()
+		setTelegramScope({
+			component: "conversation-session.complete",
+			chatId: this.state.chatId || undefined,
+			userId: result.userId ?? this.state.userId,
+			conversationId: result.conversationId ?? this.state.conversationId,
+			attributes: {
+				buffered_message_count: this.state.buffer.length,
+				session_status: this.state.status,
+			},
+		})
 
 		// Cache resolved IDs from the workflow
 		if (result.userId) this.state.userId = result.userId
