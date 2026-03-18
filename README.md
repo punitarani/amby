@@ -44,3 +44,20 @@ bun run lint            # lint (biome)
 bun run typecheck       # type-check all packages (tsc)
 bun run build           # build all packages (bun build)
 ```
+
+## Production API Logging
+
+The deployed API runs as a Cloudflare Worker from `apps/api/src/worker.ts`. Production logs are exported to PostHog through Cloudflare Workers Observability OTLP export, with the Worker config expecting a dashboard destination named `posthog-logs`.
+
+Use `${POSTHOG_HOST}/i/v1/logs` for the logs destination with `Authorization: Bearer <POSTHOG_KEY>` using the PostHog project token (`phc_...`).
+
+The Worker also captures uncaught Hono exceptions with `app.onError(...)` via `posthog-node` error tracking. Production source maps for that Worker bundle are injected and uploaded during the deploy workflow with `@posthog/cli`.
+
+The source map upload step uses CI-only PostHog CLI credentials stored in Doppler, not the runtime ingestion vars above: `POSTHOG_CLI_PROJECT_ID` and `POSTHOG_CLI_API_KEY` (a personal API key with `error tracking write` and `organization read` scopes). The CLI host for the current US project is `https://us.posthog.com`.
+
+Reference docs:
+- https://posthog.com/docs/libraries/cloudflare-workers
+- https://posthog.com/docs/error-tracking/installation/hono
+- https://posthog.com/docs/error-tracking/upload-source-maps
+
+This is separate from the existing `posthog-node` usage in the repo for analytics/event capture and application-level agent tracing, and from the Cloudflare OTLP log-export path used for production API Worker logs.
