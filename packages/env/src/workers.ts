@@ -15,6 +15,8 @@ export interface WorkerBindings {
 	BETTER_AUTH_SECRET: string
 	BETTER_AUTH_URL?: string
 	ENABLE_CUA?: string
+	BRAINTRUST_API_KEY?: string
+	BRAINTRUST_PROJECT_NAME?: string
 	HYPERDRIVE?: { connectionString: string }
 	POSTHOG_KEY?: string
 	POSTHOG_HOST?: string
@@ -55,6 +57,8 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		BETTER_AUTH_SECRET: bindings.BETTER_AUTH_SECRET,
 		BETTER_AUTH_URL: bindings.BETTER_AUTH_URL ?? "http://localhost:3000",
 		ENABLE_CUA: bindings.ENABLE_CUA === "true",
+		BRAINTRUST_API_KEY: bindings.BRAINTRUST_API_KEY ?? "",
+		BRAINTRUST_PROJECT_NAME: bindings.BRAINTRUST_PROJECT_NAME ?? "Amby Agent",
 		POSTHOG_KEY: bindings.POSTHOG_KEY ?? "",
 		POSTHOG_HOST: bindings.POSTHOG_HOST ?? "https://us.i.posthog.com",
 	})
