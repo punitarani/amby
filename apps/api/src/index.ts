@@ -8,6 +8,7 @@ import { MemoryServiceLive } from "@amby/memory"
 import { ModelServiceLive } from "@amby/models"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
+import { homeResponse } from "./home"
 import { TelegramBot, TelegramBotLive } from "./telegram"
 import { findOrCreateUser, handleCommand, verifySecret } from "./telegram/utils"
 
@@ -24,6 +25,7 @@ const runtime = ManagedRuntime.make(SharedLive)
 
 const app = new Hono()
 
+app.get("/", (c) => c.json(homeResponse))
 app.get("/health", (c) => c.json({ status: "ok" }))
 
 // Local dev: telegram webhook processes synchronously (no queues/DO/workflows)

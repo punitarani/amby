@@ -1,5 +1,6 @@
 import type { WorkerBindings } from "@amby/env/workers"
 import { Hono } from "hono"
+import { homeResponse } from "./home"
 import { handleQueueBatch } from "./queue/consumer"
 import type { TelegramQueueMessage } from "./telegram/utils"
 import { verifySecret } from "./telegram/utils"
@@ -13,6 +14,7 @@ type Env = { Bindings: WorkerBindings }
 
 const app = new Hono<Env>()
 
+app.get("/", (c) => c.json(homeResponse))
 app.get("/health", (c) => c.json({ status: "ok" }))
 
 // Webhook handler — verify, enqueue, return 200 immediately
