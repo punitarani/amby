@@ -3,9 +3,14 @@
 import { PostHogProvider } from "@posthog/react"
 import { usePathname, useSearchParams } from "next/navigation"
 import posthog, { type PostHogConfig } from "posthog-js"
-import { type ReactNode, useEffect, useRef } from "react"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 
-import { getMarketingPageType, normalizePathname } from "@/lib/posthog"
+import {
+	getMarketingPageType,
+	isPostHogReady,
+	normalizePathname,
+	setPostHogReady,
+} from "@/lib/posthog"
 
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY ?? ""
 const POSTHOG_API_HOST = process.env.NEXT_PUBLIC_POSTHOG_API_HOST ?? ""
@@ -23,24 +28,18 @@ const getPostHogUiHost = (host: string) => {
 	return url.toString().replace(/\/+$/, "")
 }
 
-const posthogOptions: Partial<PostHogConfig> = {
-	api_host: POSTHOG_API_HOST,
-	ui_host: getPostHogUiHost(POSTHOG_HOST),
-	autocapture: true,
-	capture_pageview: false,
-	disable_session_recording: true,
-	person_profiles: "identified_only",
-	debug: process.env.NODE_ENV !== "production",
+type PostHogPageviewTrackerProps = {
+	isReady: boolean
 }
 
-const PostHogPageviewTracker = () => {
+const PostHogPageviewTracker = ({ isReady }: PostHogPageviewTrackerProps) => {
 	const pathname = usePathname()
 	const searchParams = useSearchParams()
 	const lastTrackedUrlRef = useRef<string | null>(null)
 	const search = searchParams.toString()
 
 	useEffect(() => {
-		if (!pathname || !posthog.__loaded) return
+		if (!pathname || !isReady) return
 
 		const normalizedPathname = normalizePathname(pathname)
 		const currentUrl = search ? `${normalizedPathname}?${search}` : normalizedPathname
@@ -54,7 +53,7 @@ const PostHogPageviewTracker = () => {
 			pathname: normalizedPathname,
 			search: search ? `?${search}` : "",
 		})
-	}, [pathname, search])
+	}, [isReady, pathname, search])
 
 	return null
 }
@@ -64,22 +63,45 @@ type ProvidersProps = Readonly<{
 }>
 
 export const Providers = ({ children }: ProvidersProps) => {
-	useEffect(() => {
-		if (!POSTHOG_KEY) return
+	const [isReady, setIsReady] = useState(() => isPostHogReady())
+	const posthogOptions = useMemo<Partial<PostHogConfig>>(
+		() => ({
+			api_host: POSTHOG_API_HOST,
+			ui_host: getPostHogUiHost(POSTHOG_HOST),
+			autocapture: true,
+			capture_pageview: false,
+			disable_session_recording: true,
+			person_profiles: "identified_only",
+			debug: process.env.NODE_ENV !== "production",
+			loaded: () => {
+				setPostHogReady(true)
+				setIsReady(true)
+			},
+		}),
+		[],
+	)
 
-		if (!posthog.__loaded) {
+	useEffect(() => {
+		if (!POSTHOG_KEY) {
+			setPostHogReady(false)
+			setIsReady(false)
+			return
+		}
+
+		if (!isPostHogReady()) {
 			posthog.init(POSTHOG_KEY, posthogOptions)
 			return
 		}
 
 		posthog.set_config(posthogOptions)
-	}, [])
+		setIsReady(true)
+	}, [posthogOptions])
 
 	if (!POSTHOG_KEY) return children
 
 	return (
 		<PostHogProvider client={posthog}>
-			<PostHogPageviewTracker />
+			<PostHogPageviewTracker isReady={isReady} />
 			{children}
 		</PostHogProvider>
 	)

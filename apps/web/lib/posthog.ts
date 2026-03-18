@@ -44,6 +44,14 @@ type TrackMarketingLinkClickedOptions = {
 	sourcePath?: string | null
 }
 
+let posthogReady = false
+
+export const setPostHogReady = (ready: boolean) => {
+	posthogReady = ready
+}
+
+export const isPostHogReady = () => posthogReady
+
 export const normalizePathname = (pathname: string | null | undefined) => {
 	if (!pathname || pathname === "/") return "/"
 
@@ -70,7 +78,7 @@ export const trackMarketingLinkClicked = ({
 	placement,
 	sourcePath,
 }: TrackMarketingLinkClickedOptions) => {
-	if (!posthog.__loaded) return
+	if (!isPostHogReady()) return
 
 	const resolvedSourcePath = normalizePathname(sourcePath ?? getCurrentSourcePath())
 

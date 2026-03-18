@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 
+// Next.js 16 uses `proxy.ts` as the request interception file convention.
 const POSTHOG_PROXY_PATH = "/_a"
 const INTERNAL_PATH_PREFIXES = [POSTHOG_PROXY_PATH, "/_next"] as const
 

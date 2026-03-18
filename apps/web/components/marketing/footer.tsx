@@ -22,13 +22,7 @@ export const MarketingFooter = () => {
 								href={item.href}
 								key={item.label}
 								kind="footer"
-								placement={
-									item.label === "Vision"
-										? "footer_vision"
-										: item.label === "Telegram Bot"
-											? "footer_telegram"
-											: "footer_github"
-								}
+								placement={item.analyticsPlacement}
 								rel={item.external ? "noreferrer" : undefined}
 								target={item.external ? "_blank" : undefined}
 							>

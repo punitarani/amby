@@ -54,7 +54,7 @@ export const MarketingHeader = ({
 								href={item.href}
 								key={item.label}
 								kind="nav"
-								placement="header_nav_vision"
+								placement={item.analyticsPlacement}
 							>
 								{item.label}
 							</MarketingTrackedLink>

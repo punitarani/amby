@@ -15,11 +15,7 @@ const posthogHost = normalizeUrl(process.env.POSTHOG_HOST, DEFAULT_POSTHOG_HOST)
 const getPostHogAssetsHost = (host: string) => {
 	const url = new URL(host)
 
-	if (!url.hostname.endsWith(".i.posthog.com")) {
-		throw new Error(
-			"POSTHOG_HOST must point to a PostHog Cloud ingest host such as https://us.i.posthog.com",
-		)
-	}
+	if (!url.hostname.endsWith(".i.posthog.com")) return url.toString().replace(/\/+$/, "")
 
 	url.hostname = url.hostname.replace(".i.posthog.com", "-assets.i.posthog.com")
 
