@@ -47,8 +47,8 @@ export class CodexProvider implements TaskProvider {
 		// Write prompt to file (avoids shell injection)
 		await sandbox.fs.uploadFile(Buffer.from(config.prompt), `${workspaceDir}/prompt.txt`)
 
-		// Write env vars to file (avoids shell injection)
-		const envContent = `CODEX_API_KEY=${config.apiKey}\nCODEX_HOME=${CODEX_HOME}`
+		// Codex auth lives in CODEX_HOME/auth.json inside the sandbox.
+		const envContent = `CODEX_HOME=${CODEX_HOME}`
 		await sandbox.fs.uploadFile(Buffer.from(envContent), `${taskDir}/.env`)
 
 		const codexFlags = ["--full-auto", "--output-last-message", "-o ../artifacts/result.md"].join(

@@ -22,9 +22,10 @@ export type StreamPart =
 	| { type: "tool-result"; toolName: string; result: unknown }
 
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
-import { createSandboxDelegationTools } from "./tools/delegation"
 import { createSubagentTools } from "./subagents/spawner"
 import { buildToolGroups } from "./subagents/tool-groups"
+import { createCodexAuthTools } from "./tools/codex-auth"
+import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
 
 export class AgentService extends Context.Tag("AgentService")<
@@ -122,9 +123,12 @@ export const makeAgentServiceLive = (userId: string) =>
 					const history = yield* loadHistory(conversationId)
 
 					const memoryTools = createMemoryTools(memory, userId)
-          const sandboxTools = sandbox.enabled
-            ? createSandboxDelegationTools(taskSupervisor, userId)
-            : undefined
+					const sandboxTools = sandbox.enabled
+						? createSandboxDelegationTools(taskSupervisor, userId)
+						: undefined
+					const codexAuthTools = sandbox.enabled
+						? createCodexAuthTools(taskSupervisor, userId)
+						: undefined
 					const cuaTools = enableCua
 						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 						: undefined
@@ -151,6 +155,8 @@ export const makeAgentServiceLive = (userId: string) =>
 					const tools = {
 						...delegationTools,
 						search_memories,
+						...(sandboxTools ?? {}),
+						...(codexAuthTools ?? {}),
 						...createJobTools(db, userId, userTimezone),
 						...(onReply ? createReplyTools(onReply) : {}),
 					}

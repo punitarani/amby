@@ -2,8 +2,8 @@
 
 // ── Paths ──────────────────────────────────────────────────────────────
 
-export const AGENT_HOME = "/home/user"
-export const AGENT_WORKDIR = `${AGENT_HOME}/Desktop`
+export const AGENT_HOME = "/home/agent"
+export const AGENT_WORKDIR = `${AGENT_HOME}/workspace`
 export const TASK_BASE = `${AGENT_WORKDIR}/tasks`
 export const CODEX_HOME = `${AGENT_HOME}/.codex`
 export const MANIFEST_PATH = "/.amby/harnesses.json"

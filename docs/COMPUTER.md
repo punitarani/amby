@@ -52,7 +52,7 @@ User ──> Channel ──> AgentService.handleMessage()
 | Sandbox per task or per user? | **Per user** | Reuse existing sandbox. Each task gets its own folder. `sandboxId` in DB allows per-task sandboxes later. |
 | Codex install | **HarnessInstaller** | `CodexInstaller.ensureInstalled()` runs once per sandbox lifecycle, caches result in `/.amby/harnesses.json`. |
 | Sync or async? | **Always async** | `delegate_task` returns immediately. `get_task` polls briefly (max 15s) or returns instantly. |
-| Auth | **OAuth first, API key fallback** | `getValidAccessToken()` checks for Codex OAuth tokens. Falls back to `OPENAI_API_KEY`. |
+| Auth | **Codex-managed auth cache** | Keep Codex credentials in `CODEX_HOME/auth.json`. Prefer ChatGPT device login for headless flows; use API keys for automation. |
 | Outputs | **Sandbox filesystem** | DB stores `artifactRoot` path + small `outputSummary`. Heavy outputs stay in sandbox. |
 | Provider abstraction | **Interface now, one impl** | `TaskProvider` interface with `CodexProvider`. `ClaudeCodeProvider` slots in later. |
 | Prompt/env passing | **File-based** | Prompt written to `prompt.txt`, env to `.env` — avoids shell injection via `$(cat ...)`. |
@@ -88,6 +88,7 @@ harness/                  # Task delegation: providers + supervisor
 
 ```
 delegation.ts             # delegate_task, get_task tools (wrappers around TaskSupervisor)
+codex-auth.ts             # Codex auth status + setup tools
 ```
 
 ### `packages/db/src/schema/`
@@ -263,18 +264,12 @@ Output: { taskId, status, outputSummary, error, exitCode, startedAt, completedAt
 
 ## Auth Flow
 
-```
-resolveAuth()
-  │
-  ├─ getValidAccessToken()  ── token found + valid ──> use as CODEX_API_KEY (authMode: chatgpt_account)
-  │                          ── token expired ──> refresh via OpenAI OAuth ──> use refreshed token
-  │                          ── no token ──> fall through
-  │
-  └─ env.OPENAI_API_KEY     ── exists ──> use as CODEX_API_KEY (authMode: api_key)
-                             ── missing ──> throw error
-```
+Codex auth now follows the official Codex CLI model instead of a custom OAuth implementation:
 
-OAuth tokens are stored at `~/.amby/openai-tokens.json` on the host. Users authenticate via `amby auth openai` (PKCE OAuth flow). Tokens auto-refresh.
+- **ChatGPT login**: Start `codex login --device-auth` inside the sandbox and relay the verification URL + one-time code to the user. Codex writes the resulting session to `CODEX_HOME/auth.json`.
+- **API key**: Write the official API-key auth cache shape to `CODEX_HOME/auth.json` and record only non-secret metadata in the DB.
+- **Persistence**: Store auth state and pending device-login metadata in `sandboxes.auth_config`, while the actual credentials stay in the sandbox filesystem.
+- **Fallback**: If device auth is unavailable, import a trusted `~/.codex/auth.json` from another machine rather than implementing a custom OAuth callback flow.
 
 ---
 

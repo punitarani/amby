@@ -3,7 +3,6 @@ import type { Sandbox } from "@daytonaio/sdk"
 export interface TaskConfig {
 	taskId: string
 	prompt: string
-	apiKey: string
 	authMode: "api_key" | "chatgpt_account"
 	needsBrowser: boolean
 	model?: string

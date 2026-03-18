@@ -57,7 +57,7 @@ export const sandboxImage = Image.base("ubuntu:24.04")
 	// agent — tool-calling user for the AI agent
 	.runCommands(
 		"useradd -m -s /bin/bash -d /home/agent agent " +
-			"&& mkdir -p /home/agent/data /home/agent/.local/bin " +
+			"&& mkdir -p /home/agent/data /home/agent/.local/bin /home/agent/workspace " +
 			"&& chown -R agent:agent /home/agent",
 	)
 	// agent can read user's home (not write)
