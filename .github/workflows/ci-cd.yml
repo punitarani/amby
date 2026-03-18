@@ -132,6 +132,7 @@ jobs:
       - name: Inject and upload PostHog source maps
         run: |
           doppler run -- bash -lc '
+            set -euo pipefail
             cd apps/api
             # PostHog inject intentionally mutates the built worker.js bundle to stamp chunk IDs.
             # The injected dist-worker artifact is the exact bundle deployed below with --no-bundle.
