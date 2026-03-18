@@ -22,24 +22,6 @@ export function createReplyTools(sendReply: ReplyFn) {
 	}
 }
 
-export type SubAgentSpawner = (task: string, context?: string) => Promise<string>
-
-export function createDelegationTools(spawnSubAgent: SubAgentSpawner) {
-	return {
-		delegate_task: tool({
-			description: "Delegate a complex sub-task to a specialized sub-agent",
-			inputSchema: z.object({
-				task: z.string().describe("The sub-task to delegate"),
-				context: z.string().optional().describe("Additional context for the sub-agent"),
-			}),
-			execute: async ({ task, context }) => {
-				const result = await spawnSubAgent(task, context)
-				return { completed: true, result }
-			},
-		}),
-	}
-}
-
 export function createJobTools(db: Database, userId: string, userTimezone?: string) {
 	return {
 		schedule_job: tool({

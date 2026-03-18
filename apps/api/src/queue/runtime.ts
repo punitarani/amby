@@ -1,5 +1,5 @@
 import { AuthServiceLive } from "@amby/auth"
-import { SandboxServiceLive } from "@amby/computer"
+import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { makeDbServiceFromHyperdrive } from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
 import { MemoryServiceLive } from "@amby/memory"
@@ -18,11 +18,12 @@ export const makeRuntimeForConsumer = (bindings: WorkerBindings) => {
 
 	const SharedLive = Layer.mergeAll(
 		MemoryServiceLive,
-		SandboxServiceLive,
+		TaskSupervisorLive,
 		ModelServiceLive,
 		AuthServiceLive,
 		TelegramBotLite,
 	).pipe(
+		Layer.provideMerge(SandboxServiceLive),
 		Layer.provideMerge(makeDbServiceFromHyperdrive(connectionString)),
 		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
 	)

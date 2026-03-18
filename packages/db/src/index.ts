@@ -1,5 +1,5 @@
 export { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm"
 export * from "./errors"
-export type { JobStatus } from "./schema"
+export type { JobStatus, TaskStatus } from "./schema"
 export * as schema from "./schema"
 export * from "./service"
