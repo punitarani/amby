@@ -1,7 +1,6 @@
-import Link from "next/link"
-
 import { marketingBrandLine, marketingFooterLinks } from "@/components/marketing/constants"
 import { GitHubIcon, TelegramIcon } from "@/components/marketing/social-icons"
+import { MarketingTrackedLink } from "./tracked-link"
 
 export const MarketingFooter = () => {
 	return (
@@ -17,10 +16,19 @@ export const MarketingFooter = () => {
 
 					<div className="flex flex-wrap items-center gap-x-8 gap-y-3 border-t border-foreground/8 pt-6">
 						{marketingFooterLinks.map((item) => (
-							<Link
+							<MarketingTrackedLink
 								className="inline-flex items-center gap-2 text-[0.98rem] leading-7 text-foreground/72 transition hover:text-primary"
+								external={item.external}
 								href={item.href}
 								key={item.label}
+								kind="footer"
+								placement={
+									item.label === "Vision"
+										? "footer_vision"
+										: item.label === "Telegram Bot"
+											? "footer_telegram"
+											: "footer_github"
+								}
 								rel={item.external ? "noreferrer" : undefined}
 								target={item.external ? "_blank" : undefined}
 							>
@@ -30,7 +38,7 @@ export const MarketingFooter = () => {
 									<GitHubIcon className="size-4" />
 								) : null}
 								{item.label}
-							</Link>
+							</MarketingTrackedLink>
 						))}
 					</div>
 				</div>
