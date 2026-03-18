@@ -51,4 +51,8 @@ The deployed API runs as a Cloudflare Worker from `apps/api/src/worker.ts`. Prod
 
 Use `${POSTHOG_HOST}/i/v1/logs` for the logs destination with `Authorization: Bearer <POSTHOG_KEY>` using the PostHog project token (`phc_...`).
 
-This is separate from the existing `posthog-node` usage in the repo, which is used for analytics/event capture and application-level agent tracing rather than as the transport for production API Worker logs.
+The Worker also captures uncaught Hono exceptions with `app.onError(...)` via `posthog-node` error tracking. Production source maps for that Worker bundle are injected and uploaded during the deploy workflow with `@posthog/cli`.
+
+The source map upload step uses CI-only PostHog CLI credentials, not the runtime ingestion vars above: `POSTHOG_CLI_PROJECT_ID` and `POSTHOG_CLI_API_KEY` (a personal API key with `error tracking write` and `organization read` scopes). The CLI host for the current US project is `https://us.posthog.com`.
+
+This is separate from the existing `posthog-node` usage in the repo for analytics/event capture and application-level agent tracing, and from the Cloudflare OTLP log-export path used for production API Worker logs.

@@ -1,6 +1,8 @@
 import type { WorkerBindings } from "@amby/env/workers"
 import { Hono } from "hono"
+import { HTTPException } from "hono/http-exception"
 import { homeResponse } from "./home"
+import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
 import type { TelegramQueueMessage } from "./telegram/utils"
 import { verifySecret } from "./telegram/utils"
@@ -13,6 +15,39 @@ export { SandboxProvisionWorkflow } from "./workflows/sandbox-provision"
 type Env = { Bindings: WorkerBindings }
 
 const app = new Hono<Env>()
+
+app.onError(async (err, c) => {
+	const status = err instanceof HTTPException ? err.status : 500
+
+	console.error("[API] Unhandled Hono error:", err)
+
+	const posthogKey = c.env.POSTHOG_KEY ?? ""
+	if (status >= 500 && posthogKey) {
+		try {
+			const posthog = getPostHogClient(posthogKey, c.env.POSTHOG_HOST ?? "https://us.i.posthog.com")
+			posthog.captureException(err, undefined, {
+				framework: "hono",
+				runtime: "cloudflare-worker",
+				status,
+				method: c.req.method,
+				path: c.req.path,
+				url: c.req.url,
+				cf_ray: c.req.header("cf-ray") ?? null,
+				content_type: c.req.header("content-type") ?? null,
+				user_agent: c.req.header("user-agent") ?? null,
+			})
+			await posthog.flush()
+		} catch (captureError) {
+			console.error("[API] Failed to capture exception in PostHog:", captureError)
+		}
+	}
+
+	if (err instanceof HTTPException) {
+		return err.getResponse()
+	}
+
+	return c.json({ error: "Internal Server Error" }, 500)
+})
 
 app.get("/", (c) => c.json(homeResponse))
 app.get("/health", (c) => c.json({ status: "ok" }))
