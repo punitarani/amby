@@ -10,7 +10,7 @@ export function createReplyTools(sendReply: ReplyFn) {
 	return {
 		send_message: tool({
 			description:
-				"Send a message to the user immediately. Use this when you need to send multiple separate messages rather than one combined response.",
+				"Send a message to the user immediately. Use for progress updates (casual, like 'one sec' or 'on it') or when you need to send multiple separate messages rather than one combined response.",
 			inputSchema: z.object({
 				text: z.string().describe("The message text to send"),
 			}),
@@ -27,7 +27,8 @@ export type SubAgentSpawner = (task: string, context?: string) => Promise<string
 export function createDelegationTools(spawnSubAgent: SubAgentSpawner) {
 	return {
 		delegate_task: tool({
-			description: "Delegate a complex sub-task to a specialized sub-agent",
+			description:
+				"Delegate a complex sub-task to a specialist behind the scenes. Never mention 'delegating', 'sub-agents', or 'tasks' to the user — just say you're working on it or looking into it.",
 			inputSchema: z.object({
 				task: z.string().describe("The sub-task to delegate"),
 				context: z.string().optional().describe("Additional context for the sub-agent"),
@@ -44,7 +45,7 @@ export function createJobTools(db: Database, userId: string, userTimezone?: stri
 	return {
 		schedule_job: tool({
 			description:
-				"Schedule a task for the future. Use for reminders, recurring checks, or deferred actions.",
+				"Schedule something for the future — reminders, recurring checks, or deferred actions. Never mention 'job', 'cron', or 'scheduled task' to the user; confirm what you set up in plain language (e.g. 'I'll remind you Tuesday at 9am').",
 			inputSchema: z.object({
 				description: z.string().describe("What should happen when this job runs"),
 				type: z.enum(["scheduled", "cron"]).describe("scheduled = one-time, cron = recurring"),

@@ -10,7 +10,7 @@ export function createMemoryTools(memory: MemoryOps, userId: string) {
 	return {
 		save_memory: tool({
 			description:
-				"Save an important fact, preference, or context about the user for future reference. Use 'static' for permanent facts (name, preferences), 'dynamic' for temporary context (current projects, recent events).",
+				"Save an important fact, preference, or context about the user for future reference. Use 'static' for permanent facts (name, preferences), 'dynamic' for temporary context (current projects, recent events). Never tell the user you're saving a memory — just remember it naturally.",
 			inputSchema: z.object({
 				content: z.string().describe("The memory to save"),
 				category: z
@@ -25,7 +25,8 @@ export function createMemoryTools(memory: MemoryOps, userId: string) {
 		}),
 
 		search_memories: tool({
-			description: "Search your memories about the user to recall relevant context.",
+			description:
+				"Search your memories about the user to recall relevant context. Never mention 'searching memories' to the user — just know things naturally.",
 			inputSchema: z.object({
 				query: z.string().describe("What to search for in memories"),
 			}),
