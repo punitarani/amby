@@ -22,6 +22,8 @@ export type StreamPart =
 	| { type: "tool-result"; toolName: string; result: unknown }
 
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
+import { createSubagentTools } from "./subagents/spawner"
+import { buildToolGroups } from "./subagents/tool-groups"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
 
 export class AgentService extends Context.Tag("AgentService")<
@@ -117,15 +119,11 @@ export const makeAgentServiceLive = (userId: string) =>
 
 					const history = yield* loadHistory(conversationId)
 
-					const tools = {
-						...createMemoryTools(memory, userId),
-						...computer.tools,
-						...createJobTools(db, userId, userTimezone),
-						...(onReply ? createReplyTools(onReply) : {}),
-						...(enableCua
-							? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
-							: {}),
-					}
+					const memoryTools = createMemoryTools(memory, userId)
+					const cuaTools = enableCua
+						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
+						: undefined
+					const toolGroups = buildToolGroups(memoryTools, computer.tools, cuaTools)
 
 					const basePrompt = enableCua
 						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
@@ -133,6 +131,24 @@ export const makeAgentServiceLive = (userId: string) =>
 					const systemPrompt = memoryContext
 						? `${basePrompt}\n\n# User Memory Context\n${memoryContext}`
 						: basePrompt
+
+					const sharedContext = [
+						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
+						`# Current Date/Time\n${formatted} (${userTimezone})`,
+					]
+						.filter(Boolean)
+						.join("\n\n")
+
+					const delegationTools = createSubagentTools(baseModel, toolGroups, sharedContext)
+
+					// Orchestrator gets: delegation tools + read-only memory search + jobs + reply
+					const { search_memories } = memoryTools
+					const tools = {
+						...delegationTools,
+						search_memories,
+						...createJobTools(db, userId, userTimezone),
+						...(onReply ? createReplyTools(onReply) : {}),
+					}
 
 					return { tools, systemPrompt, history }
 				})

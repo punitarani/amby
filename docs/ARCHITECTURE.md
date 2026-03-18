@@ -360,48 +360,38 @@ user replies, the exchange continues reactively in that same conversation thread
 
 ### @amby/agent
 
-The highest-level package. Brings everything together into a single coherent agent that any app (CLI, API server, etc.)
-can instantiate.
+The highest-level package. Brings everything together into a multi-agent orchestrator that any app (CLI, API server,
+etc.) can instantiate. See [AGENT.md](./AGENT.md) for the full multi-agent architecture.
 
-**Exports:** `AmbyAgent` (main agent class), `createAgent(config)` (factory function).
+**Exports:** `AgentService` (Effect service tag), `makeAgentServiceLive(userId)` (service factory), subagent definitions
+and utilities.
 
 #### How It Works
 
-The agent is built on Vercel AI SDK primitives (`generateText` / `streamText` with multi-step tool loops). It combines:
+The agent uses a **multi-agent orchestration** pattern built on Vercel AI SDK v6 primitives. A single orchestrator agent
+receives user messages and delegates work to specialized subagents, each implemented as a tool that runs its own
+`generateText()` loop with restricted tools and a focused system prompt.
 
-1. **System prompt** — personality, capabilities, constraints, injected memory context
-2. **Tools** — functions the agent can call to act on the world
-3. **Memory integration** — automatic context injection via `withMemory` wrapper
+1. **Orchestrator** — receives messages, decides how to handle them, delegates to subagents, synthesizes responses
+2. **Subagents** — research, builder, planner, computer (CUA), memory manager — each with scoped tools and prompts
+3. **Memory integration** — automatic context injection into orchestrator and subagent prompts
 4. **Job runner** — polls for and executes scheduled tasks in the background
 
-#### Tools
+#### Orchestrator Tools
 
-| Tool              | Source Package   | Description                               |
-|-------------------|------------------|-------------------------------------------|
-| `search_memories` | `@amby/memory`   | Search stored memories by query           |
-| `save_memory`     | `@amby/memory`   | Store a new memory                        |
-| `execute_command` | `@amby/computer` | Run a shell command in the sandbox        |
-| `read_file`       | `@amby/computer` | Read a file from the sandbox              |
-| `write_file`      | `@amby/computer` | Write a file to the sandbox               |
-| `schedule_job`    | `@amby/agent`    | Schedule a future task or reminder        |
-| `delegate_task`   | `@amby/agent`    | Delegate a sub-task to a child workflow   |
-| `send_message`    | `@amby/channels` | Proactively message the user on a channel |
+| Tool                       | Type       | Description                                        |
+|----------------------------|------------|----------------------------------------------------|
+| `delegate_research`        | subagent   | Gather info, read files, search memories            |
+| `delegate_builder`         | subagent   | Create/modify files, run code, install packages     |
+| `delegate_planner`         | subagent   | Break down complex tasks (pure reasoning)           |
+| `delegate_computer`        | subagent   | GUI interaction via desktop (when CUA enabled)      |
+| `delegate_memory_manager`  | subagent   | Save and organize user memories                     |
+| `search_memories`          | direct     | Read-only memory search (for pre-delegation context)|
+| `schedule_job`             | direct     | Schedule a future task or reminder                  |
+| `set_timezone`             | direct     | Set the user's IANA timezone                        |
+| `send_message`             | direct     | Send an immediate message to the user               |
 
-Tools are defined using the Vercel AI SDK `tool()` helper with Zod input schemas. The agent decides which tools to use
-based on the user's message and memory context.
-
-#### Agent Instantiation
-
-```
-createAgent({
-  userId:            string
-  model:             LanguageModel           // from @amby/models registry
-  db:                DrizzleClient           // from @amby/db
-  memoryRepository:  MemoryRepository        // from @amby/memory
-  sandboxManager:    SandboxManager          // from @amby/computer
-  channelRegistry:   ChannelRegistry         // from @amby/channels
-})
-```
+Tools are defined using the Vercel AI SDK `tool()` helper with Zod input schemas.
 
 The agent is **stateless between requests** — all state lives in the database and memory system. The agent process can
 restart without losing context.
@@ -771,18 +761,21 @@ amby/
 │       ├── package.json
 │       ├── tsconfig.json
 │       └── src/
-│           ├── agent.ts            ← Core AmbyAgent class
+│           ├── agent.ts            ← Orchestrator wiring (prepareContext, handleMessage)
+│           ├── subagents/
+│           │   ├── definitions.ts  ← Subagent types and 5 definitions
+│           │   ├── tool-groups.ts  ← Tool grouping and resolution
+│           │   ├── spawner.ts      ← Factory that creates delegate_* tools
+│           │   └── index.ts
 │           ├── tools/
-│           │   ├── memory.ts       ← search_memories, save_memory
-│           │   ├── computer.ts     ← execute_command, read_file, write_file
-│           │   ├── messaging.ts    ← schedule_job, delegate_task
+│           │   ├── messaging.ts    ← send_message, schedule_job, set_timezone
 │           │   └── index.ts
 │           ├── jobs/
 │           │   ├── scheduler.ts    ← Job scheduling logic
 │           │   ├── runner.ts       ← Job polling and execution
 │           │   └── index.ts
 │           ├── prompts/
-│           │   └── system.ts       ← System prompt templates
+│           │   └── system.ts       ← System prompt templates (orchestrator + CUA)
 │           └── index.ts
 ├── docker/
 │   └── sandbox/
