@@ -1,6 +1,6 @@
 # Agent Architecture: Multi-Agent Orchestration
 
-The Amby agent uses a multi-agent orchestration pattern where a single **orchestrator** delegates work to specialized **subagents**. Each subagent is implemented as a tool that internally runs its own `generateText()` loop with restricted tools and a focused system prompt. This follows the AI SDK v6 idiom of subagents-as-tools — no custom classes or abstractions needed.
+The Amby agent uses a multi-agent orchestration pattern where a single **orchestrator** delegates work to specialized **subagents**. The orchestrator and each subagent are backed by AI SDK v6 `ToolLoopAgent` instances with scoped tools and focused instructions. Subagents are still exposed to the orchestrator as tools, so the overall architecture remains subagents-as-tools.
 
 The user never sees any of this. To them, Amby is just one person getting things done.
 
@@ -32,7 +32,7 @@ The orchestrator keeps lightweight coordination tools (reply, jobs, read-only me
 3. Orchestrator decides how to handle — answer directly or delegate
 4. If delegating: calls e.g. `delegate_builder({ task: "...", context: "..." })`
 5. Subagent receives: its own system prompt + shared context (memories, datetime) + task
-6. Subagent runs its tool loop (up to `maxSteps`), interacting with sandbox/memory/etc.
+6. Subagent runs its `ToolLoopAgent` loop (up to `maxSteps`), interacting with sandbox/memory/etc.
 7. Subagent's `result.text` returned as tool result to orchestrator
 8. Orchestrator synthesizes the summary into a natural, user-facing response
 
@@ -91,7 +91,8 @@ createSubagentTools(model: LanguageModel, toolGroups: ToolGroups, sharedContext:
 Each delegation tool:
 - Has schema `{ task: string, context?: string }`
 - Resolves its tools from `toolGroups` using the definition's `toolKeys`
-- Calls `generateText()` with the subagent's system prompt + shared context + task as user message
+- Creates a `ToolLoopAgent` with the subagent's instructions, scoped tools, and `maxSteps`
+- Calls `subagent.generate({ prompt, abortSignal })` so cancellation propagates through tool execution
 - Returns `{ summary: result.text }` on success
 - Returns `{ error: true, summary: "..." }` on failure (errors don't crash the orchestrator)
 - Skips the `computer` subagent entirely when CUA tools aren't available
@@ -134,7 +135,7 @@ The orchestrator's system prompt (`packages/agent/src/prompts/system.ts`) includ
 Subagents cannot spawn other subagents. The orchestrator chains them sequentially when needed (e.g., `delegate_planner` then `delegate_builder`). Simpler, easier to debug.
 
 ### Same model for all agents
-All subagents use the base model (`models.getModel()`). The `modelId` field exists in `SubagentDef` for future per-agent overrides but isn't wired yet. Subagents receive the untraced model — PostHog tracing only covers orchestrator-level LLM calls, which avoids double-counting tokens but means subagent calls aren't individually trackable in analytics.
+All subagents use the base model (`models.getModel()`). The `modelId` field exists in `SubagentDef` for future per-agent overrides but isn't wired yet. Braintrust wraps the AI SDK `ToolLoopAgent` class, so orchestrator and subagent runs both emit traced agent spans; the orchestrator also adds a parent span with request metadata and lightweight step summaries.
 
 ### Read-only memory on orchestrator
 The orchestrator gets `search_memories` directly (destructured from the full memory tools) rather than the full `save_memory` + `search_memories` set. This lets the orchestrator check user context before deciding how to delegate without being tempted to write memories itself.
@@ -171,5 +172,6 @@ The research agent receives the same `execute_command` tool as the builder but i
 | `packages/agent/src/subagents/spawner.ts` | Factory that creates delegation tools |
 | `packages/agent/src/subagents/index.ts` | Barrel exports |
 | `packages/agent/src/agent.ts` | Orchestrator wiring in `prepareContext()` |
+| `packages/agent/src/braintrust.ts` | Braintrust-backed AI SDK wrapper + parent span helper |
 | `packages/agent/src/prompts/system.ts` | Orchestrator system prompt with delegation instructions |
 | `packages/agent/src/tools/messaging.ts` | `createReplyTools` + `createJobTools` (orchestrator-only) |

@@ -3,7 +3,7 @@ import { flush, initLogger, traced, wrapAISDK } from "braintrust"
 
 const instrumentedAI = wrapAISDK(ai)
 
-export const { generateText, streamText } = instrumentedAI
+export const { ToolLoopAgent } = instrumentedAI
 export const { stepCountIs, tool } = ai
 
 export const initializeBraintrust = (apiKey?: string, projectName = "Amby Agent") => {
