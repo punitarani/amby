@@ -33,7 +33,7 @@ export const getSentryOptions = (env: WorkerBindings): CloudflareOptions | undef
 		environment: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV ?? "production",
 		release: env.SENTRY_RELEASE ?? env.CF_VERSION_METADATA?.id,
 		enableLogs: true,
-		tracesSampleRate: 1.0,
+		tracesSampleRate: env.NODE_ENV === "production" ? 0.2 : 1.0,
 		integrations: [Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] })],
 		beforeSend: (event) => {
 			if (!event.request?.url?.includes("/telegram/webhook")) {
@@ -52,8 +52,11 @@ export const getSentryOptions = (env: WorkerBindings): CloudflareOptions | undef
 	}
 }
 
-export const getSentryOptionsOrFallback = (env: WorkerBindings): CloudflareOptions =>
-	getSentryOptions(env) ?? {}
+export const getSentryOptionsOrFallback = (env: WorkerBindings): CloudflareOptions => {
+	const opts = getSentryOptions(env)
+	if (!opts) return { enabled: false }
+	return opts
+}
 
 const setScopeAttributes = (scope: Scope, attributes: Record<string, ScopeAttribute>) => {
 	scope.setAttributes(withDefinedAttributes(attributes))

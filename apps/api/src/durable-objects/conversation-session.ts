@@ -153,15 +153,16 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		this.state.status = "processing"
 
 		// Launch the workflow
-		if (this.env.AGENT_WORKFLOW) {
+		const workflow = this.env.AGENT_WORKFLOW
+		if (workflow) {
 			try {
 				const instance = await Sentry.startSpan(
 					{
 						op: "workflow.start",
 						name: "AgentExecutionWorkflow.create",
 					},
-					async () =>
-						this.env.AGENT_WORKFLOW?.create({
+					() =>
+						workflow.create({
 							id: crypto.randomUUID(),
 							params: {
 								chatId: this.state.chatId,
@@ -171,9 +172,6 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 							},
 						}),
 				)
-				if (!instance) {
-					throw new Error("AGENT_WORKFLOW binding not available")
-				}
 				this.state.activeWorkflowId = instance.id
 				Sentry.logger.info("Conversation workflow started", {
 					telegram_chat_id: this.state.chatId,

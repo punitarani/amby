@@ -119,18 +119,6 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 					}
 				},
 			)
-			setTelegramScope({
-				component: "workflow.agent_execution",
-				chatId,
-				from,
-				userId,
-				conversationId,
-				attributes: {
-					workflow_instance_id: event.instanceId,
-					message_count: messages.length,
-					is_sub_agent: Boolean(isSubAgent),
-				},
-			})
 			Sentry.logger.info("Agent execution completed", {
 				workflow_instance_id: event.instanceId,
 				message_count: messages.length,

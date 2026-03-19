@@ -6,12 +6,7 @@ import { ConversationSession as ConversationSessionBase } from "./durable-object
 import { homeResponse } from "./home"
 import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
-import {
-	getSentryOptions,
-	getSentryOptionsOrFallback,
-	setTelegramScope,
-	setWorkerScope,
-} from "./sentry"
+import { getSentryOptions, getSentryOptionsOrFallback, setTelegramScope } from "./sentry"
 import type { TelegramQueueMessage } from "./telegram/utils"
 import { verifySecret } from "./telegram/utils"
 import { AgentExecutionWorkflow as AgentExecutionWorkflowBase } from "./workflows/agent-execution"
@@ -36,18 +31,10 @@ type Env = { Bindings: WorkerBindings; Variables: { posthogDistinctId?: string }
 const app = new Hono<Env>()
 
 app.use("*", async (c, next) => {
-	const spanName = `${c.req.method} ${c.req.path}`
-	const scope = setWorkerScope("worker.fetch", {
-		http_method: c.req.method,
-		http_path: c.req.path,
-	})
-	scope.setTransactionName(spanName)
-
 	const activeSpan = Sentry.getActiveSpan()
 	if (activeSpan) {
-		Sentry.updateSpanName(Sentry.getRootSpan(activeSpan), spanName)
+		Sentry.updateSpanName(Sentry.getRootSpan(activeSpan), `${c.req.method} ${c.req.path}`)
 	}
-
 	await next()
 })
 
@@ -58,7 +45,7 @@ app.onError(async (err, c) => {
 	if (activeSpan) {
 		Sentry.setHttpStatus(activeSpan, status)
 	}
-	if (!(err instanceof HTTPException) || status >= 500 || status < 300) {
+	if (!(err instanceof HTTPException) || status >= 500) {
 		Sentry.captureException(err)
 	}
 
