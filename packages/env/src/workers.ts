@@ -9,6 +9,9 @@ export interface WorkerBindings {
 	DAYTONA_API_KEY?: string
 	DAYTONA_API_URL?: string
 	DAYTONA_TARGET?: string
+	SENTRY_DSN?: string
+	SENTRY_ENVIRONMENT?: string
+	SENTRY_RELEASE?: string
 	TELEGRAM_BOT_TOKEN?: string
 	TELEGRAM_WEBHOOK_SECRET?: string
 	DATABASE_URL?: string
@@ -20,6 +23,7 @@ export interface WorkerBindings {
 	HYPERDRIVE?: { connectionString: string }
 	POSTHOG_KEY?: string
 	POSTHOG_HOST?: string
+	CF_VERSION_METADATA?: { id?: string }
 
 	// Cloudflare primitives — typed structurally for portability
 	TELEGRAM_QUEUE?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }

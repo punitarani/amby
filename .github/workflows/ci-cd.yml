@@ -112,20 +112,21 @@ jobs:
       - name: Sync secrets to Cloudflare
         run: |
           doppler secrets download --no-file --format json | \
-            jq -c 'with_entries(select(.key | test("^(NODE_ENV|OPENROUTER_API_KEY|OPENAI_API_KEY|CARTESIA_API_KEY|DAYTONA_API_KEY|DAYTONA_API_URL|DAYTONA_TARGET|TELEGRAM_BOT_TOKEN|TELEGRAM_WEBHOOK_SECRET|DATABASE_URL|BETTER_AUTH_SECRET|BETTER_AUTH_URL|ENABLE_CUA|POSTHOG_KEY|POSTHOG_HOST)$")))' | \
+            jq -c 'with_entries(select(.key | test("^(NODE_ENV|OPENROUTER_API_KEY|OPENAI_API_KEY|CARTESIA_API_KEY|DAYTONA_API_KEY|DAYTONA_API_URL|DAYTONA_TARGET|SENTRY_DSN|SENTRY_ENVIRONMENT|TELEGRAM_BOT_TOKEN|TELEGRAM_WEBHOOK_SECRET|DATABASE_URL|BETTER_AUTH_SECRET|BETTER_AUTH_URL|ENABLE_CUA|POSTHOG_KEY|POSTHOG_HOST)$")))' | \
             (cd apps/api && npx wrangler secret bulk)
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      - name: Build Worker bundle for PostHog source maps
+      - name: Build Worker bundle for source maps
         run: |
           cd apps/api
           rm -rf dist-worker
-          npx wrangler versions upload --dry-run --outdir dist-worker
+          npx wrangler versions upload --dry-run --outdir dist-worker --var SENTRY_RELEASE:"$GITHUB_SHA"
           test -f dist-worker/worker.js
         env:
+          GITHUB_SHA: ${{ github.sha }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
@@ -150,6 +151,27 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           POSTHOG_CLI_HOST: https://us.posthog.com
 
+      - name: Upload Sentry source maps
+        run: |
+          doppler run -- bash -lc '
+            set -euo pipefail
+            cd apps/api
+            test -f dist-worker/worker.js
+            test -f dist-worker/worker.js.map
+            export SENTRY_RELEASE="$GITHUB_SHA"
+            if ! npx sentry-cli releases info "$SENTRY_RELEASE" >/dev/null 2>&1; then
+              npx sentry-cli releases new "$SENTRY_RELEASE"
+            fi
+            npx sentry-cli sourcemaps upload \
+              --release "$SENTRY_RELEASE" \
+              --strip-prefix "$PWD" \
+              dist-worker
+            npx sentry-cli releases finalize "$SENTRY_RELEASE"
+          '
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+          GITHUB_SHA: ${{ github.sha }}
+
       - name: Upload Worker Version
         id: upload
         run: |
@@ -158,6 +180,7 @@ jobs:
           OUTPUT=$(npx wrangler versions upload dist-worker/worker.js \
             --no-bundle \
             --upload-source-maps \
+            --var SENTRY_RELEASE:"$GITHUB_SHA" \
             --message "${{ steps.metadata.outputs.message }}" \
             --tag "${{ steps.metadata.outputs.tag }}" 2>&1)
           echo "$OUTPUT"
@@ -165,6 +188,7 @@ jobs:
           echo "$OUTPUT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
         env:
+          GITHUB_SHA: ${{ github.sha }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 

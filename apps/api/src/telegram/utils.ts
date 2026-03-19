@@ -1,6 +1,5 @@
 import { timingSafeEqual } from "node:crypto"
-import { AgentService, makeAgentServiceLive } from "@amby/agent"
-import { and, DbService, eq, schema } from "@amby/db"
+import { and, DbService, desc, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import { Effect } from "effect"
@@ -185,10 +184,19 @@ export const handleCommand = (
 
 		switch (command) {
 			case "/start": {
-				yield* Effect.gen(function* () {
-					const agent = yield* AgentService
-					yield* agent.ensureConversation("telegram")
-				}).pipe(Effect.provide(makeAgentServiceLive(userId)))
+				const { db } = yield* DbService
+				yield* Effect.tryPromise(async () =>
+					db.transaction(async (tx) => {
+						const existing = await tx
+							.select({ id: schema.conversations.id })
+							.from(schema.conversations)
+							.where(eq(schema.conversations.userId, userId))
+							.orderBy(desc(schema.conversations.updatedAt))
+							.limit(1)
+						if (existing[0]) return
+						await tx.insert(schema.conversations).values({ userId, channelType: "telegram" })
+					}),
+				)
 
 				// Kick off sandbox provisioning via durable workflow
 				if (options?.sandboxWorkflow) {

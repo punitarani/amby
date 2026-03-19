@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import { jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
 import { users } from "./users"
 
 export const sandboxes = pgTable("sandboxes", {
@@ -13,6 +13,7 @@ export const sandboxes = pgTable("sandboxes", {
 		.$type<"creating" | "running" | "stopped" | "archived" | "error">()
 		.notNull()
 		.default("creating"),
+	authConfig: jsonb("auth_config").$type<Record<string, unknown>>(),
 	lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })

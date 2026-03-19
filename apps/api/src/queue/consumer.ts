@@ -1,4 +1,6 @@
 import type { WorkerBindings } from "@amby/env/workers"
+import * as Sentry from "@sentry/cloudflare"
+import { setTelegramScope, setWorkerScope } from "../sentry"
 import type { TelegramQueueMessage } from "../telegram/utils"
 import { handleCommand } from "../telegram/utils"
 import { makeRuntimeForConsumer } from "./runtime"
@@ -10,56 +12,107 @@ export async function handleQueueBatch(
 	env: WorkerBindings,
 ) {
 	for (const msg of batch.messages) {
-		const { update } = msg.body
-		const message = update.message
+		await Sentry.withIsolationScope(async () => {
+			const { update, receivedAt } = msg.body
+			const message = update.message
 
-		if (!message?.from || !message.chat?.id) {
-			msg.ack()
-			continue
-		}
+			setWorkerScope("telegram.queue", {
+				queue_batch_size: batch.messages.length,
+				queue_received_at: receivedAt,
+				telegram_update_id: update.update_id,
+			})
 
-		const text = message.text ?? ""
-		const chatId = message.chat.id
-		const from = message.from
-
-		if (COMMANDS.has(text)) {
-			// Handle simple commands inline — fast, stateless
-			const runtime = makeRuntimeForConsumer(env)
-			try {
-				await runtime.runPromise(
-					handleCommand(text, from, chatId, { sandboxWorkflow: env.SANDBOX_WORKFLOW }),
-				)
-			} catch (err) {
-				console.error(`[Queue] Command ${text} failed for chat ${chatId}:`, err)
-			} finally {
-				await runtime.dispose()
-			}
-		} else if (message.text) {
-			// Route text messages to ConversationSession Durable Object
-			const doBinding = env.CONVERSATION_SESSION
-			if (!doBinding) {
-				console.error("[Queue] CONVERSATION_SESSION binding not available")
+			if (!message?.from || !message.chat?.id) {
 				msg.ack()
-				continue
+				return
 			}
 
-			try {
-				const doId = doBinding.idFromName(String(chatId))
-				const stub = doBinding.get(doId)
-				await stub.ingestMessage({
-					text: message.text,
-					chatId,
-					messageId: message.message_id,
-					date: message.date,
-					from,
-				})
-			} catch (err) {
-				console.error(`[Queue] Failed to route message to DO for chat ${chatId}:`, err)
-				msg.retry()
-				continue
-			}
-		}
+			const text = message.text ?? ""
+			const chatId = message.chat.id
+			const from = message.from
+			const isCommand = COMMANDS.has(text)
 
-		msg.ack()
+			setTelegramScope({
+				component: "telegram.queue",
+				chatId,
+				from,
+				attributes: {
+					queue_batch_size: batch.messages.length,
+					queue_received_at: receivedAt,
+					telegram_update_id: update.update_id,
+					telegram_message_id: message.message_id,
+					is_command: isCommand,
+				},
+			})
+
+			await Sentry.startSpan(
+				{
+					op: "queue.process",
+					name: isCommand ? "telegram.command" : "telegram.message",
+				},
+				async () => {
+					if (isCommand) {
+						// Handle simple commands inline — fast, stateless
+						const runtime = makeRuntimeForConsumer(env)
+						try {
+							await runtime.runPromise(
+								handleCommand(text, from, chatId, { sandboxWorkflow: env.SANDBOX_WORKFLOW }),
+							)
+							Sentry.logger.info("Telegram command processed", {
+								command: text,
+								telegram_chat_id: chatId,
+								telegram_from_id: from.id,
+								telegram_message_id: message.message_id,
+							})
+						} catch (err) {
+							Sentry.captureException(err)
+							console.error(`[Queue] Command ${text} failed for chat ${chatId}:`, err)
+						} finally {
+							await runtime.dispose()
+						}
+					} else if (message.text) {
+						// Route text messages to ConversationSession Durable Object
+						const doBinding = env.CONVERSATION_SESSION
+						if (!doBinding) {
+							console.error("[Queue] CONVERSATION_SESSION binding not available")
+							return
+						}
+
+						try {
+							const doId = doBinding.idFromName(String(chatId))
+							const stub = doBinding.get(doId)
+							await Sentry.startSpan(
+								{
+									op: "durable-object.rpc",
+									name: "ConversationSession.ingestMessage",
+								},
+								async () => {
+									await stub.ingestMessage({
+										text: message.text,
+										chatId,
+										messageId: message.message_id,
+										date: message.date,
+										from,
+									})
+								},
+							)
+							Sentry.logger.info("Telegram message buffered", {
+								telegram_chat_id: chatId,
+								telegram_from_id: from.id,
+								telegram_message_id: message.message_id,
+								message_length: message.text.length,
+							})
+						} catch (err) {
+							Sentry.captureException(err)
+							console.error(`[Queue] Failed to route message to DO for chat ${chatId}:`, err)
+							msg.retry()
+							return
+						}
+					}
+				},
+			)
+
+			msg.ack()
+		})
 	}
 }
