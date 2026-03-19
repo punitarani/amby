@@ -6,6 +6,11 @@ const EnvConfig = Config.all({
 	OPENROUTER_API_KEY: Config.redacted("OPENROUTER_API_KEY"),
 	OPENAI_API_KEY: Config.redacted("OPENAI_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 	CARTESIA_API_KEY: Config.redacted("CARTESIA_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
+	LIVEKIT_URL: Config.string("LIVEKIT_URL").pipe(Config.withDefault("")),
+	LIVEKIT_API_KEY: Config.redacted("LIVEKIT_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
+	LIVEKIT_API_SECRET: Config.redacted("LIVEKIT_API_SECRET").pipe(
+		Config.withDefault(Redacted.make("")),
+	),
 	DAYTONA_API_KEY: Config.redacted("DAYTONA_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 	DAYTONA_API_URL: Config.string("DAYTONA_API_URL").pipe(
 		Config.withDefault("https://app.daytona.io/api"),
@@ -38,6 +43,9 @@ export const EnvServiceLive = Layer.effect(
 			OPENROUTER_API_KEY: Redacted.value(raw.OPENROUTER_API_KEY),
 			OPENAI_API_KEY: Redacted.value(raw.OPENAI_API_KEY),
 			CARTESIA_API_KEY: Redacted.value(raw.CARTESIA_API_KEY),
+			LIVEKIT_URL: raw.LIVEKIT_URL,
+			LIVEKIT_API_KEY: Redacted.value(raw.LIVEKIT_API_KEY),
+			LIVEKIT_API_SECRET: Redacted.value(raw.LIVEKIT_API_SECRET),
 			DAYTONA_API_KEY: Redacted.value(raw.DAYTONA_API_KEY),
 			DAYTONA_API_URL: raw.DAYTONA_API_URL,
 			DAYTONA_TARGET: raw.DAYTONA_TARGET,

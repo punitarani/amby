@@ -6,6 +6,9 @@ export interface WorkerBindings {
 	OPENROUTER_API_KEY: string
 	OPENAI_API_KEY?: string
 	CARTESIA_API_KEY?: string
+	LIVEKIT_URL?: string
+	LIVEKIT_API_KEY?: string
+	LIVEKIT_API_SECRET?: string
 	DAYTONA_API_KEY?: string
 	DAYTONA_API_URL?: string
 	DAYTONA_TARGET?: string
@@ -52,6 +55,9 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		OPENROUTER_API_KEY: bindings.OPENROUTER_API_KEY,
 		OPENAI_API_KEY: bindings.OPENAI_API_KEY ?? "",
 		CARTESIA_API_KEY: bindings.CARTESIA_API_KEY ?? "",
+		LIVEKIT_URL: bindings.LIVEKIT_URL ?? "",
+		LIVEKIT_API_KEY: bindings.LIVEKIT_API_KEY ?? "",
+		LIVEKIT_API_SECRET: bindings.LIVEKIT_API_SECRET ?? "",
 		DAYTONA_API_KEY: bindings.DAYTONA_API_KEY ?? "",
 		DAYTONA_API_URL: bindings.DAYTONA_API_URL ?? "https://app.daytona.io/api",
 		DAYTONA_TARGET: bindings.DAYTONA_TARGET ?? "us",

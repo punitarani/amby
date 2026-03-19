@@ -1,0 +1,44 @@
+{
+	"name": "@amby/voice",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"format": "bunx @biomejs/biome format --write .",
+		"format:check": "bunx @biomejs/biome format .",
+		"lint": "bunx @biomejs/biome check .",
+		"lint:fix": "bunx @biomejs/biome check --fix .",
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/index.ts ./src/worker.ts ./src/playground.ts ./src/create-user.ts --outdir dist --target node --packages external",
+		"download-files": "tsx src/worker.ts download-files",
+		"worker": "tsx src/worker.ts start",
+		"worker:dev": "tsx src/worker.ts dev",
+		"playground": "tsx src/playground.ts",
+		"create-user": "tsx src/create-user.ts"
+	},
+	"dependencies": {
+		"@amby/agent": "workspace:*",
+		"@amby/auth": "workspace:*",
+		"@amby/computer": "workspace:*",
+		"@amby/db": "workspace:*",
+		"@amby/env": "workspace:*",
+		"@amby/memory": "workspace:*",
+		"@amby/models": "workspace:*",
+		"@livekit/agents": "1.0.51",
+		"@livekit/agents-plugin-cartesia": "1.0.51",
+		"@livekit/agents-plugin-livekit": "1.0.51",
+		"@livekit/agents-plugin-openai": "1.0.51",
+		"@livekit/agents-plugin-silero": "1.0.51",
+		"@livekit/rtc-node": "0.13.24",
+		"effect": "^3.19.19",
+		"livekit-server-sdk": "^2.15.0",
+		"zod": "^4.1.8"
+	},
+	"devDependencies": {
+		"@types/node": "^25.5.0",
+		"tsx": "^4.20.6"
+	}
+}

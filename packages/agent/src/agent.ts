@@ -60,15 +60,30 @@ const summarizeRequestMetadata = (metadata?: Record<string, unknown>) => {
 		telegram && typeof telegram === "object" && !Array.isArray(telegram)
 			? (telegram as Record<string, unknown>)
 			: undefined
+	const voice = metadata.voice
+	const voiceMetadata =
+		voice && typeof voice === "object" && !Array.isArray(voice)
+			? (voice as Record<string, unknown>)
+			: undefined
 
 	return compactRecord({
 		keys: Object.keys(metadata),
-		source: Object.hasOwn(metadata, "telegram") ? "telegram" : undefined,
+		source: Object.hasOwn(metadata, "telegram")
+			? "telegram"
+			: Object.hasOwn(metadata, "voice")
+				? "voice"
+				: undefined,
 		telegramBatched:
 			typeof telegramMetadata?.batched === "boolean" ? telegramMetadata.batched : undefined,
 		telegramMessageCount:
 			typeof telegramMetadata?.messageCount === "number"
 				? telegramMetadata.messageCount
+				: undefined,
+		voiceSource: typeof voiceMetadata?.source === "string" ? voiceMetadata.source : undefined,
+		voiceRoomName: typeof voiceMetadata?.roomName === "string" ? voiceMetadata.roomName : undefined,
+		voiceParticipantIdentity:
+			typeof voiceMetadata?.participantIdentity === "string"
+				? voiceMetadata.participantIdentity
 				: undefined,
 	})
 }
@@ -101,12 +116,16 @@ export class AgentService extends Context.Tag("AgentService")<
 			conversationId: string,
 			content: string,
 			onPart: (part: StreamPart) => void,
+			metadata?: Record<string, unknown>,
 		) => Effect.Effect<string, AgentError>
 		readonly ensureConversation: (channelType?: ChannelType) => Effect.Effect<string, AgentError>
+		readonly startConversation: (
+			channelType: ChannelType,
+			metadata?: Record<string, unknown>,
+		) => Effect.Effect<string, AgentError>
 		readonly shutdown: () => Effect.Effect<void, AgentError>
 	}
 >() {}
-
 export const makeAgentServiceLive = (userId: string) =>
 	Layer.effect(
 		AgentService,
@@ -153,6 +172,20 @@ export const makeAgentServiceLive = (userId: string) =>
 			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
 				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
 
+			const createConversation = (channelType: ChannelType, metadata?: Record<string, unknown>) =>
+				query((d) =>
+					d
+						.insert(schema.conversations)
+						.values({ userId, channelType, metadata })
+						.returning({ id: schema.conversations.id }),
+				).pipe(
+					Effect.flatMap((rows) => {
+						const row = rows[0]
+						return row
+							? Effect.succeed(row.id)
+							: Effect.fail(new Error("Failed to create conversation"))
+					}),
+				)
 			const extractLastToolUserMessages = (result: {
 				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
 			}): string[] | undefined => {
@@ -420,7 +453,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						),
 					),
 
-				streamMessage: (conversationId, content, onPart) =>
+				streamMessage: (conversationId, content, onPart, metadata) =>
 					Effect.gen(function* () {
 						const { tools, systemPrompt, history, userTimezone } =
 							yield* prepareContext(conversationId)
@@ -432,6 +465,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							userTimezone,
 							replyToolEnabled: false,
 							messageCount: 1,
+							requestMetadata: metadata,
 						})
 						const lifecycle = createLifecycleCallbacks(traceMetadata)
 						const agent = createOrchestrator(systemPrompt, tools as ToolSet)
@@ -478,7 +512,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							catch: (cause) => new AgentError({ message: "Failed to stream response", cause }),
 						})
 
-						yield* saveMessage(conversationId, "user", content)
+						yield* saveMessage(conversationId, "user", content, metadata)
 						yield* saveMessage(conversationId, "assistant", result)
 
 						return result
@@ -516,6 +550,17 @@ export const makeAgentServiceLive = (userId: string) =>
 							(e) =>
 								new AgentError({
 									message: `Failed to ensure conversation: ${e instanceof Error ? e.message : String(e)}`,
+									cause: e,
+								}),
+						),
+					),
+
+				startConversation: (channelType, metadata) =>
+					createConversation(channelType, metadata).pipe(
+						Effect.mapError(
+							(e) =>
+								new AgentError({
+									message: `Failed to start conversation: ${e instanceof Error ? e.message : String(e)}`,
 									cause: e,
 								}),
 						),

@@ -9,6 +9,9 @@ export interface Env {
 	readonly OPENROUTER_API_KEY: string
 	readonly OPENAI_API_KEY: string
 	readonly CARTESIA_API_KEY: string
+	readonly LIVEKIT_URL: string
+	readonly LIVEKIT_API_KEY: string
+	readonly LIVEKIT_API_SECRET: string
 	readonly DAYTONA_API_KEY: string
 	readonly DAYTONA_API_URL: string
 	readonly DAYTONA_TARGET: string
