@@ -1,5 +1,6 @@
 import type { Env } from "@amby/env"
 import { AccessToken, RoomAgentDispatch, RoomConfiguration } from "livekit-server-sdk"
+import { z } from "zod"
 import {
 	AMBY_VOICE_AGENT_NAME,
 	PLAYGROUND_TOKEN_TTL,
@@ -79,22 +80,23 @@ export const createPlaygroundToken = async ({
 	return token.toJwt()
 }
 
+const VoiceDispatchMetadataSchema = z.object({
+	userId: z.string(),
+	conversationId: z.string(),
+	source: z.literal("playground"),
+})
+
 export const parseDispatchMetadata = (rawMetadata: string | undefined): VoiceDispatchMetadata => {
 	if (!rawMetadata) throw new Error("Missing LiveKit dispatch metadata.")
 
-	const parsed = JSON.parse(rawMetadata)
-	if (typeof parsed !== "object" || !parsed || Array.isArray(parsed)) {
-		throw new Error("Invalid LiveKit dispatch metadata payload.")
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(rawMetadata)
+	} catch {
+		throw new Error("Invalid JSON in LiveKit dispatch metadata.")
 	}
 
-	const userId = parsed.userId
-	const conversationId = parsed.conversationId
-	const source = parsed.source
-	if (typeof userId !== "string" || typeof conversationId !== "string" || source !== "playground") {
-		throw new Error("LiveKit dispatch metadata is missing required voice fields.")
-	}
-
-	return { userId, conversationId, source }
+	return VoiceDispatchMetadataSchema.parse(parsed)
 }
 
 export const buildVoiceMessageMetadata = ({

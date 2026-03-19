@@ -9,6 +9,7 @@ const printUsage = () => {
 	)
 }
 
+/** Dev-only tooling — passwords are visible in process args. Do not use in production. */
 const main = async () => {
 	if (process.argv.includes("--help")) {
 		printUsage()

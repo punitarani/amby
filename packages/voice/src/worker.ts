@@ -1,6 +1,6 @@
 import { ReadableStream } from "node:stream/web"
 import { fileURLToPath } from "node:url"
-import { AgentService } from "@amby/agent"
+import { AgentService, type StreamPart } from "@amby/agent"
 import { EnvService } from "@amby/env"
 import {
 	type APIConnectOptions,
@@ -26,10 +26,19 @@ import {
 	DEFAULT_CARTESIA_VOICE,
 	DEFAULT_OPENAI_STT_MODEL,
 	DEFAULT_VOICE_LANGUAGE,
+	VOICE_FILLER_DELAY_MS,
+	VOICE_GENERIC_FILLERS,
+	VOICE_TOOL_FILLERS,
 	type VoiceMessageMetadata,
 } from "./config"
 import { buildVoiceMessageMetadata, getVoiceProviderConfig, parseDispatchMetadata } from "./livekit"
 import { makeVoiceAgentRuntime } from "./runtime"
+
+const pickRandom = <T>(items: readonly T[]): T => {
+	const item = items[Math.floor(Math.random() * items.length)]
+	if (item === undefined) throw new Error("pickRandom called on empty array")
+	return item
+}
 
 const extractLatestUserText = (chatCtx: llm.ChatContext) => {
 	for (let index = chatCtx.items.length - 1; index >= 0; index -= 1) {
@@ -80,7 +89,7 @@ class AmbyVoiceAgent extends voice.Agent {
 	constructor(
 		private readonly streamReply: (
 			content: string,
-			onText: (text: string) => void,
+			onPart: (part: StreamPart) => void,
 			metadata: VoiceMessageMetadata,
 		) => Promise<string>,
 		private readonly metadata: VoiceMessageMetadata,
@@ -97,24 +106,62 @@ class AmbyVoiceAgent extends voice.Agent {
 		const userInput = extractLatestUserText(chatCtx)
 		if (!userInput) return null
 
-		let emittedText = false
-
 		return new ReadableStream<string>({
 			start: (controller) => {
+				let emittedText = false
+				let fillerEmitted = false
+				let fillerTimer: ReturnType<typeof setTimeout> | undefined
+
+				const emitFiller = (text: string) => {
+					if (fillerEmitted || emittedText) return
+					fillerEmitted = true
+					if (fillerTimer) {
+						clearTimeout(fillerTimer)
+						fillerTimer = undefined
+					}
+					controller.enqueue(text)
+				}
+
+				// Emit a generic filler if no text or relevant tool activity within the threshold.
+				fillerTimer = setTimeout(() => {
+					emitFiller(pickRandom(VOICE_GENERIC_FILLERS))
+				}, VOICE_FILLER_DELAY_MS)
+
 				void this.streamReply(
 					userInput,
-					(text) => {
-						if (!text) return
-						emittedText = true
-						controller.enqueue(text)
+					(part) => {
+						switch (part.type) {
+							case "text-delta": {
+								if (!part.text) return
+								if (fillerTimer) {
+									clearTimeout(fillerTimer)
+									fillerTimer = undefined
+								}
+								emittedText = true
+								controller.enqueue(part.text)
+								break
+							}
+							case "tool-call": {
+								// Emit a contextual filler when a long-running tool starts.
+								const fillers = VOICE_TOOL_FILLERS[part.toolName]
+								if (fillers?.length) {
+									emitFiller(pickRandom(fillers))
+								}
+								break
+							}
+						}
 					},
 					this.metadata,
 				)
 					.then((result) => {
+						if (fillerTimer) clearTimeout(fillerTimer)
 						if (!emittedText && result.trim()) controller.enqueue(result)
 						controller.close()
 					})
-					.catch((error) => controller.error(error))
+					.catch((error) => {
+						if (fillerTimer) clearTimeout(fillerTimer)
+						controller.error(error)
+					})
 			},
 		})
 	}
@@ -177,7 +224,11 @@ export default defineAgent({
 					model: DEFAULT_CARTESIA_TTS_MODEL,
 					voice: DEFAULT_CARTESIA_VOICE,
 				}),
-				vad: ctx.proc.userData.vad as silero.VAD,
+				vad: (() => {
+					const vad = ctx.proc.userData.vad
+					if (!(vad instanceof silero.VAD)) throw new Error("VAD not loaded during prewarm.")
+					return vad
+				})(),
 				turnDetection: new livekit.turnDetector.MultilingualModel(),
 			})
 
@@ -187,16 +238,9 @@ export default defineAgent({
 
 			await session.start({
 				agent: new AmbyVoiceAgent(
-					(content, onText, metadata) =>
+					(content, onPart, metadata) =>
 						runtime.runPromise(
-							agentService.streamMessage(
-								dispatch.conversationId,
-								content,
-								(part) => {
-									if (part.type === "text-delta") onText(part.text)
-								},
-								metadata,
-							),
+							agentService.streamMessage(dispatch.conversationId, content, onPart, metadata),
 						),
 					messageMetadata,
 				),
@@ -206,7 +250,7 @@ export default defineAgent({
 				},
 			})
 
-			session.say(AMBY_VOICE_GREETING)
+			await session.say(AMBY_VOICE_GREETING)
 		} catch (error) {
 			await disposeRuntime()
 			throw error
