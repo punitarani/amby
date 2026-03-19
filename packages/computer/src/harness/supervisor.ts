@@ -351,6 +351,8 @@ export const TaskSupervisorLive = Layer.scoped(
 		}, HEARTBEAT_INTERVAL_MS)
 
 		async function finalizeTask(task: ActiveTask, exitCode: number) {
+			if (!activeTasks.has(task.taskId)) return
+
 			let result = { output: "", summary: "Task completed" }
 			try {
 				result = await provider.collectResult(task.sandbox, provider.getArtifactRoot(task.taskId))

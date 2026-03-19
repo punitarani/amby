@@ -159,7 +159,8 @@ interface TaskProvider {
 3. Write `.codex/config.toml` with Playwright MCP if `needsBrowser: true`
 4. Write `AGENTS.md` with output instructions
 5. Write `prompt.txt` (prompt) and `.env` (API key + CODEX_HOME)
-6. Return command: `cd workspace && env $(cat ../.env | xargs) codex exec --full-auto -o ../artifacts/result.md "$(cat prompt.txt)"`
+6. Write `run.sh` wrapper that sources `.env` with `set -a` and runs `codex exec --full-auto --output-last-message -o ../artifacts/result.md "$prompt" 2>../artifacts/stderr.log`
+7. Return command: `cd {taskDir} && sh run.sh`
 
 **Result collection** (`collectResult`):
 - Reads `artifacts/result.md` for output
