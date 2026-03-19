@@ -1,6 +1,6 @@
 import type { LanguageModel, ToolSet } from "ai"
-import { generateText, stepCountIs, tool } from "ai"
 import { z } from "zod"
+import { generateText, stepCountIs, tool } from "../braintrust"
 import { SUBAGENT_DEFS } from "./definitions"
 import { resolveTools, type ToolGroups } from "./tool-groups"
 

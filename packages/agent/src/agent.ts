@@ -1,4 +1,3 @@
-import type { LanguageModelV3 } from "@ai-sdk/provider"
 import type { ChannelType } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
 import { DbService, desc, eq, schema } from "@amby/db"
@@ -10,10 +9,15 @@ import {
 	MemoryService,
 } from "@amby/memory"
 import { ModelService } from "@amby/models"
-import { withTracing } from "@posthog/ai"
-import { generateText, stepCountIs, streamText } from "ai"
 import { Context, Effect, Layer } from "effect"
-import { PostHog } from "posthog-node"
+import {
+	flushBraintrust,
+	generateText,
+	initializeBraintrust,
+	stepCountIs,
+	streamText,
+	traceBraintrustOperation,
+} from "./braintrust"
 import { AgentError } from "./errors"
 
 export type StreamPart =
@@ -53,6 +57,30 @@ export class AgentService extends Context.Tag("AgentService")<
 	}
 >() {}
 
+const compactRecord = (record: Record<string, unknown>) =>
+	Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined))
+
+const summarizeRequestMetadata = (metadata?: Record<string, unknown>) => {
+	if (!metadata) return undefined
+
+	const telegram = metadata.telegram
+	const telegramMetadata =
+		telegram && typeof telegram === "object" && !Array.isArray(telegram)
+			? (telegram as Record<string, unknown>)
+			: undefined
+
+	return compactRecord({
+		keys: Object.keys(metadata),
+		source: Object.hasOwn(metadata, "telegram") ? "telegram" : undefined,
+		telegramBatched:
+			typeof telegramMetadata?.batched === "boolean" ? telegramMetadata.batched : undefined,
+		telegramMessageCount:
+			typeof telegramMetadata?.messageCount === "number"
+				? telegramMetadata.messageCount
+				: undefined,
+	})
+}
+
 export const makeAgentServiceLive = (userId: string) =>
 	Layer.effect(
 		AgentService,
@@ -64,11 +92,8 @@ export const makeAgentServiceLive = (userId: string) =>
 			const taskSupervisor = yield* TaskSupervisor
 			const env = yield* EnvService
 			const enableCua = env.ENABLE_CUA
-			const phClient = new PostHog(env.POSTHOG_KEY, { host: env.POSTHOG_HOST })
+			initializeBraintrust(env.BRAINTRUST_API_KEY, env.BRAINTRUST_PROJECT_NAME)
 			const baseModel = models.getModel()
-			const model = withTracing(baseModel as LanguageModelV3, phClient, {
-				posthogDistinctId: userId,
-			})
 
 			const computer = createComputerTools(sandbox, userId)
 
@@ -189,23 +214,75 @@ export const makeAgentServiceLive = (userId: string) =>
 						...(onReply ? createReplyTools(onReply) : {}),
 					}
 
-					return { tools, systemPrompt, history }
+					return { tools, systemPrompt, history, userTimezone }
+				})
+
+			const buildTraceMetadata = ({
+				conversationId,
+				mode,
+				historyLength,
+				toolCount,
+				userTimezone,
+				replyToolEnabled,
+				messageCount,
+				requestMetadata,
+			}: {
+				conversationId: string
+				mode: "message" | "batched-message" | "stream-message"
+				historyLength: number
+				toolCount: number
+				userTimezone: string
+				replyToolEnabled: boolean
+				messageCount: number
+				requestMetadata?: Record<string, unknown>
+			}) =>
+				compactRecord({
+					userId,
+					conversationId,
+					mode,
+					messageCount,
+					historyLength,
+					toolCount,
+					replyToolEnabled,
+					userTimezone,
+					modelId: models.defaultModelId,
+					cuaEnabled: enableCua,
+					requestMetadata: summarizeRequestMetadata(requestMetadata),
 				})
 
 			return {
 				handleMessage: (conversationId, content, metadata, onReply) =>
 					Effect.gen(function* () {
-						const { tools, systemPrompt, history } = yield* prepareContext(conversationId, onReply)
+						const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
+							conversationId,
+							onReply,
+						)
 
 						const result = yield* Effect.tryPromise({
 							try: () =>
-								generateText({
-									model,
-									system: systemPrompt,
-									messages: [...history, { role: "user" as const, content }],
-									tools,
-									stopWhen: stepCountIs(10),
-								}),
+								traceBraintrustOperation(
+									"agent.handle-message",
+									{ content },
+									buildTraceMetadata({
+										conversationId,
+										mode: "message",
+										historyLength: history.length,
+										toolCount: Object.keys(tools).length,
+										userTimezone,
+										replyToolEnabled: Boolean(onReply),
+										messageCount: 1,
+										requestMetadata: metadata,
+									}),
+									() =>
+										generateText({
+											model: baseModel,
+											system: systemPrompt,
+											messages: [...history, { role: "user" as const, content }],
+											tools,
+											stopWhen: stepCountIs(10),
+										}),
+									(response) => ({ text: response.text }),
+								),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
 						const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
@@ -232,7 +309,10 @@ export const makeAgentServiceLive = (userId: string) =>
 
 				handleBatchedMessages: (conversationId, messages, metadata, onReply) =>
 					Effect.gen(function* () {
-						const { tools, systemPrompt, history } = yield* prepareContext(conversationId, onReply)
+						const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
+							conversationId,
+							onReply,
+						)
 
 						// Each batched message becomes a separate user turn
 						const userMessages = messages.map((content) => ({
@@ -242,13 +322,29 @@ export const makeAgentServiceLive = (userId: string) =>
 
 						const result = yield* Effect.tryPromise({
 							try: () =>
-								generateText({
-									model,
-									system: systemPrompt,
-									messages: [...history, ...userMessages],
-									tools,
-									stopWhen: stepCountIs(10),
-								}),
+								traceBraintrustOperation(
+									"agent.handle-batched-messages",
+									{ messages },
+									buildTraceMetadata({
+										conversationId,
+										mode: "batched-message",
+										historyLength: history.length,
+										toolCount: Object.keys(tools).length,
+										userTimezone,
+										replyToolEnabled: Boolean(onReply),
+										messageCount: messages.length,
+										requestMetadata: metadata,
+									}),
+									() =>
+										generateText({
+											model: baseModel,
+											system: systemPrompt,
+											messages: [...history, ...userMessages],
+											tools,
+											stopWhen: stepCountIs(10),
+										}),
+									(response) => ({ text: response.text }),
+								),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
 						const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
@@ -278,38 +374,58 @@ export const makeAgentServiceLive = (userId: string) =>
 
 				streamMessage: (conversationId, content, onPart) =>
 					Effect.gen(function* () {
-						const { tools, systemPrompt, history } = yield* prepareContext(conversationId)
+						const { tools, systemPrompt, history, userTimezone } =
+							yield* prepareContext(conversationId)
 
 						const result = yield* Effect.tryPromise({
-							try: async () => {
-								const stream = streamText({
-									model,
-									system: systemPrompt,
-									messages: [...history, { role: "user" as const, content }],
-									tools,
-									stopWhen: stepCountIs(10),
-								})
+							try: () =>
+								traceBraintrustOperation(
+									"agent.stream-message",
+									{ content },
+									buildTraceMetadata({
+										conversationId,
+										mode: "stream-message",
+										historyLength: history.length,
+										toolCount: Object.keys(tools).length,
+										userTimezone,
+										replyToolEnabled: false,
+										messageCount: 1,
+									}),
+									async () => {
+										const stream = streamText({
+											model: baseModel,
+											system: systemPrompt,
+											messages: [...history, { role: "user" as const, content }],
+											tools,
+											stopWhen: stepCountIs(10),
+										})
 
-								for await (const part of stream.fullStream) {
-									switch (part.type) {
-										case "text-delta":
-											onPart({ type: "text-delta", text: part.text })
-											break
-										case "tool-call":
-											onPart({
-												type: "tool-call",
-												toolName: part.toolName,
-												args: part.input as Record<string, unknown>,
-											})
-											break
-										case "tool-result":
-											onPart({ type: "tool-result", toolName: part.toolName, result: part.output })
-											break
-									}
-								}
+										for await (const part of stream.fullStream) {
+											switch (part.type) {
+												case "text-delta":
+													onPart({ type: "text-delta", text: part.text })
+													break
+												case "tool-call":
+													onPart({
+														type: "tool-call",
+														toolName: part.toolName,
+														args: part.input as Record<string, unknown>,
+													})
+													break
+												case "tool-result":
+													onPart({
+														type: "tool-result",
+														toolName: part.toolName,
+														result: part.output,
+													})
+													break
+											}
+										}
 
-								return await stream.text
-							},
+										return await stream.text
+									},
+									(text) => ({ text }),
+								),
 							catch: (cause) => new AgentError({ message: "Failed to stream response", cause }),
 						})
 
@@ -360,8 +476,8 @@ export const makeAgentServiceLive = (userId: string) =>
 					Effect.gen(function* () {
 						yield* taskSupervisor.shutdown()
 						yield* Effect.tryPromise({
-							try: () => phClient.shutdown(),
-							catch: (cause) => new AgentError({ message: "Failed to shutdown PostHog", cause }),
+							try: () => flushBraintrust(),
+							catch: (cause) => new AgentError({ message: "Failed to flush Braintrust", cause }),
 						})
 						const instance = computer.getSandbox()
 						if (instance) {
