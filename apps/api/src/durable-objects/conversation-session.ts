@@ -198,7 +198,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		await this.hydrate()
 		setTelegramScope({
 			component: "conversation-session.complete",
-			chatId: this.state.chatId || undefined,
+			chatId: this.state.chatId ?? undefined,
 			userId: result.userId ?? this.state.userId,
 			conversationId: result.conversationId ?? this.state.conversationId,
 			attributes: {

@@ -75,7 +75,6 @@ export async function handleQueueBatch(
 						const doBinding = env.CONVERSATION_SESSION
 						if (!doBinding) {
 							console.error("[Queue] CONVERSATION_SESSION binding not available")
-							msg.ack()
 							return
 						}
 
