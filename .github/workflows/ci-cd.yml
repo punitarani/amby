@@ -62,6 +62,20 @@ jobs:
           test -f dist-worker/worker.js
           npx wrangler versions upload dist-worker/worker.js --no-bundle --upload-source-maps --dry-run
 
+      - name: Validate deploy tooling
+        run: |
+          # Verify CLI tools used in deploy resolve correctly
+          bunx sentry-cli --version
+          bunx @posthog/cli --version
+
+          # Verify worker-env-keys.txt produces a non-empty key pattern
+          PATTERN=$(grep -v '^#' scripts/worker-env-keys.txt | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
+          if [ -z "$PATTERN" ]; then
+            echo "ERROR: scripts/worker-env-keys.txt produced an empty key pattern"
+            exit 1
+          fi
+          echo "Env key pattern: $PATTERN"
+
   # --- Production only (push to main) ---
 
   db-migrate:
@@ -138,11 +152,11 @@ jobs:
             cd apps/api
             # PostHog inject intentionally mutates the built worker.js bundle to stamp chunk IDs.
             # The injected dist-worker artifact is the exact bundle deployed below with --no-bundle.
-            npx @posthog/cli sourcemap inject \
+            bunx @posthog/cli sourcemap inject \
               --directory dist-worker \
               --release-name amby-api \
               --release-version "$GITHUB_SHA"
-            npx @posthog/cli sourcemap upload \
+            bunx @posthog/cli sourcemap upload \
               --directory dist-worker \
               --release-name amby-api \
               --release-version "$GITHUB_SHA"
