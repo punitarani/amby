@@ -3,7 +3,7 @@ import { tool } from "ai"
 import type { Context } from "effect"
 import { Effect } from "effect"
 import { z } from "zod"
-import type { SandboxService } from "./sandbox"
+import type { SandboxService } from "./service"
 
 type SandboxOps = Context.Tag.Service<typeof SandboxService>
 
