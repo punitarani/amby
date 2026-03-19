@@ -185,16 +185,18 @@ export const handleCommand = (
 		switch (command) {
 			case "/start": {
 				const { db } = yield* DbService
-				yield* Effect.tryPromise(async () => {
-					const existing = await db
-						.select({ id: schema.conversations.id })
-						.from(schema.conversations)
-						.where(eq(schema.conversations.userId, userId))
-						.orderBy(desc(schema.conversations.updatedAt))
-						.limit(1)
-					if (existing[0]) return
-					await db.insert(schema.conversations).values({ userId, channelType: "telegram" })
-				})
+				yield* Effect.tryPromise(async () =>
+					db.transaction(async (tx) => {
+						const existing = await tx
+							.select({ id: schema.conversations.id })
+							.from(schema.conversations)
+							.where(eq(schema.conversations.userId, userId))
+							.orderBy(desc(schema.conversations.updatedAt))
+							.limit(1)
+						if (existing[0]) return
+						await tx.insert(schema.conversations).values({ userId, channelType: "telegram" })
+					}),
+				)
 
 				// Kick off sandbox provisioning via durable workflow
 				if (options?.sandboxWorkflow) {

@@ -26,9 +26,9 @@ export class CodexInstaller implements HarnessInstaller {
 		let version = check.result.trim()
 
 		if (!version) {
-			// Install codex
+			// Install codex — sandbox runs as non-root agent user, so sudo is required for global installs
 			const install = await sandbox.process.executeCommand(
-				"npm install -g @openai/codex",
+				"sudo npm install -g @openai/codex",
 				undefined,
 				undefined,
 				NPM_INSTALL_TIMEOUT,

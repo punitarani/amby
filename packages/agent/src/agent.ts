@@ -102,7 +102,14 @@ export const makeAgentServiceLive = (userId: string) =>
 			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
 				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
 
-			/** Scans tool results from last to first, returning the first `userMessages` array found. */
+			/**
+			 * Scans tool results from last to first, returning the first `userMessages` array found.
+			 *
+			 * When a tool returns `{ userMessages: string[] }`, those messages are sent directly
+			 * to the user via onReply and the LLM's own text response is suppressed (finalText = "").
+			 * This lets tools like codex-auth relay multi-step instructions (e.g. device-code URLs)
+			 * without the LLM paraphrasing them.
+			 */
 			const extractLastToolUserMessages = (result: {
 				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
 			}): string[] | undefined => {

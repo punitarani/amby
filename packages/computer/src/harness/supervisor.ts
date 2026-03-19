@@ -37,6 +37,10 @@ const CODEX_AUTH_LOG = `${CODEX_HOME}/login.out`
 const CODEX_CONFIG_FILE = `${CODEX_HOME}/config.toml`
 const CODEX_CONFIG = 'cli_auth_credentials_store = "file"\n'
 
+// Matches ANSI CSI (ESC[…m) and OSC (ESC]…BEL/ST) sequences.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI stripping requires matching ESC/BEL control chars
+const ANSI_RE = /\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*(?:\x07|\x1b\\))/g
+
 interface ActiveTask {
 	taskId: string
 	sandbox: Sandbox
@@ -47,25 +51,7 @@ interface ActiveTask {
 	consecutiveFailures: number
 }
 
-const stripAnsi = (value: string) => {
-	let clean = ""
-
-	for (let i = 0; i < value.length; i += 1) {
-		if (value[i] === "\u001b" && value[i + 1] === "[") {
-			i += 2
-
-			while (i < value.length && value[i] !== "m") {
-				i += 1
-			}
-
-			continue
-		}
-
-		clean += value[i]
-	}
-
-	return clean
-}
+const stripAnsi = (value: string) => value.replace(ANSI_RE, "")
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -89,6 +75,7 @@ const parseDeviceAuthPrompt = (value: string) => {
 	return verificationUri && userCode ? { verificationUri, userCode } : null
 }
 
+/** Decode JWT payload for metadata extraction only — no signature verification. */
 const decodeJwtPayload = (jwt?: string) => {
 	const payload = jwt?.split(".")[1]
 	if (!payload) return null
@@ -201,13 +188,8 @@ export const TaskSupervisorLive = Layer.scoped(
 			return rows[0]?.authConfig
 		}
 
-		const saveSandboxAuthConfig = async (
-			userId: string,
-			authConfig: unknown,
-			sandbox?: Sandbox,
-		) => {
+		const saveSandboxAuthConfig = async (userId: string, authConfig: unknown, sandbox: Sandbox) => {
 			const next = readHarnessAuthConfig(authConfig)
-			const instance = sandbox ?? (await Effect.runPromise(sandboxService.ensure(userId)))
 			await db
 				.update(schema.sandboxes)
 				.set({
@@ -215,7 +197,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					lastActivityAt: new Date(),
 				})
 				.where(eq(schema.sandboxes.userId, userId))
-			return instance
+			return sandbox
 		}
 
 		const readSandboxText = async (sandbox: Sandbox, path: string) => {
@@ -243,12 +225,11 @@ export const TaskSupervisorLive = Layer.scoped(
 
 		const syncCodexAuthStatus = async (
 			userId: string,
-			sandbox?: Sandbox,
+			sandbox: Sandbox,
 		): Promise<CodexAuthSummary> => {
 			const raw = await loadSandboxAuthConfig(userId)
 			const current = readHarnessAuthConfig(raw).codex
-			const instance = sandbox ?? (await Effect.runPromise(sandboxService.ensure(userId)))
-			const authJson = await readSandboxText(instance, CODEX_AUTH_FILE)
+			const authJson = await readSandboxText(sandbox, CODEX_AUTH_FILE)
 			if (!current && !authJson) return summarizeCodexAuth(null)
 
 			if (authJson) {
@@ -258,13 +239,13 @@ export const TaskSupervisorLive = Layer.scoped(
 						raw,
 						"Codex credentials exist in the sandbox, but the cache is invalid. Reconnect Codex.",
 					)
-					await saveSandboxAuthConfig(userId, invalid, instance)
+					await saveSandboxAuthConfig(userId, invalid, sandbox)
 					return summarizeCodexAuth(invalid)
 				}
 
 				const authenticated = setCodexAuthenticated(raw, parsed.cache, parsed.apiKeyLast4)
-				await saveSandboxAuthConfig(userId, authenticated, instance)
-				await deletePendingSession(instance, current?.pending?.sessionId)
+				await saveSandboxAuthConfig(userId, authenticated, sandbox)
+				await deletePendingSession(sandbox, current?.pending?.sessionId)
 				return summarizeCodexAuth(authenticated)
 			}
 
@@ -272,7 +253,7 @@ export const TaskSupervisorLive = Layer.scoped(
 
 			if (current.pending) {
 				try {
-					const cmd = await instance.process.getSessionCommand(
+					const cmd = await sandbox.process.getSessionCommand(
 						current.pending.sessionId,
 						current.pending.commandId,
 					)
@@ -280,17 +261,17 @@ export const TaskSupervisorLive = Layer.scoped(
 						return summarizeCodexAuth(raw)
 					}
 
-					const log = await readSandboxText(instance, CODEX_AUTH_LOG)
+					const log = await readSandboxText(sandbox, CODEX_AUTH_LOG)
 					const invalid = setCodexInvalid(raw, summarizeLoginFailure(log, cmd.exitCode))
-					await saveSandboxAuthConfig(userId, invalid, instance)
-					await deletePendingSession(instance, current.pending.sessionId)
+					await saveSandboxAuthConfig(userId, invalid, sandbox)
+					await deletePendingSession(sandbox, current.pending.sessionId)
 					return summarizeCodexAuth(invalid)
 				} catch {
 					const invalid = setCodexInvalid(
 						raw,
 						"The Codex login session ended before authentication completed. Start it again.",
 					)
-					await saveSandboxAuthConfig(userId, invalid, instance)
+					await saveSandboxAuthConfig(userId, invalid, sandbox)
 					return summarizeCodexAuth(invalid)
 				}
 			}
@@ -300,7 +281,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					raw,
 					"Stored Codex credentials were not found in the sandbox. Reconnect Codex.",
 				)
-				await saveSandboxAuthConfig(userId, invalid, instance)
+				await saveSandboxAuthConfig(userId, invalid, sandbox)
 				return summarizeCodexAuth(invalid)
 			}
 
@@ -328,6 +309,8 @@ export const TaskSupervisorLive = Layer.scoped(
 		}
 
 		const heartbeatInterval = setInterval(async () => {
+			if (activeTasks.size === 0) return
+
 			for (const task of [...activeTasks.values()]) {
 				try {
 					await task.sandbox.refreshActivity()
@@ -406,7 +389,13 @@ export const TaskSupervisorLive = Layer.scoped(
 		}
 
 		const recoverRunning = async () => {
-			const running = await db.select().from(schema.tasks).where(eq(schema.tasks.status, "running"))
+			let running: TaskRecord[]
+			try {
+				running = await db.select().from(schema.tasks).where(eq(schema.tasks.status, "running"))
+			} catch (err) {
+				console.error("[TaskSupervisor] recovery: failed to query running tasks:", err)
+				return
+			}
 
 			for (const task of running) {
 				if (!task.sandboxId || !task.sessionId || !task.commandId) {
@@ -439,176 +428,184 @@ export const TaskSupervisorLive = Layer.scoped(
 			}
 		}
 
+		// Fire-and-forget: recoverRunning uses Effect.runPromise for sandboxService.ensure
+		// because it runs outside the Effect pipeline during layer initialization.
 		recoverRunning().catch((err) => console.error("[TaskSupervisor] recovery failed:", err))
 
 		yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(heartbeatInterval)))
 
+		const wrapSandboxError = (cause: unknown) =>
+			new SandboxError({
+				message: cause instanceof Error ? cause.message : String(cause),
+				cause,
+			})
+
 		return {
 			getCodexAuthStatus: (userId) =>
-				Effect.tryPromise({
-					try: () => syncCodexAuthStatus(userId),
-					catch: (cause) =>
-						new SandboxError({
-							message: `Failed to inspect Codex auth: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
+				Effect.gen(function* () {
+					const sandbox = yield* sandboxService.ensure(userId)
+					return yield* Effect.tryPromise({
+						try: () => syncCodexAuthStatus(userId, sandbox),
+						catch: wrapSandboxError,
+					})
 				}),
 
 			setCodexApiKey: (userId, apiKey) =>
-				Effect.tryPromise({
-					try: async () => {
-						const trimmed = apiKey.trim()
-						if (!trimmed) {
-							throw new Error("OpenAI API key cannot be empty.")
-						}
-
-						const sandbox = await Effect.runPromise(sandboxService.ensure(userId))
-						const raw = await loadSandboxAuthConfig(userId)
-						const current = readHarnessAuthConfig(raw).codex
-
-						await ensureCodexHome(sandbox)
-						await deletePendingSession(sandbox, current?.pending?.sessionId)
-						await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_LOG}`)
-
-						const authJson = JSON.stringify(
-							{
-								auth_mode: "apikey",
-								OPENAI_API_KEY: trimmed,
-							},
-							null,
-							2,
+				Effect.gen(function* () {
+					const trimmed = apiKey.trim()
+					if (!trimmed) {
+						return yield* Effect.fail(
+							new SandboxError({ message: "OpenAI API key cannot be empty." }),
 						)
-						await sandbox.fs.uploadFile(Buffer.from(authJson), CODEX_AUTH_FILE)
+					}
 
-						const next = setCodexAuthenticated(
-							raw,
-							{ method: "api_key", updatedAt: new Date().toISOString() },
-							trimmed.slice(-4),
-						)
-						await saveSandboxAuthConfig(userId, next, sandbox)
-						return summarizeCodexAuth(next)
-					},
-					catch: (cause) =>
-						new SandboxError({
-							message: `Failed to save Codex API key: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
+					const sandbox = yield* sandboxService.ensure(userId)
+					return yield* Effect.tryPromise({
+						try: async () => {
+							const raw = await loadSandboxAuthConfig(userId)
+							const current = readHarnessAuthConfig(raw).codex
+
+							await ensureCodexHome(sandbox)
+							await deletePendingSession(sandbox, current?.pending?.sessionId)
+							await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_LOG}`)
+
+							const authJson = JSON.stringify(
+								{ auth_mode: "apikey", OPENAI_API_KEY: trimmed },
+								null,
+								2,
+							)
+							await sandbox.fs.uploadFile(Buffer.from(authJson), CODEX_AUTH_FILE)
+
+							const next = setCodexAuthenticated(
+								raw,
+								{ method: "api_key", updatedAt: new Date().toISOString() },
+								trimmed.slice(-4),
+							)
+							await saveSandboxAuthConfig(userId, next, sandbox)
+							return summarizeCodexAuth(next)
+						},
+						catch: wrapSandboxError,
+					})
 				}),
 
 			startCodexChatgptAuth: (userId) =>
-				Effect.tryPromise({
-					try: async () => {
-						const sandbox = await Effect.runPromise(sandboxService.ensure(userId))
-						const current = await syncCodexAuthStatus(userId, sandbox)
-						if (current.status === "pending") return current
-						if (current.status === "authenticated" && current.method === "chatgpt") return current
+				Effect.gen(function* () {
+					const sandbox = yield* sandboxService.ensure(userId)
+					const current = yield* Effect.tryPromise({
+						try: () => syncCodexAuthStatus(userId, sandbox),
+						catch: wrapSandboxError,
+					})
+					if (current.status === "pending") return current
+					if (current.status === "authenticated" && current.method === "chatgpt") return current
 
-						const installResult = await installer.ensureInstalled(sandbox)
-						if (!installResult.installed) {
-							throw new Error("Failed to install Codex CLI in sandbox.")
-						}
+					return yield* Effect.tryPromise({
+						try: async () => {
+							const installResult = await installer.ensureInstalled(sandbox)
+							if (!installResult.installed) {
+								throw new Error("Failed to install Codex CLI in sandbox.")
+							}
 
-						const raw = await loadSandboxAuthConfig(userId)
-						const previous = readHarnessAuthConfig(raw).codex
+							const raw = await loadSandboxAuthConfig(userId)
+							const previous = readHarnessAuthConfig(raw).codex
 
-						await ensureCodexHome(sandbox)
-						await deletePendingSession(sandbox, previous?.pending?.sessionId)
-						await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_FILE} ${CODEX_AUTH_LOG}`)
+							await ensureCodexHome(sandbox)
+							await deletePendingSession(sandbox, previous?.pending?.sessionId)
+							await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_FILE} ${CODEX_AUTH_LOG}`)
 
-						const sessionId = `codex-auth-${Date.now()}`
-						const command =
-							`cd ${AGENT_WORKDIR} && ` +
-							`export CODEX_HOME=${CODEX_HOME} && ` +
-							`mkdir -p ${CODEX_HOME} && ` +
-							`codex login --device-auth -c 'cli_auth_credentials_store="file"' 2>&1 | tee ${CODEX_AUTH_LOG}`
+							const sessionId = `codex-auth-${Date.now()}`
+							const command =
+								`cd ${AGENT_WORKDIR} && ` +
+								`export CODEX_HOME=${CODEX_HOME} && ` +
+								`mkdir -p ${CODEX_HOME} && ` +
+								`codex login --device-auth -c 'cli_auth_credentials_store="file"' 2>&1 | tee ${CODEX_AUTH_LOG}`
 
-						await sandbox.process.createSession(sessionId)
-						const execResult = await sandbox.process.executeSessionCommand(sessionId, {
-							command,
-							runAsync: true,
-						})
+							await sandbox.process.createSession(sessionId)
+							const execResult = await sandbox.process.executeSessionCommand(sessionId, {
+								command,
+								runAsync: true,
+							})
 
-						let pendingPrompt: { verificationUri: string; userCode: string } | null = null
-						for (let attempt = 0; attempt < 20; attempt++) {
-							const log = await readSandboxText(sandbox, CODEX_AUTH_LOG)
-							pendingPrompt = log ? parseDeviceAuthPrompt(log) : null
-							if (pendingPrompt) break
-							await wait(500)
-						}
+							let pendingPrompt: {
+								verificationUri: string
+								userCode: string
+							} | null = null
+							for (let attempt = 0; attempt < 20; attempt++) {
+								const log = await readSandboxText(sandbox, CODEX_AUTH_LOG)
+								pendingPrompt = log ? parseDeviceAuthPrompt(log) : null
+								if (pendingPrompt) break
+								await wait(500)
+							}
 
-						if (!pendingPrompt) {
-							const log = await readSandboxText(sandbox, CODEX_AUTH_LOG)
-							await deletePendingSession(sandbox, sessionId)
-							throw new Error(summarizeLoginFailure(log))
-						}
+							if (!pendingPrompt) {
+								const log = await readSandboxText(sandbox, CODEX_AUTH_LOG)
+								await deletePendingSession(sandbox, sessionId)
+								throw new Error(summarizeLoginFailure(log))
+							}
 
-						const next = setCodexPendingDeviceAuth(raw, {
-							type: "device_code",
-							verificationUri: pendingPrompt.verificationUri,
-							userCode: pendingPrompt.userCode,
-							sessionId,
-							commandId: execResult.cmdId,
-							startedAt: new Date().toISOString(),
-						})
-						await saveSandboxAuthConfig(userId, next, sandbox)
-						return summarizeCodexAuth(next)
-					},
-					catch: (cause) =>
-						new SandboxError({
-							message: `Failed to start Codex ChatGPT login: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
+							const next = setCodexPendingDeviceAuth(raw, {
+								type: "device_code",
+								verificationUri: pendingPrompt.verificationUri,
+								userCode: pendingPrompt.userCode,
+								sessionId,
+								commandId: execResult.cmdId,
+								startedAt: new Date().toISOString(),
+							})
+							await saveSandboxAuthConfig(userId, next, sandbox)
+							return summarizeCodexAuth(next)
+						},
+						catch: wrapSandboxError,
+					})
 				}),
 
 			importCodexChatgptAuth: (userId, authJson) =>
-				Effect.tryPromise({
-					try: async () => {
-						const parsed = parseCodexAuthFile(authJson)
-						if (!parsed || parsed.cache.method !== "chatgpt") {
-							throw new Error("That auth.json does not contain ChatGPT Codex credentials.")
-						}
-
-						const sandbox = await Effect.runPromise(sandboxService.ensure(userId))
-						const raw = await loadSandboxAuthConfig(userId)
-						const current = readHarnessAuthConfig(raw).codex
-
-						await ensureCodexHome(sandbox)
-						await deletePendingSession(sandbox, current?.pending?.sessionId)
-						await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_LOG}`)
-						await sandbox.fs.uploadFile(
-							Buffer.from(JSON.stringify(JSON.parse(authJson), null, 2)),
-							CODEX_AUTH_FILE,
+				Effect.gen(function* () {
+					const parsed = parseCodexAuthFile(authJson)
+					if (!parsed || parsed.cache.method !== "chatgpt") {
+						return yield* Effect.fail(
+							new SandboxError({
+								message: "That auth.json does not contain ChatGPT Codex credentials.",
+							}),
 						)
+					}
 
-						const next = setCodexAuthenticated(raw, parsed.cache)
-						await saveSandboxAuthConfig(userId, next, sandbox)
-						return summarizeCodexAuth(next)
-					},
-					catch: (cause) =>
-						new SandboxError({
-							message: `Failed to import Codex auth.json: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
+					const sandbox = yield* sandboxService.ensure(userId)
+					return yield* Effect.tryPromise({
+						try: async () => {
+							const raw = await loadSandboxAuthConfig(userId)
+							const current = readHarnessAuthConfig(raw).codex
+
+							await ensureCodexHome(sandbox)
+							await deletePendingSession(sandbox, current?.pending?.sessionId)
+							await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_LOG}`)
+							await sandbox.fs.uploadFile(
+								Buffer.from(JSON.stringify(JSON.parse(authJson), null, 2)),
+								CODEX_AUTH_FILE,
+							)
+
+							const next = setCodexAuthenticated(raw, parsed.cache)
+							await saveSandboxAuthConfig(userId, next, sandbox)
+							return summarizeCodexAuth(next)
+						},
+						catch: wrapSandboxError,
+					})
 				}),
 
 			clearCodexAuth: (userId) =>
-				Effect.tryPromise({
-					try: async () => {
-						const raw = await loadSandboxAuthConfig(userId)
-						const sandbox = await Effect.runPromise(sandboxService.ensure(userId))
-						const current = readHarnessAuthConfig(raw).codex
-						await deletePendingSession(sandbox, current?.pending?.sessionId)
-						await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_FILE} ${CODEX_AUTH_LOG}`)
+				Effect.gen(function* () {
+					const sandbox = yield* sandboxService.ensure(userId)
+					return yield* Effect.tryPromise({
+						try: async () => {
+							const raw = await loadSandboxAuthConfig(userId)
+							const current = readHarnessAuthConfig(raw).codex
+							await deletePendingSession(sandbox, current?.pending?.sessionId)
+							await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_FILE} ${CODEX_AUTH_LOG}`)
 
-						const next = clearCodexAuth(raw)
-						await saveSandboxAuthConfig(userId, next, sandbox)
-						return summarizeCodexAuth(next)
-					},
-					catch: (cause) =>
-						new SandboxError({
-							message: `Failed to clear Codex auth: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
+							const next = clearCodexAuth(raw)
+							await saveSandboxAuthConfig(userId, next, sandbox)
+							return summarizeCodexAuth(next)
+						},
+						catch: wrapSandboxError,
+					})
 				}),
 
 			startTask: ({ userId, prompt, needsBrowser }) =>
@@ -617,11 +614,7 @@ export const TaskSupervisorLive = Layer.scoped(
 
 					const { authMode } = yield* Effect.tryPromise({
 						try: () => requireCodexAuth(userId, sandbox),
-						catch: (cause) =>
-							new SandboxError({
-								message: cause instanceof Error ? cause.message : String(cause),
-								cause,
-							}),
+						catch: wrapSandboxError,
 					})
 
 					const installResult = yield* Effect.tryPromise({
@@ -772,21 +765,23 @@ export const TaskSupervisorLive = Layer.scoped(
 					const cappedWait = waitSeconds ? Math.min(waitSeconds, MAX_WAIT_SECONDS) : 0
 					const taskFilter = and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId))
 
+					const fetchTask = async () => {
+						const rows = await db.select().from(schema.tasks).where(taskFilter).limit(1)
+						return rows[0] ?? null
+					}
+
+					let task: TaskRecord | null
 					if (cappedWait > 0) {
-						const result = yield* Effect.tryPromise({
+						task = yield* Effect.tryPromise({
 							try: async () => {
 								const deadline = Date.now() + cappedWait * 1000
 								while (Date.now() < deadline) {
-									const rows = await db.select().from(schema.tasks).where(taskFilter).limit(1)
-									const task = rows[0]
-									if (!task) return null
-									if (TERMINAL_STATUSES.includes(task.status as TaskStatus)) {
-										return task
-									}
+									const t = await fetchTask()
+									if (!t) return null
+									if (TERMINAL_STATUSES.includes(t.status as TaskStatus)) return t
 									await wait(POLL_INTERVAL_MS)
 								}
-								const rows = await db.select().from(schema.tasks).where(taskFilter).limit(1)
-								return rows[0] ?? null
+								return await fetchTask()
 							},
 							catch: (error) =>
 								new SandboxError({
@@ -794,19 +789,77 @@ export const TaskSupervisorLive = Layer.scoped(
 									cause: error,
 								}),
 						})
-						return result
+					} else {
+						task = yield* query((d) =>
+							d.select().from(schema.tasks).where(taskFilter).limit(1),
+						).pipe(
+							Effect.map((rows) => rows[0] ?? null),
+							Effect.mapError(
+								(error) =>
+									new SandboxError({
+										message: `Failed to get task: ${error instanceof Error ? error.message : String(error)}`,
+										cause: error,
+									}),
+							),
+						)
 					}
 
-					return yield* query((d) => d.select().from(schema.tasks).where(taskFilter).limit(1)).pipe(
-						Effect.map((rows) => rows[0] ?? null),
-						Effect.mapError(
-							(error) =>
-								new SandboxError({
-									message: `Failed to get task: ${error instanceof Error ? error.message : String(error)}`,
-									cause: error,
-								}),
-						),
-					)
+					// Live session check: if the task is still "running" in DB but not tracked
+					// in this supervisor's memory (e.g. supervisor was recreated between workflow
+					// steps), check the actual sandbox session to detect completion eagerly.
+					if (
+						task &&
+						task.status === "running" &&
+						!activeTasks.has(task.id) &&
+						task.sessionId &&
+						task.commandId
+					) {
+						const sandbox = yield* sandboxService
+							.ensure(task.userId)
+							.pipe(Effect.catchAll(() => Effect.succeed(null as Sandbox | null)))
+
+						if (sandbox) {
+							// Capture fields before entering the async closure to avoid non-null assertions
+							const taskRef = task
+							const sessionId = task.sessionId
+							const commandId = task.commandId
+							const startedAt = task.startedAt?.getTime() ?? Date.now()
+							task = yield* Effect.tryPromise({
+								try: async () => {
+									const cmd = await sandbox.process.getSessionCommand(sessionId, commandId)
+									if (cmd.exitCode != null) {
+										await finalizeTask(
+											{
+												taskId: taskRef.id,
+												sandbox,
+												sessionId,
+												commandId,
+												startedAt,
+												timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
+												consecutiveFailures: 0,
+											},
+											cmd.exitCode,
+										)
+										return await fetchTask()
+									}
+									// Still running — re-register for heartbeat tracking
+									activeTasks.set(taskRef.id, {
+										taskId: taskRef.id,
+										sandbox,
+										sessionId,
+										commandId,
+										startedAt,
+										timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
+										consecutiveFailures: 0,
+									})
+									return taskRef
+								},
+								catch: () => new SandboxError({ message: "Live session check failed" }),
+							}).pipe(Effect.catchAll(() => Effect.succeed(task)))
+						}
+					}
+
+					return task
 				}),
 
 			shutdown: () =>
