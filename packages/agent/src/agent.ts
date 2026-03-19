@@ -92,7 +92,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			const taskSupervisor = yield* TaskSupervisor
 			const env = yield* EnvService
 			const enableCua = env.ENABLE_CUA
-			initializeBraintrust(env.BRAINTRUST_API_KEY, env.BRAINTRUST_PROJECT_NAME)
+			initializeBraintrust(env.BRAINTRUST_API_KEY, env.BRAINTRUST_PROJECT_ID)
 			const baseModel = models.getModel()
 
 			const computer = createComputerTools(sandbox, userId)

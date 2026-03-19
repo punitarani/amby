@@ -19,7 +19,7 @@ export interface Env {
 	readonly BETTER_AUTH_URL: string
 	readonly ENABLE_CUA: boolean
 	readonly BRAINTRUST_API_KEY: string
-	readonly BRAINTRUST_PROJECT_NAME: string
+	readonly BRAINTRUST_PROJECT_ID: string
 	readonly POSTHOG_KEY: string
 	readonly POSTHOG_HOST: string
 }

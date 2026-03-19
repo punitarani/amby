@@ -24,9 +24,7 @@ const EnvConfig = Config.all({
 	),
 	ENABLE_CUA: Config.boolean("ENABLE_CUA").pipe(Config.withDefault(false)),
 	BRAINTRUST_API_KEY: Config.string("BRAINTRUST_API_KEY").pipe(Config.withDefault("")),
-	BRAINTRUST_PROJECT_NAME: Config.string("BRAINTRUST_PROJECT_NAME").pipe(
-		Config.withDefault("Amby Agent"),
-	),
+	BRAINTRUST_PROJECT_ID: Config.string("BRAINTRUST_PROJECT_ID").pipe(Config.withDefault("")),
 	POSTHOG_KEY: Config.string("POSTHOG_KEY").pipe(Config.withDefault("")),
 	POSTHOG_HOST: Config.string("POSTHOG_HOST").pipe(Config.withDefault("https://us.i.posthog.com")),
 })
@@ -50,7 +48,7 @@ export const EnvServiceLive = Layer.effect(
 			BETTER_AUTH_URL: raw.BETTER_AUTH_URL,
 			ENABLE_CUA: raw.ENABLE_CUA,
 			BRAINTRUST_API_KEY: raw.BRAINTRUST_API_KEY,
-			BRAINTRUST_PROJECT_NAME: raw.BRAINTRUST_PROJECT_NAME,
+			BRAINTRUST_PROJECT_ID: raw.BRAINTRUST_PROJECT_ID,
 			POSTHOG_KEY: raw.POSTHOG_KEY,
 			POSTHOG_HOST: raw.POSTHOG_HOST,
 		}
