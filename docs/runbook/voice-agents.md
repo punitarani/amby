@@ -40,6 +40,14 @@ bun run voice:create-user -- --name "Voice User" --email you@example.com --passw
 
 ## Start the Worker
 
+Download the local LiveKit model files first:
+
+```bash
+bun run voice:download
+```
+
+Then start the worker:
+
 ```bash
 bun run voice:worker
 ```
@@ -74,6 +82,7 @@ conversation for that authenticated user.
 ## Troubleshooting
 
 - Auth failure: verify the user was created with `voice:create-user` and the password matches.
+- Turn-detector model missing: run `bun run voice:download` once to cache the LiveKit model files locally.
 - Worker does not join: verify `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and that `bun run voice:worker`
   is still running.
 - No speech input or output: verify `OPENAI_API_KEY` and `CARTESIA_API_KEY`.

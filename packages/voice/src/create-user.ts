@@ -25,11 +25,7 @@ const main = async () => {
 			Effect.gen(function* () {
 				const auth = yield* AuthService
 				const result = yield* Effect.tryPromise({
-					try: () =>
-						auth.api.signUpEmail({
-							body: { name, email, password, rememberMe: false },
-							headers: new Headers(),
-						}),
+					try: () => auth.api.createUser({ body: { name, email, password } }),
 					catch: (cause) =>
 						cause instanceof Error ? cause : new Error(`Failed to create user: ${String(cause)}`),
 				})

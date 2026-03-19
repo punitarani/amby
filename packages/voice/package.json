@@ -13,6 +13,7 @@
 		"lint:fix": "bunx @biomejs/biome check --fix .",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts ./src/worker.ts ./src/playground.ts ./src/create-user.ts --outdir dist --target node --packages external",
+		"download-files": "tsx src/worker.ts download-files",
 		"worker": "tsx src/worker.ts start",
 		"worker:dev": "tsx src/worker.ts dev",
 		"playground": "tsx src/playground.ts",
