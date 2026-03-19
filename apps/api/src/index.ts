@@ -1,6 +1,6 @@
 import { AgentService, makeAgentServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
-import { SandboxServiceLive } from "@amby/computer"
+import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { EnvServiceLive } from "@amby/env/local"
@@ -15,11 +15,15 @@ import { findOrCreateUser, handleCommand, verifySecret } from "./telegram/utils"
 // Shared layers — constructed once at startup
 const SharedLive = Layer.mergeAll(
 	MemoryServiceLive,
-	SandboxServiceLive,
+	TaskSupervisorLive,
 	ModelServiceLive,
 	AuthServiceLive,
 	TelegramBotLive,
-).pipe(Layer.provideMerge(DbServiceLive), Layer.provideMerge(EnvServiceLive))
+).pipe(
+	Layer.provideMerge(SandboxServiceLive),
+	Layer.provideMerge(DbServiceLive),
+	Layer.provideMerge(EnvServiceLive),
+)
 
 const runtime = ManagedRuntime.make(SharedLive)
 
@@ -65,7 +69,9 @@ app.post("/telegram/webhook", async (c) => {
 			return yield* agent.handleMessage(conversationId, text, { telegram: message }, sendReply)
 		}).pipe(Effect.provide(makeAgentServiceLive(userId)))
 
-		yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, response))
+		if (response.trim()) {
+			yield* Effect.tryPromise(() => bot.api.sendMessage(chatId, response))
+		}
 	}).pipe(
 		Effect.catchAllCause((cause) =>
 			Effect.gen(function* () {

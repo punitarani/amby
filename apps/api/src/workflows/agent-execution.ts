@@ -4,7 +4,7 @@ import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
 import { Bot } from "grammy"
-import { makeRuntimeForConsumer } from "../queue/runtime"
+import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "../queue/runtime"
 import { setTelegramScope } from "../sentry"
 import type { BufferedMessage, TelegramFrom } from "../telegram/utils"
 import { findOrCreateUser, splitTelegramMessage } from "../telegram/utils"
@@ -89,7 +89,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 					// Typing indicator inside the step — survives retries, no leak
 					const typingInterval = setInterval(sendTyping, 4000)
 					try {
-						const runtime = makeRuntimeForConsumer(this.env)
+						const runtime = makeAgentRuntimeForConsumer(this.env)
 						try {
 							const sendReply = (text: string) => bot.api.sendMessage(chatId, text).then(() => {})
 							const effect = Effect.gen(function* () {
@@ -127,7 +127,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			})
 
 			// Step 4: Send response to Telegram (split if >4096 chars)
-			if (!isSubAgent) {
+			if (!isSubAgent && response.trim()) {
 				await step.do("reply", async () => {
 					for (const chunk of splitTelegramMessage(response)) {
 						await bot.api.sendMessage(chatId, chunk)

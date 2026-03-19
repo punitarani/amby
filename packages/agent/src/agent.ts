@@ -1,6 +1,6 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import type { ChannelType } from "@amby/channels"
-import { createComputerTools, createCuaTools, SandboxService } from "@amby/computer"
+import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
 import { DbService, desc, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import {
@@ -24,6 +24,8 @@ export type StreamPart =
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
 import { createSubagentTools } from "./subagents/spawner"
 import { buildToolGroups } from "./subagents/tool-groups"
+import { createCodexAuthTools } from "./tools/codex-auth"
+import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
 
 export class AgentService extends Context.Tag("AgentService")<
@@ -59,6 +61,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			const models = yield* ModelService
 			const memory = yield* MemoryService
 			const sandbox = yield* SandboxService
+			const taskSupervisor = yield* TaskSupervisor
 			const env = yield* EnvService
 			const enableCua = env.ENABLE_CUA
 			const phClient = new PostHog(env.POSTHOG_KEY, { host: env.POSTHOG_HOST })
@@ -96,6 +99,34 @@ export const makeAgentServiceLive = (userId: string) =>
 			) =>
 				query((d) => d.insert(schema.messages).values({ conversationId, role, content, metadata }))
 
+			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
+				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
+
+			/**
+			 * Scans tool results from last to first, returning the first `userMessages` array found.
+			 *
+			 * When a tool returns `{ userMessages: string[] }`, those messages are sent directly
+			 * to the user via onReply and the LLM's own text response is suppressed (finalText = "").
+			 * This lets tools like codex-auth relay multi-step instructions (e.g. device-code URLs)
+			 * without the LLM paraphrasing them.
+			 */
+			const extractLastToolUserMessages = (result: {
+				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
+			}): string[] | undefined => {
+				for (let i = result.toolResults.length - 1; i >= 0; i -= 1) {
+					const output = result.toolResults[i]?.output
+					if (
+						typeof output === "object" &&
+						output !== null &&
+						"userMessages" in output &&
+						Array.isArray(output.userMessages) &&
+						output.userMessages.every((message) => typeof message === "string" && message.trim())
+					) {
+						return output.userMessages
+					}
+				}
+			}
+
 			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
 				Effect.gen(function* () {
 					const userRow = yield* query((d) =>
@@ -120,6 +151,12 @@ export const makeAgentServiceLive = (userId: string) =>
 					const history = yield* loadHistory(conversationId)
 
 					const memoryTools = createMemoryTools(memory, userId)
+					const sandboxTools = sandbox.enabled
+						? createSandboxDelegationTools(taskSupervisor, userId)
+						: undefined
+					const codexAuthTools = sandbox.enabled
+						? createCodexAuthTools(taskSupervisor, userId)
+						: undefined
 					const cuaTools = enableCua
 						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 						: undefined
@@ -146,6 +183,8 @@ export const makeAgentServiceLive = (userId: string) =>
 					const tools = {
 						...delegationTools,
 						search_memories,
+						...(sandboxTools ?? {}),
+						...(codexAuthTools ?? {}),
 						...createJobTools(db, userId, userTimezone),
 						...(onReply ? createReplyTools(onReply) : {}),
 					}
@@ -169,11 +208,20 @@ export const makeAgentServiceLive = (userId: string) =>
 								}),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
+						const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
+						if (toolUserMessages && onReply) {
+							yield* Effect.tryPromise(async () => {
+								for (const message of toolUserMessages) {
+									await onReply(message)
+								}
+							})
+						}
+						const finalText = toolUserMessages ? "" : result.text
 
 						yield* saveMessage(conversationId, "user", content, metadata)
-						yield* saveMessage(conversationId, "assistant", result.text)
+						yield* maybeSaveAssistantMessage(conversationId, finalText)
 
-						return result.text
+						return finalText
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
@@ -203,14 +251,23 @@ export const makeAgentServiceLive = (userId: string) =>
 								}),
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
+						const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
+						if (toolUserMessages && onReply) {
+							yield* Effect.tryPromise(async () => {
+								for (const message of toolUserMessages) {
+									await onReply(message)
+								}
+							})
+						}
+						const finalText = toolUserMessages ? "" : result.text
 
 						// Save each message individually for accurate history
 						for (const content of messages) {
 							yield* saveMessage(conversationId, "user", content, metadata)
 						}
-						yield* saveMessage(conversationId, "assistant", result.text)
+						yield* maybeSaveAssistantMessage(conversationId, finalText)
 
-						return result.text
+						return finalText
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
@@ -301,6 +358,7 @@ export const makeAgentServiceLive = (userId: string) =>
 
 				shutdown: () =>
 					Effect.gen(function* () {
+						yield* taskSupervisor.shutdown()
 						yield* Effect.tryPromise({
 							try: () => phClient.shutdown(),
 							catch: (cause) => new AgentError({ message: "Failed to shutdown PostHog", cause }),
