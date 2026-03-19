@@ -6,13 +6,14 @@ const instrumentedAI = wrapAISDK(ai)
 export const { generateText, streamText } = instrumentedAI
 export const { stepCountIs, tool } = ai
 
-export const initializeBraintrust = (apiKey?: string, projectName = "Amby Agent") => {
+export const initializeBraintrust = (apiKey?: string, projectId?: string) => {
 	const key = apiKey?.trim()
 	if (!key) {
 		console.warn("[braintrust] BRAINTRUST_API_KEY not set — tracing disabled")
 		return
 	}
-	initLogger({ apiKey: key, projectName })
+	const id = projectId?.trim()
+	initLogger({ apiKey: key, ...(id ? { projectId: id } : { projectName: "Amby Agent" }) })
 }
 
 export const traceBraintrustOperation = async <T>(
