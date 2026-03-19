@@ -369,8 +369,8 @@ and utilities.
 #### How It Works
 
 The agent uses a **multi-agent orchestration** pattern built on Vercel AI SDK v6 primitives. A single orchestrator agent
-receives user messages and delegates work to specialized subagents, each implemented as a tool that runs its own
-`generateText()` loop with restricted tools and a focused system prompt.
+receives user messages and delegates work to specialized subagents, each implemented as a tool backed by its own
+`ToolLoopAgent` with restricted tools and focused instructions.
 
 1. **Orchestrator** — receives messages, decides how to handle them, delegates to subagents, synthesizes responses
 2. **Subagents** — research, builder, planner, computer (CUA), memory manager — each with scoped tools and prompts
@@ -435,9 +435,9 @@ sequenceDiagram
     A->>Mem: buildMemoriesText(userId, text)
     Mem-->>A: memory context
 
-    A->>M: generateText(prompt + memory + tools)
+    A->>M: ToolLoopAgent.generate(messages + instructions + tools)
 
-    loop Tool Loop (AI SDK managed)
+    loop ToolLoopAgent Step Loop
         M-->>A: tool call (e.g., execute_command)
         A->>C: executeCommand(sandboxId, cmd)
         C-->>A: result

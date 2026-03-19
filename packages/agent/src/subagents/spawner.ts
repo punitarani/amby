@@ -1,6 +1,6 @@
 import type { LanguageModel, ToolSet } from "ai"
 import { z } from "zod"
-import { generateText, stepCountIs, tool } from "../braintrust"
+import { stepCountIs, ToolLoopAgent, tool } from "../braintrust"
 import { SUBAGENT_DEFS } from "./definitions"
 import { resolveTools, type ToolGroups } from "./tool-groups"
 
@@ -19,6 +19,12 @@ export function createSubagentTools(
 		const systemPrompt = sharedContext
 			? `${def.systemPrompt}\n\n# Context\n${sharedContext}`
 			: def.systemPrompt
+		const subagent = new ToolLoopAgent({
+			model,
+			instructions: systemPrompt,
+			tools: subagentTools,
+			stopWhen: stepCountIs(def.maxSteps),
+		})
 
 		tools[`delegate_${def.name}`] = tool({
 			description: def.description,
@@ -26,17 +32,11 @@ export function createSubagentTools(
 				task: z.string().describe("The task for this agent to execute"),
 				context: z.string().optional().describe("Additional context relevant to the task"),
 			}),
-			execute: async ({ task, context }) => {
+			execute: async ({ task, context }, { abortSignal }) => {
 				try {
 					const userMessage = context ? `${task}\n\nAdditional context: ${context}` : task
 
-					const result = await generateText({
-						model,
-						system: systemPrompt,
-						messages: [{ role: "user", content: userMessage }],
-						tools: subagentTools,
-						stopWhen: stepCountIs(def.maxSteps),
-					})
+					const result = await subagent.generate({ prompt: userMessage, abortSignal })
 
 					return { summary: result.text }
 				} catch (error) {
