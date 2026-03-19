@@ -9,13 +9,13 @@ import {
 	MemoryService,
 } from "@amby/memory"
 import { ModelService } from "@amby/models"
+import type { ToolSet } from "ai"
 import { Context, Effect, Layer } from "effect"
 import {
 	flushBraintrust,
-	generateText,
 	initializeBraintrust,
 	stepCountIs,
-	streamText,
+	ToolLoopAgent,
 	traceBraintrustOperation,
 } from "./braintrust"
 import { AgentError } from "./errors"
@@ -32,35 +32,22 @@ import { createCodexAuthTools } from "./tools/codex-auth"
 import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
 
-export class AgentService extends Context.Tag("AgentService")<
-	AgentService,
-	{
-		readonly handleMessage: (
-			conversationId: string,
-			content: string,
-			metadata?: Record<string, unknown>,
-			onReply?: ReplyFn,
-		) => Effect.Effect<string, AgentError>
-		readonly handleBatchedMessages: (
-			conversationId: string,
-			messages: string[],
-			metadata?: Record<string, unknown>,
-			onReply?: ReplyFn,
-		) => Effect.Effect<string, AgentError>
-		readonly streamMessage: (
-			conversationId: string,
-			content: string,
-			onPart: (part: StreamPart) => void,
-			metadata?: Record<string, unknown>,
-		) => Effect.Effect<string, AgentError>
-		readonly ensureConversation: (channelType?: ChannelType) => Effect.Effect<string, AgentError>
-		readonly startConversation: (
-			channelType: ChannelType,
-			metadata?: Record<string, unknown>,
-		) => Effect.Effect<string, AgentError>
-		readonly shutdown: () => Effect.Effect<void, AgentError>
-	}
->() {}
+type RequestMode = "message" | "batched-message" | "stream-message"
+type UsageSummary = {
+	inputTokens?: number
+	outputTokens?: number
+	totalTokens?: number
+}
+type StepLifecycleEvent = {
+	stepNumber: number
+	finishReason: string
+	toolCalls?: Array<{ toolName: string }>
+	usage?: UsageSummary
+}
+type FinishLifecycleEvent = {
+	steps: unknown[]
+	totalUsage?: UsageSummary
+}
 
 const compactRecord = (record: Record<string, unknown>) =>
 	Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined))
@@ -101,6 +88,44 @@ const summarizeRequestMetadata = (metadata?: Record<string, unknown>) => {
 	})
 }
 
+const summarizeUsage = (usage?: UsageSummary) =>
+	usage
+		? compactRecord({
+				inputTokens: usage.inputTokens,
+				outputTokens: usage.outputTokens,
+				totalTokens: usage.totalTokens,
+			})
+		: undefined
+
+export class AgentService extends Context.Tag("AgentService")<
+	AgentService,
+	{
+		readonly handleMessage: (
+			conversationId: string,
+			content: string,
+			metadata?: Record<string, unknown>,
+			onReply?: ReplyFn,
+		) => Effect.Effect<string, AgentError>
+		readonly handleBatchedMessages: (
+			conversationId: string,
+			messages: string[],
+			metadata?: Record<string, unknown>,
+			onReply?: ReplyFn,
+		) => Effect.Effect<string, AgentError>
+		readonly streamMessage: (
+			conversationId: string,
+			content: string,
+			onPart: (part: StreamPart) => void,
+			metadata?: Record<string, unknown>,
+		) => Effect.Effect<string, AgentError>
+		readonly ensureConversation: (channelType?: ChannelType) => Effect.Effect<string, AgentError>
+		readonly startConversation: (
+			channelType: ChannelType,
+			metadata?: Record<string, unknown>,
+		) => Effect.Effect<string, AgentError>
+		readonly shutdown: () => Effect.Effect<void, AgentError>
+	}
+>() {}
 export const makeAgentServiceLive = (userId: string) =>
 	Layer.effect(
 		AgentService,
@@ -161,15 +186,6 @@ export const makeAgentServiceLive = (userId: string) =>
 							: Effect.fail(new Error("Failed to create conversation"))
 					}),
 				)
-
-			/**
-			 * Scans tool results from last to first, returning the first `userMessages` array found.
-			 *
-			 * When a tool returns `{ userMessages: string[] }`, those messages are sent directly
-			 * to the user via onReply and the LLM's own text response is suppressed (finalText = "").
-			 * This lets tools like codex-auth relay multi-step instructions (e.g. device-code URLs)
-			 * without the LLM paraphrasing them.
-			 */
 			const extractLastToolUserMessages = (result: {
 				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
 			}): string[] | undefined => {
@@ -238,7 +254,6 @@ export const makeAgentServiceLive = (userId: string) =>
 
 					const delegationTools = createSubagentTools(baseModel, toolGroups, sharedContext)
 
-					// Orchestrator gets: delegation tools + read-only memory search + jobs + reply
 					const { search_memories } = memoryTools
 					const tools = {
 						...delegationTools,
@@ -263,7 +278,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				requestMetadata,
 			}: {
 				conversationId: string
-				mode: "message" | "batched-message" | "stream-message"
+				mode: RequestMode
 				historyLength: number
 				toolCount: number
 				userTimezone: string
@@ -285,55 +300,134 @@ export const makeAgentServiceLive = (userId: string) =>
 					requestMetadata: summarizeRequestMetadata(requestMetadata),
 				})
 
+			const createOrchestrator = (systemPrompt: string, tools: ToolSet) =>
+				new ToolLoopAgent({
+					model: baseModel,
+					instructions: systemPrompt,
+					tools,
+					stopWhen: stepCountIs(10),
+				})
+
+			const createLifecycleCallbacks = (traceMetadata: Record<string, unknown>) => {
+				const toolNames = new Set<string>()
+				const stepFinishReasons = new Set<string>()
+				let stepCount = 0
+
+				const syncTraceMetadata = (totalUsage?: UsageSummary) => {
+					Object.assign(
+						traceMetadata,
+						compactRecord({
+							stepCount,
+							stepFinishReasons: stepFinishReasons.size > 0 ? [...stepFinishReasons] : undefined,
+							toolNames: toolNames.size > 0 ? [...toolNames] : undefined,
+							totalUsage: summarizeUsage(totalUsage),
+						}),
+					)
+				}
+
+				return {
+					onStepFinish: async ({
+						stepNumber,
+						finishReason,
+						toolCalls,
+						usage,
+					}: StepLifecycleEvent) => {
+						stepCount = Math.max(stepCount, stepNumber)
+						stepFinishReasons.add(finishReason)
+						for (const toolCall of toolCalls ?? []) {
+							toolNames.add(toolCall.toolName)
+						}
+						syncTraceMetadata(usage)
+					},
+					onFinish: async ({ steps, totalUsage }: FinishLifecycleEvent) => {
+						stepCount = Math.max(stepCount, steps.length)
+						syncTraceMetadata(totalUsage)
+					},
+				}
+			}
+
+			const sendToolUserMessages = (toolUserMessages: string[], onReply: ReplyFn) =>
+				Effect.tryPromise(async () => {
+					for (const message of toolUserMessages) {
+						await onReply(message)
+					}
+				})
+
+			const runGenerateRequest = ({
+				conversationId,
+				mode,
+				operationName,
+				input,
+				requestMessages,
+				metadata,
+				onReply,
+			}: {
+				conversationId: string
+				mode: Extract<RequestMode, "message" | "batched-message">
+				operationName: "agent.handle-message" | "agent.handle-batched-messages"
+				input: { content: string } | { messages: string[] }
+				requestMessages: ReadonlyArray<{ role: "user"; content: string }>
+				metadata?: Record<string, unknown>
+				onReply?: ReplyFn
+			}) =>
+				Effect.gen(function* () {
+					const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
+						conversationId,
+						onReply,
+					)
+					const traceMetadata = buildTraceMetadata({
+						conversationId,
+						mode,
+						historyLength: history.length,
+						toolCount: Object.keys(tools).length,
+						userTimezone,
+						replyToolEnabled: Boolean(onReply),
+						messageCount: requestMessages.length,
+						requestMetadata: metadata,
+					})
+					const lifecycle = createLifecycleCallbacks(traceMetadata)
+					const agent = createOrchestrator(systemPrompt, tools as ToolSet)
+
+					const result = yield* Effect.tryPromise({
+						try: () =>
+							traceBraintrustOperation(
+								operationName,
+								input,
+								traceMetadata,
+								() =>
+									agent.generate({
+										messages: [...history, ...requestMessages],
+										onStepFinish: lifecycle.onStepFinish,
+										onFinish: lifecycle.onFinish,
+									}),
+								(response) => ({ text: response.text }),
+							),
+						catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
+					})
+					const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
+					if (toolUserMessages && onReply) {
+						yield* sendToolUserMessages(toolUserMessages, onReply)
+					}
+					const finalText = toolUserMessages ? "" : result.text
+
+					for (const message of requestMessages) {
+						yield* saveMessage(conversationId, "user", message.content, metadata)
+					}
+					yield* maybeSaveAssistantMessage(conversationId, finalText)
+
+					return finalText
+				})
+
 			return {
 				handleMessage: (conversationId, content, metadata, onReply) =>
-					Effect.gen(function* () {
-						const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
-							conversationId,
-							onReply,
-						)
-
-						const result = yield* Effect.tryPromise({
-							try: () =>
-								traceBraintrustOperation(
-									"agent.handle-message",
-									{ content },
-									buildTraceMetadata({
-										conversationId,
-										mode: "message",
-										historyLength: history.length,
-										toolCount: Object.keys(tools).length,
-										userTimezone,
-										replyToolEnabled: Boolean(onReply),
-										messageCount: 1,
-										requestMetadata: metadata,
-									}),
-									() =>
-										generateText({
-											model: baseModel,
-											system: systemPrompt,
-											messages: [...history, { role: "user" as const, content }],
-											tools,
-											stopWhen: stepCountIs(10),
-										}),
-									(response) => ({ text: response.text }),
-								),
-							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
-						})
-						const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
-						if (toolUserMessages && onReply) {
-							yield* Effect.tryPromise(async () => {
-								for (const message of toolUserMessages) {
-									await onReply(message)
-								}
-							})
-						}
-						const finalText = toolUserMessages ? "" : result.text
-
-						yield* saveMessage(conversationId, "user", content, metadata)
-						yield* maybeSaveAssistantMessage(conversationId, finalText)
-
-						return finalText
+					runGenerateRequest({
+						conversationId,
+						mode: "message",
+						operationName: "agent.handle-message",
+						input: { content },
+						requestMessages: [{ role: "user", content }],
+						metadata,
+						onReply,
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
@@ -343,62 +437,14 @@ export const makeAgentServiceLive = (userId: string) =>
 					),
 
 				handleBatchedMessages: (conversationId, messages, metadata, onReply) =>
-					Effect.gen(function* () {
-						const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
-							conversationId,
-							onReply,
-						)
-
-						// Each batched message becomes a separate user turn
-						const userMessages = messages.map((content) => ({
-							role: "user" as const,
-							content,
-						}))
-
-						const result = yield* Effect.tryPromise({
-							try: () =>
-								traceBraintrustOperation(
-									"agent.handle-batched-messages",
-									{ messages },
-									buildTraceMetadata({
-										conversationId,
-										mode: "batched-message",
-										historyLength: history.length,
-										toolCount: Object.keys(tools).length,
-										userTimezone,
-										replyToolEnabled: Boolean(onReply),
-										messageCount: messages.length,
-										requestMetadata: metadata,
-									}),
-									() =>
-										generateText({
-											model: baseModel,
-											system: systemPrompt,
-											messages: [...history, ...userMessages],
-											tools,
-											stopWhen: stepCountIs(10),
-										}),
-									(response) => ({ text: response.text }),
-								),
-							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
-						})
-						const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
-						if (toolUserMessages && onReply) {
-							yield* Effect.tryPromise(async () => {
-								for (const message of toolUserMessages) {
-									await onReply(message)
-								}
-							})
-						}
-						const finalText = toolUserMessages ? "" : result.text
-
-						// Save each message individually for accurate history
-						for (const content of messages) {
-							yield* saveMessage(conversationId, "user", content, metadata)
-						}
-						yield* maybeSaveAssistantMessage(conversationId, finalText)
-
-						return finalText
+					runGenerateRequest({
+						conversationId,
+						mode: "batched-message",
+						operationName: "agent.handle-batched-messages",
+						input: { messages },
+						requestMessages: messages.map((content) => ({ role: "user" as const, content })),
+						metadata,
+						onReply,
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
@@ -411,29 +457,30 @@ export const makeAgentServiceLive = (userId: string) =>
 					Effect.gen(function* () {
 						const { tools, systemPrompt, history, userTimezone } =
 							yield* prepareContext(conversationId)
+						const traceMetadata = buildTraceMetadata({
+							conversationId,
+							mode: "stream-message",
+							historyLength: history.length,
+							toolCount: Object.keys(tools).length,
+							userTimezone,
+							replyToolEnabled: false,
+							messageCount: 1,
+							requestMetadata: metadata,
+						})
+						const lifecycle = createLifecycleCallbacks(traceMetadata)
+						const agent = createOrchestrator(systemPrompt, tools as ToolSet)
 
 						const result = yield* Effect.tryPromise({
 							try: () =>
 								traceBraintrustOperation(
 									"agent.stream-message",
 									{ content },
-									buildTraceMetadata({
-										conversationId,
-										mode: "stream-message",
-										historyLength: history.length,
-										toolCount: Object.keys(tools).length,
-										userTimezone,
-										replyToolEnabled: false,
-										messageCount: 1,
-										requestMetadata: metadata,
-									}),
+									traceMetadata,
 									async () => {
-										const stream = streamText({
-											model: baseModel,
-											system: systemPrompt,
+										const stream = await agent.stream({
 											messages: [...history, { role: "user" as const, content }],
-											tools,
-											stopWhen: stepCountIs(10),
+											onStepFinish: lifecycle.onStepFinish,
+											onFinish: lifecycle.onFinish,
 										})
 
 										for await (const part of stream.fullStream) {
