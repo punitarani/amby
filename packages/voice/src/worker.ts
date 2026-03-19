@@ -3,12 +3,14 @@ import { fileURLToPath } from "node:url"
 import { AgentService } from "@amby/agent"
 import { EnvService } from "@amby/env"
 import {
+	type APIConnectOptions,
 	AutoSubscribe,
 	cli,
+	DEFAULT_API_CONNECT_OPTIONS,
 	defineAgent,
 	type JobContext,
 	type JobProcess,
-	type llm,
+	llm,
 	voice,
 	WorkerOptions,
 } from "@livekit/agents"
@@ -41,6 +43,39 @@ const extractLatestUserText = (chatCtx: llm.ChatContext) => {
 	return undefined
 }
 
+class NoopLLM extends llm.LLM {
+	override label() {
+		return "amby-voice-bridge"
+	}
+
+	override get model() {
+		return "amby-agent-bridge"
+	}
+
+	override chat({
+		chatCtx,
+		toolCtx,
+		connOptions = DEFAULT_API_CONNECT_OPTIONS,
+	}: {
+		chatCtx: llm.ChatContext
+		toolCtx?: llm.ToolContext
+		connOptions?: APIConnectOptions
+		parallelToolCalls?: boolean
+		toolChoice?: llm.ToolChoice
+		extraKwargs?: Record<string, unknown>
+	}) {
+		return new NoopLLMStream(this, { chatCtx, toolCtx, connOptions })
+	}
+}
+
+class NoopLLMStream extends llm.LLMStream {
+	protected override async run() {
+		throw new Error(
+			"NoopLLM should never be used directly. AmbyVoiceAgent.llmNode must handle replies.",
+		)
+	}
+}
+
 class AmbyVoiceAgent extends voice.Agent {
 	constructor(
 		private readonly streamReply: (
@@ -52,6 +87,9 @@ class AmbyVoiceAgent extends voice.Agent {
 	) {
 		super({
 			instructions: "You are Amby, a voice assistant.",
+			// LiveKit requires an LLM to be present before it will run the reply pipeline.
+			// Replies still come from the custom llmNode bridge into @amby/agent.
+			llm: new NoopLLM(),
 		})
 	}
 
@@ -141,6 +179,10 @@ export default defineAgent({
 				}),
 				vad: ctx.proc.userData.vad as silero.VAD,
 				turnDetection: new livekit.turnDetector.MultilingualModel(),
+			})
+
+			session.on(voice.AgentSessionEventTypes.Error, (event) => {
+				console.error("Voice session error:", event.error)
 			})
 
 			await session.start({
