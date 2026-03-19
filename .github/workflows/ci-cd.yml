@@ -111,8 +111,9 @@ jobs:
 
       - name: Sync secrets to Cloudflare
         run: |
+          PATTERN=$(grep -v '^#' scripts/worker-env-keys.txt | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
           doppler secrets download --no-file --format json | \
-            jq -c 'with_entries(select(.key | test("^(NODE_ENV|OPENROUTER_API_KEY|OPENAI_API_KEY|CARTESIA_API_KEY|DAYTONA_API_KEY|DAYTONA_API_URL|DAYTONA_TARGET|SENTRY_DSN|SENTRY_ENVIRONMENT|TELEGRAM_BOT_TOKEN|TELEGRAM_WEBHOOK_SECRET|DATABASE_URL|BETTER_AUTH_SECRET|BETTER_AUTH_URL|ENABLE_CUA|POSTHOG_KEY|POSTHOG_HOST)$")))' | \
+            jq -c --arg p "^($PATTERN)$" 'with_entries(select(.key | test($p)))' | \
             (cd apps/api && npx wrangler secret bulk)
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
@@ -159,14 +160,14 @@ jobs:
             test -f dist-worker/worker.js
             test -f dist-worker/worker.js.map
             export SENTRY_RELEASE="$GITHUB_SHA"
-            if ! npx sentry-cli releases info "$SENTRY_RELEASE" >/dev/null 2>&1; then
-              npx sentry-cli releases new "$SENTRY_RELEASE"
+            if ! bunx sentry-cli releases info "$SENTRY_RELEASE" >/dev/null 2>&1; then
+              bunx sentry-cli releases new "$SENTRY_RELEASE"
             fi
-            npx sentry-cli sourcemaps upload \
+            bunx sentry-cli sourcemaps upload \
               --release "$SENTRY_RELEASE" \
               --strip-prefix "$PWD" \
               dist-worker
-            npx sentry-cli releases finalize "$SENTRY_RELEASE"
+            bunx sentry-cli releases finalize "$SENTRY_RELEASE"
           '
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
