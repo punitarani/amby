@@ -2,37 +2,17 @@ import * as ai from "ai"
 import { flush, initLogger, traced, wrapAISDK } from "braintrust"
 
 const instrumentedAI = wrapAISDK(ai)
-const DEFAULT_BRAINTRUST_PROJECT_NAME = "Amby Agent"
 
-let initializedConfig: { apiKey: string; projectName: string } | undefined
-
-export const { generateText, streamText, Experimental_Agent, ToolLoopAgent } = instrumentedAI
+export const { generateText, streamText } = instrumentedAI
 export const { stepCountIs, tool } = ai
 
-export const initializeBraintrust = (apiKey?: string, projectName?: string) => {
-	const normalizedApiKey = apiKey?.trim()
-	if (!normalizedApiKey) return false
-
-	const resolvedProjectName = projectName?.trim() || DEFAULT_BRAINTRUST_PROJECT_NAME
-
-	if (
-		initializedConfig?.apiKey === normalizedApiKey &&
-		initializedConfig?.projectName === resolvedProjectName
-	) {
-		return true
+export const initializeBraintrust = (apiKey?: string, projectName = "Amby Agent") => {
+	const key = apiKey?.trim()
+	if (!key) {
+		console.warn("[braintrust] BRAINTRUST_API_KEY not set — tracing disabled")
+		return
 	}
-
-	initLogger({
-		apiKey: normalizedApiKey,
-		projectName: resolvedProjectName,
-	})
-
-	initializedConfig = {
-		apiKey: normalizedApiKey,
-		projectName: resolvedProjectName,
-	}
-
-	return true
+	initLogger({ apiKey: key, projectName })
 }
 
 export const traceBraintrustOperation = async <T>(
@@ -40,17 +20,22 @@ export const traceBraintrustOperation = async <T>(
 	input: unknown,
 	metadata: Record<string, unknown>,
 	operation: () => Promise<T>,
-	output: (result: T) => unknown = (result) => result,
+	extractOutput: (result: T) => unknown = (result) => result,
 ) =>
 	traced(
 		async (span) => {
-			const result = await operation()
-			span.log({
-				input,
-				output: output(result),
-				metadata,
-			})
-			return result
+			try {
+				const result = await operation()
+				span.log({ input, output: extractOutput(result), metadata })
+				return result
+			} catch (error) {
+				span.log({
+					input,
+					metadata,
+					error: error instanceof Error ? error.message : String(error),
+				})
+				throw error
+			}
 		},
 		{ name, type: "function" },
 	)
