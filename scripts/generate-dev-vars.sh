@@ -1,39 +1,15 @@
 #!/usr/bin/env bash
 # Generates apps/api/.dev.vars from Doppler environment variables.
 # Run via: bun run dev:vars  (which wraps this with `doppler run`)
-#
-# Keys are derived from the WorkerBindings interface in packages/env/src/workers.ts,
-# excluding Cloudflare primitives (queues, DOs, workflows, Hyperdrive).
 
 set -euo pipefail
 
-OUTFILE="$(dirname "$0")/../apps/api/.dev.vars"
+SCRIPT_DIR="$(dirname "$0")"
+OUTFILE="$SCRIPT_DIR/../apps/api/.dev.vars"
+KEYS_FILE="$SCRIPT_DIR/worker-env-keys.txt"
 
-KEYS=(
-  NODE_ENV
-  OPENROUTER_API_KEY
-  OPENAI_API_KEY
-  CARTESIA_API_KEY
-  LIVEKIT_URL
-  LIVEKIT_API_KEY
-  LIVEKIT_API_SECRET
-  DAYTONA_API_KEY
-  DAYTONA_API_URL
-  DAYTONA_TARGET
-  SENTRY_DSN
-  SENTRY_ENVIRONMENT
-  SENTRY_RELEASE
-  TELEGRAM_BOT_TOKEN
-  TELEGRAM_WEBHOOK_SECRET
-  DATABASE_URL
-  BETTER_AUTH_SECRET
-  BETTER_AUTH_URL
-  ENABLE_CUA
-  BRAINTRUST_API_KEY
-  BRAINTRUST_PROJECT_ID
-  POSTHOG_KEY
-  POSTHOG_HOST
-)
+# Read keys from shared list, skipping comments and blank lines
+mapfile -t KEYS < <(grep -v '^#' "$KEYS_FILE" | grep -v '^$')
 
 : > "$OUTFILE"
 

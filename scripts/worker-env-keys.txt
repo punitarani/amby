@@ -1,0 +1,28 @@
+## Worker environment variable keys
+## Derived from WorkerBindings in packages/env/src/workers.ts,
+## excluding Cloudflare primitives (queues, DOs, workflows, Hyperdrive, version metadata).
+## Used by: generate-dev-vars.sh, ci-cd.yml (secret sync)
+
+NODE_ENV
+OPENROUTER_API_KEY
+OPENAI_API_KEY
+CARTESIA_API_KEY
+LIVEKIT_URL
+LIVEKIT_API_KEY
+LIVEKIT_API_SECRET
+DAYTONA_API_KEY
+DAYTONA_API_URL
+DAYTONA_TARGET
+SENTRY_DSN
+SENTRY_ENVIRONMENT
+SENTRY_RELEASE
+TELEGRAM_BOT_TOKEN
+TELEGRAM_WEBHOOK_SECRET
+DATABASE_URL
+BETTER_AUTH_SECRET
+BETTER_AUTH_URL
+ENABLE_CUA
+BRAINTRUST_API_KEY
+BRAINTRUST_PROJECT_ID
+POSTHOG_KEY
+POSTHOG_HOST
