@@ -11,8 +11,10 @@ import {
 } from "@amby/computer/sandbox-config"
 import { DbService, eq, schema } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
+import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
 import { makeRuntimeForConsumer } from "../queue/runtime"
+import { setWorkerScope } from "../sentry"
 
 export interface SandboxProvisionParams {
 	userId: string
@@ -24,6 +26,12 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 > {
 	async run(event: WorkflowEvent<SandboxProvisionParams>, step: WorkflowStep) {
 		const { userId } = event.payload
+		const scope = setWorkerScope("workflow.sandbox_provision", {
+			workflow_instance_id: event.instanceId,
+			user_id: userId,
+		})
+		scope.setUser({ id: userId })
+
 		const isDev = this.env.NODE_ENV !== "production"
 		const name = sandboxName(userId, isDev)
 		const env = this.env
@@ -70,7 +78,10 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 		})
 
 		if (exists) {
-			console.log(`[SandboxProvision] Sandbox ${name} already exists, skipping`)
+			Sentry.logger.info("Sandbox already exists", {
+				sandbox_name: name,
+				user_id: userId,
+			})
 			return
 		}
 
@@ -154,6 +165,10 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			},
 		)
 
-		console.log(`[SandboxProvision] Successfully provisioned sandbox ${name} (${sandboxId})`)
+		Sentry.logger.info("Sandbox provisioned", {
+			sandbox_name: name,
+			sandbox_id: sandboxId,
+			user_id: userId,
+		})
 	}
 }

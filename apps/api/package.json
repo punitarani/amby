@@ -8,11 +8,14 @@
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
 		"dev": "bun run --hot src/index.ts",
 		"dev:worker": "wrangler dev",
-		"deploy": "wrangler deploy",
+		"deploy": "export SENTRY_RELEASE=${SENTRY_RELEASE:-$(sentry-cli releases propose-version)} && wrangler deploy --outdir dist-worker --upload-source-maps --var SENTRY_RELEASE:$SENTRY_RELEASE && bun run sentry:sourcemaps",
+		"sentry:release": "sentry-cli releases info \"$SENTRY_RELEASE\" >/dev/null 2>&1 || sentry-cli releases new \"$SENTRY_RELEASE\"",
+		"sentry:sourcemaps": "bun run sentry:release && sentry-cli sourcemaps upload --release=\"$SENTRY_RELEASE\" --strip-prefix \"$PWD\" dist-worker && sentry-cli releases finalize \"$SENTRY_RELEASE\"",
 		"cf-typegen": "wrangler types --env-interface CloudflareBindings",
 		"start": "bun run src/index.ts"
 	},
 	"devDependencies": {
+		"@sentry/cli": "^2.58.2",
 		"wrangler": "^4.0.0",
 		"@cloudflare/workers-types": "^4.20241218.0"
 	},
@@ -24,6 +27,7 @@
 		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",
 		"@amby/models": "workspace:*",
+		"@sentry/cloudflare": "^10.44.0",
 		"effect": "^3.19.19",
 		"grammy": "^1.35.0",
 		"hono": "^4.7.0",
