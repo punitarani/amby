@@ -64,9 +64,9 @@ jobs:
 
       - name: Validate deploy tooling
         run: |
-          # sentry-cli: local devDep of apps/api — npx resolves from node_modules/.bin
-          (cd apps/api && npx sentry-cli --version)
-          # @posthog/cli: not a local dep — npx auto-downloads the scoped package
+          # @sentry/cli: local devDep of apps/api — must use scoped name with npx
+          (cd apps/api && npx @sentry/cli --version)
+          # @posthog/cli: not a local dep — npx auto-downloads
           npx @posthog/cli --version
 
           # Verify worker-env-keys.txt produces a non-empty key pattern
@@ -175,14 +175,14 @@ jobs:
             test -f dist-worker/worker.js
             test -f dist-worker/worker.js.map
             export SENTRY_RELEASE="$GITHUB_SHA"
-            if ! npx sentry-cli releases info "$SENTRY_RELEASE" >/dev/null 2>&1; then
-              npx sentry-cli releases new "$SENTRY_RELEASE"
+            if ! npx @sentry/cli releases info "$SENTRY_RELEASE" >/dev/null 2>&1; then
+              npx @sentry/cli releases new "$SENTRY_RELEASE"
             fi
-            npx sentry-cli sourcemaps upload \
+            npx @sentry/cli sourcemaps upload \
               --release "$SENTRY_RELEASE" \
               --strip-prefix "$PWD" \
               dist-worker
-            npx sentry-cli releases finalize "$SENTRY_RELEASE"
+            npx @sentry/cli releases finalize "$SENTRY_RELEASE"
           '
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
