@@ -64,9 +64,10 @@ jobs:
 
       - name: Validate deploy tooling
         run: |
-          # Verify CLI tools used in deploy resolve correctly
-          bunx sentry-cli --version
-          bunx @posthog/cli --version
+          # sentry-cli: local devDep of apps/api — npx resolves from node_modules/.bin
+          (cd apps/api && npx sentry-cli --version)
+          # @posthog/cli: not a local dep — npx auto-downloads the scoped package
+          npx @posthog/cli --version
 
           # Verify worker-env-keys.txt produces a non-empty key pattern
           PATTERN=$(grep -v '^#' scripts/worker-env-keys.txt | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
@@ -152,11 +153,11 @@ jobs:
             cd apps/api
             # PostHog inject intentionally mutates the built worker.js bundle to stamp chunk IDs.
             # The injected dist-worker artifact is the exact bundle deployed below with --no-bundle.
-            bunx @posthog/cli sourcemap inject \
+            npx @posthog/cli sourcemap inject \
               --directory dist-worker \
               --release-name amby-api \
               --release-version "$GITHUB_SHA"
-            bunx @posthog/cli sourcemap upload \
+            npx @posthog/cli sourcemap upload \
               --directory dist-worker \
               --release-name amby-api \
               --release-version "$GITHUB_SHA"
@@ -174,14 +175,14 @@ jobs:
             test -f dist-worker/worker.js
             test -f dist-worker/worker.js.map
             export SENTRY_RELEASE="$GITHUB_SHA"
-            if ! bunx sentry-cli releases info "$SENTRY_RELEASE" >/dev/null 2>&1; then
-              bunx sentry-cli releases new "$SENTRY_RELEASE"
+            if ! npx sentry-cli releases info "$SENTRY_RELEASE" >/dev/null 2>&1; then
+              npx sentry-cli releases new "$SENTRY_RELEASE"
             fi
-            bunx sentry-cli sourcemaps upload \
+            npx sentry-cli sourcemaps upload \
               --release "$SENTRY_RELEASE" \
               --strip-prefix "$PWD" \
               dist-worker
-            bunx sentry-cli releases finalize "$SENTRY_RELEASE"
+            npx sentry-cli releases finalize "$SENTRY_RELEASE"
           '
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
