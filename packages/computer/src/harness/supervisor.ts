@@ -13,7 +13,7 @@ import {
 	POLL_INTERVAL_MS,
 	taskSessionId,
 } from "../config"
-import { SandboxError } from "../errors"
+import { SandboxError, sandboxErrorFromDefect } from "../errors"
 import { SandboxService } from "../sandbox/service"
 import {
 	asRecord,
@@ -436,19 +436,13 @@ export const TaskSupervisorLive = Layer.scoped(
 
 		yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(heartbeatInterval)))
 
-		const wrapSandboxError = (cause: unknown) =>
-			new SandboxError({
-				message: cause instanceof Error ? cause.message : String(cause),
-				cause,
-			})
-
 		return {
 			getCodexAuthStatus: (userId) =>
 				Effect.gen(function* () {
 					const sandbox = yield* sandboxService.ensure(userId)
 					return yield* Effect.tryPromise({
 						try: () => syncCodexAuthStatus(userId, sandbox),
-						catch: wrapSandboxError,
+						catch: sandboxErrorFromDefect,
 					})
 				}),
 
@@ -486,7 +480,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							await saveSandboxAuthConfig(userId, next, sandbox)
 							return summarizeCodexAuth(next)
 						},
-						catch: wrapSandboxError,
+						catch: sandboxErrorFromDefect,
 					})
 				}),
 
@@ -495,7 +489,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					const sandbox = yield* sandboxService.ensure(userId)
 					const current = yield* Effect.tryPromise({
 						try: () => syncCodexAuthStatus(userId, sandbox),
-						catch: wrapSandboxError,
+						catch: sandboxErrorFromDefect,
 					})
 					if (current.status === "pending") return current
 					if (current.status === "authenticated" && current.method === "chatgpt") return current
@@ -555,7 +549,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							await saveSandboxAuthConfig(userId, next, sandbox)
 							return summarizeCodexAuth(next)
 						},
-						catch: wrapSandboxError,
+						catch: sandboxErrorFromDefect,
 					})
 				}),
 
@@ -588,7 +582,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							await saveSandboxAuthConfig(userId, next, sandbox)
 							return summarizeCodexAuth(next)
 						},
-						catch: wrapSandboxError,
+						catch: sandboxErrorFromDefect,
 					})
 				}),
 
@@ -606,7 +600,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							await saveSandboxAuthConfig(userId, next, sandbox)
 							return summarizeCodexAuth(next)
 						},
-						catch: wrapSandboxError,
+						catch: sandboxErrorFromDefect,
 					})
 				}),
 
@@ -616,7 +610,7 @@ export const TaskSupervisorLive = Layer.scoped(
 
 					const { authMode } = yield* Effect.tryPromise({
 						try: () => requireCodexAuth(userId, sandbox),
-						catch: wrapSandboxError,
+						catch: sandboxErrorFromDefect,
 					})
 
 					const installResult = yield* Effect.tryPromise({

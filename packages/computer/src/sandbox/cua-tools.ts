@@ -5,6 +5,7 @@ import { Effect } from "effect"
 import { z } from "zod"
 import { CUA_LOCK_PATH, CUA_STALE_MINUTES } from "../config"
 import type { SandboxService } from "./service"
+import { runWithEnsuredSandbox } from "./tool-run"
 
 type SandboxOps = Context.Tag.Service<typeof SandboxService>
 
@@ -68,19 +69,8 @@ export function createCuaTools(
 		return yield* sandbox.ensure(userId)
 	})
 
-	const withSandbox = async <T>(fn: (instance: Sandbox) => Promise<T>): Promise<T | string> => {
-		try {
-			const instance = await Effect.runPromise(ensureSandbox)
-			return await fn(instance)
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err)
-			console.error(`[CUA] Error: ${message}`)
-			if (message.includes("not configured")) {
-				return "Computer access is not available — DAYTONA_API_KEY is not configured."
-			}
-			return `CUA error: ${message}. Try again in a moment.`
-		}
-	}
+	const withSandbox = <T>(fn: (instance: Sandbox) => Promise<T>) =>
+		runWithEnsuredSandbox(ensureSandbox, fn, { logPrefix: "CUA", channel: "cua" })
 
 	const tools = {
 		cua_start: tool({
