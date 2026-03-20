@@ -5,7 +5,7 @@ import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/worke
 import { MemoryServiceLive } from "@amby/memory"
 import { ModelServiceLive } from "@amby/models"
 import { Layer, ManagedRuntime } from "effect"
-import { TelegramBotLite } from "../telegram"
+import { TelegramSenderLite } from "../telegram"
 
 const makeBaseLive = (bindings: WorkerBindings) => {
 	const connectionString = bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? ""
@@ -15,7 +15,12 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		)
 	}
 
-	return Layer.mergeAll(MemoryServiceLive, ModelServiceLive, AuthServiceLive, TelegramBotLite).pipe(
+	return Layer.mergeAll(
+		MemoryServiceLive,
+		ModelServiceLive,
+		AuthServiceLive,
+		TelegramSenderLite,
+	).pipe(
 		Layer.provideMerge(SandboxServiceLive),
 		Layer.provideMerge(makeDbServiceFromHyperdrive(connectionString)),
 		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),

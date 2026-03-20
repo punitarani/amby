@@ -1,9 +1,9 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import { AgentService, makeAgentServiceLive } from "@amby/agent"
 import type { WorkerBindings } from "@amby/env/workers"
+import { createTelegramAdapter } from "@chat-adapter/telegram"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
-import { Bot } from "grammy"
 import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "../queue/runtime"
 import { setTelegramScope } from "../sentry"
 import type { BufferedMessage, TelegramFrom } from "../telegram/utils"
@@ -40,9 +40,13 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			},
 		})
 
-		const bot = new Bot(this.env.TELEGRAM_BOT_TOKEN ?? "")
+		const adapter = createTelegramAdapter({
+			botToken: this.env.TELEGRAM_BOT_TOKEN ?? "",
+			mode: "webhook",
+		})
+		const chatIdStr = String(chatId)
 
-		const sendTyping = () => bot.api.sendChatAction(chatId, "typing").catch(() => {})
+		const sendTyping = () => adapter.startTyping(chatIdStr).catch(() => {})
 
 		try {
 			// Step 1: Send typing indicator
@@ -91,7 +95,8 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 					try {
 						const runtime = makeAgentRuntimeForConsumer(this.env)
 						try {
-							const sendReply = (text: string) => bot.api.sendMessage(chatId, text).then(() => {})
+							const sendReply = (text: string) =>
+								adapter.postMessage(chatIdStr, text).then(() => {})
 							const effect = Effect.gen(function* () {
 								const agent = yield* AgentService
 								const convId = conversationId ?? (yield* agent.ensureConversation("telegram"))
@@ -130,7 +135,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			if (!isSubAgent && response.trim()) {
 				await step.do("reply", async () => {
 					for (const chunk of splitTelegramMessage(response)) {
-						await bot.api.sendMessage(chatId, chunk)
+						await adapter.postMessage(chatIdStr, chunk)
 					}
 				})
 			}
@@ -143,8 +148,8 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			// Send error message to user and reset DO state
 			if (!isSubAgent) {
 				await step.do("error-reply", async () => {
-					await bot.api
-						.sendMessage(chatId, "Sorry, something went wrong. Please try again.")
+					await adapter
+						.postMessage(chatIdStr, "Sorry, something went wrong. Please try again.")
 						.catch(() => {})
 				})
 			}
