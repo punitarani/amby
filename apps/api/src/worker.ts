@@ -3,12 +3,12 @@ import * as Sentry from "@sentry/cloudflare"
 import { Hono } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { ConversationSession as ConversationSessionBase } from "./durable-objects/conversation-session"
-import { homeResponse } from "./home"
+import { getHomeResponse } from "./home"
 import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
-import { getSentryOptions, getSentryOptionsOrFallback, setTelegramScope } from "./sentry"
+import { getSentryOptions, getSentryOptionsOrFallback } from "./sentry"
+import { getOrCreateChat } from "./telegram/chat-sdk"
 import type { TelegramQueueMessage } from "./telegram/utils"
-import { verifySecret } from "./telegram/utils"
 import { AgentExecutionWorkflow as AgentExecutionWorkflowBase } from "./workflows/agent-execution"
 import { SandboxProvisionWorkflow as SandboxProvisionWorkflowBase } from "./workflows/sandbox-provision"
 
@@ -83,58 +83,15 @@ app.onError(async (err, c) => {
 	return c.json({ error: "Internal Server Error" }, 500)
 })
 
-app.get("/", (c) => c.json(homeResponse))
+app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
 
-// Webhook handler — verify, enqueue, return 200 immediately
+// Webhook handler — Chat SDK handles secret verification, parsing, and routing via waitUntil
 app.post("/telegram/webhook", async (c) => {
-	const headerSecret = c.req.header("X-Telegram-Bot-Api-Secret-Token")
-	const webhookSecret = c.env.TELEGRAM_WEBHOOK_SECRET ?? ""
-
-	if (!verifySecret(headerSecret, webhookSecret)) {
-		return c.json({ error: "Unauthorized" }, 401)
-	}
-
-	const update = await c.req.json()
-	const message = update?.message
-	const distinctId = message?.from?.id
-	setTelegramScope({
-		component: "telegram.webhook",
-		chatId: message?.chat?.id,
-		from: message?.from,
-		attributes: {
-			http_method: c.req.method,
-			http_path: c.req.path,
-			telegram_update_id: update?.update_id,
-			telegram_message_id: message?.message_id,
-			has_text: Boolean(message?.text),
-		},
+	const { chat } = getOrCreateChat(c.env)
+	return chat.webhooks.telegram(c.req.raw, {
+		waitUntil: (task) => c.executionCtx.waitUntil(task),
 	})
-
-	if (distinctId) {
-		c.set("posthogDistinctId", String(distinctId))
-	}
-
-	const telegramQueue = c.env.TELEGRAM_QUEUE
-	if (telegramQueue) {
-		await Sentry.startSpan({ op: "queue.publish", name: "telegram-inbound" }, async () => {
-			await telegramQueue.send({
-				update,
-				receivedAt: Date.now(),
-			} satisfies TelegramQueueMessage)
-		})
-		Sentry.logger.info("Telegram update accepted", {
-			telegram_update_id: update?.update_id,
-			telegram_message_id: message?.message_id,
-			telegram_chat_id: message?.chat?.id,
-			telegram_from_id: message?.from?.id,
-			has_text: Boolean(message?.text),
-		})
-	} else {
-		console.warn("[Webhook] TELEGRAM_QUEUE binding not available — message dropped")
-	}
-
-	return c.json({ ok: true })
 })
 
 const worker: ExportedHandler<WorkerBindings, TelegramQueueMessage> = {

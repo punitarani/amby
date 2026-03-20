@@ -90,12 +90,14 @@ export class AgentService extends Context.Tag("AgentService")<
 			content: string,
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
+			onTextDelta?: (text: string) => void,
 		) => Effect.Effect<string, AgentError>
 		readonly handleBatchedMessages: (
 			conversationId: string,
 			messages: string[],
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
+			onTextDelta?: (text: string) => void,
 		) => Effect.Effect<string, AgentError>
 		readonly streamMessage: (
 			conversationId: string,
@@ -328,6 +330,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				requestMessages,
 				metadata,
 				onReply,
+				onTextDelta,
 			}: {
 				conversationId: string
 				mode: Extract<RequestMode, "message" | "batched-message">
@@ -336,6 +339,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				requestMessages: ReadonlyArray<{ role: "user"; content: string }>
 				metadata?: Record<string, unknown>
 				onReply?: ReplyFn
+				onTextDelta?: (text: string) => void
 			}) =>
 				Effect.gen(function* () {
 					const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
@@ -361,12 +365,30 @@ export const makeAgentServiceLive = (userId: string) =>
 								operationName,
 								input,
 								traceMetadata,
-								() =>
-									agent.generate({
-										messages: [...history, ...requestMessages],
-										onStepFinish: lifecycle.onStepFinish,
-										onFinish: lifecycle.onFinish,
-									}),
+								onTextDelta
+									? async () => {
+											const stream = await agent.stream({
+												messages: [...history, ...requestMessages],
+												onStepFinish: lifecycle.onStepFinish,
+												onFinish: lifecycle.onFinish,
+											})
+											for await (const part of stream.fullStream) {
+												if (part.type === "text-delta") {
+													onTextDelta(part.text)
+												}
+											}
+											const [text, toolResults] = await Promise.all([
+												stream.text,
+												stream.toolResults,
+											])
+											return { text, toolResults }
+										}
+									: () =>
+											agent.generate({
+												messages: [...history, ...requestMessages],
+												onStepFinish: lifecycle.onStepFinish,
+												onFinish: lifecycle.onFinish,
+											}),
 								(response) => ({ text: response.text }),
 							),
 						catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
@@ -386,7 +408,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				})
 
 			return {
-				handleMessage: (conversationId, content, metadata, onReply) =>
+				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>
 					runGenerateRequest({
 						conversationId,
 						mode: "message",
@@ -395,6 +417,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						requestMessages: [{ role: "user", content }],
 						metadata,
 						onReply,
+						onTextDelta,
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
@@ -403,7 +426,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						),
 					),
 
-				handleBatchedMessages: (conversationId, messages, metadata, onReply) =>
+				handleBatchedMessages: (conversationId, messages, metadata, onReply, onTextDelta) =>
 					runGenerateRequest({
 						conversationId,
 						mode: "batched-message",
@@ -412,6 +435,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						requestMessages: messages.map((content) => ({ role: "user" as const, content })),
 						metadata,
 						onReply,
+						onTextDelta,
 					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError

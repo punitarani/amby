@@ -1,10 +1,9 @@
-import { timingSafeEqual } from "node:crypto"
 import { and, DbService, desc, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import { Effect } from "effect"
 import { getPostHogClient } from "../posthog"
-import { TelegramBot } from "./index"
+import { TelegramSender } from "./index"
 
 // --- Types ---
 
@@ -85,21 +84,6 @@ const inferTimezoneFromLanguageCode = (code?: string): string | undefined => {
 
 // --- Utilities ---
 
-export const verifySecret = (
-	headerSecret: string | undefined,
-	configuredSecret: string,
-): boolean => {
-	if (!headerSecret || !configuredSecret) return false
-	try {
-		const a = Buffer.from(headerSecret, "utf-8")
-		const b = Buffer.from(configuredSecret, "utf-8")
-		if (a.length !== b.length) return false
-		return timingSafeEqual(a, b)
-	} catch {
-		return false
-	}
-}
-
 export const buildProfileMetadata = (
 	from: TelegramFrom,
 	chatId: number,
@@ -177,7 +161,7 @@ export const handleCommand = (
 	options?: { sandboxWorkflow?: WorkerBindings["SANDBOX_WORKFLOW"] },
 ) =>
 	Effect.gen(function* () {
-		const bot = yield* TelegramBot
+		const sender = yield* TelegramSender
 		const env = yield* EnvService
 		const userId = yield* findOrCreateUser(from, chatId)
 		const posthog = getPostHogClient(env.POSTHOG_KEY, env.POSTHOG_HOST)
@@ -220,7 +204,7 @@ export const handleCommand = (
 				})
 
 				yield* Effect.tryPromise(() =>
-					bot.api.sendMessage(
+					sender.sendMessage(
 						chatId,
 						`Welcome to Amby, ${from.first_name}! I'm your personal ambient assistant. Just send me a message and I'll help you out.`,
 					),
@@ -234,9 +218,7 @@ export const handleCommand = (
 					event: "bot_stopped",
 					properties: { channel: "telegram" },
 				})
-				yield* Effect.tryPromise(() =>
-					bot.api.sendMessage(chatId, "Paused. Send /start to resume."),
-				)
+				yield* Effect.tryPromise(() => sender.sendMessage(chatId, "Paused. Send /start to resume."))
 				break
 			}
 
@@ -247,7 +229,7 @@ export const handleCommand = (
 					properties: { channel: "telegram" },
 				})
 				yield* Effect.tryPromise(() =>
-					bot.api.sendMessage(
+					sender.sendMessage(
 						chatId,
 						"Available commands:\n/start — Start or resume the assistant\n/stop — Pause the assistant\n/help — Show this help message\n\nOr just send me any text message!",
 					),
