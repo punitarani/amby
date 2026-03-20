@@ -8,7 +8,7 @@ import { ModelServiceLive } from "@amby/models"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
 import { createAmbyBot } from "./bot"
-import { homeResponse } from "./home"
+import { getHomeResponse } from "./home"
 
 // Shared layers — constructed once at startup
 const SharedLive = Layer.mergeAll(
@@ -26,7 +26,7 @@ const runtime = ManagedRuntime.make(SharedLive)
 
 const app = new Hono()
 
-app.get("/", (c) => c.json(homeResponse))
+app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
 
 const port = Number(process.env.PORT) || 3001

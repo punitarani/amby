@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/cloudflare"
 import { Hono } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { ConversationSession as ConversationSessionBase } from "./durable-objects/conversation-session"
-import { homeResponse } from "./home"
+import { getHomeResponse } from "./home"
 import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
 import { getSentryOptions, getSentryOptionsOrFallback } from "./sentry"
@@ -83,7 +83,7 @@ app.onError(async (err, c) => {
 	return c.json({ error: "Internal Server Error" }, 500)
 })
 
-app.get("/", (c) => c.json(homeResponse))
+app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
 
 // Webhook handler — Chat SDK handles secret verification, parsing, and routing via waitUntil
