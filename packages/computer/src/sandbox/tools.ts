@@ -3,6 +3,7 @@ import { tool } from "ai"
 import type { Context } from "effect"
 import { Effect } from "effect"
 import { z } from "zod"
+import { runWithEnsuredSandbox } from "./tool-run"
 import type { SandboxService } from "./service"
 
 type SandboxOps = Context.Tag.Service<typeof SandboxService>
@@ -16,23 +17,8 @@ export function createComputerTools(sandbox: SandboxOps, userId: string) {
 		return state.instance
 	})
 
-	const withSandbox = async <T>(fn: (instance: Sandbox) => Promise<T>): Promise<T | string> => {
-		try {
-			const instance = await Effect.runPromise(ensureSandbox)
-			return await fn(instance)
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err)
-			const detail = err instanceof Error && err.cause ? ` | cause: ${err.cause}` : ""
-			console.error(`[Sandbox] Error: ${message}${detail}`)
-			if (err instanceof Error && err.stack) {
-				console.error(`[Sandbox] Stack: ${err.stack}`)
-			}
-			if (message.includes("not configured")) {
-				return "Computer access is not available — DAYTONA_API_KEY is not configured. Let the user know they can enable sandbox features by setting up a Daytona API key in their .env file (sign up at https://app.daytona.io)."
-			}
-			return `Sandbox error: ${message}. The sandbox may be temporarily unavailable. Try again in a moment.`
-		}
-	}
+	const withSandbox = <T>(fn: (instance: Sandbox) => Promise<T>) =>
+		runWithEnsuredSandbox(ensureSandbox, fn, { logPrefix: "Sandbox", channel: "computer" })
 
 	const tools = {
 		execute_command: tool({

@@ -1,13 +1,11 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import {
-	AGENT_USER,
-	AUTO_ARCHIVE_MINUTES,
-	AUTO_STOP_MINUTES,
+	buildSandboxCreateParams,
 	createDaytonaClient,
-	SANDBOX_RESOURCES,
-	sandboxImage,
-	sandboxLabels,
+	isDuplicateSandboxNameError,
+	persistSandboxFromInstance,
 	sandboxName,
+	tryGetSandboxByName,
 } from "@amby/computer/sandbox-config"
 import { DbService, eq, schema } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
@@ -53,9 +51,20 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			}
 		}
 
-		// Step 1: Check if sandbox already exists
-		const exists = await step.do("check-existing", { timeout: "30 seconds" }, async () => {
-			// Check DB first
+		// Step 1: If Daytona already has the sandbox, reconcile DB; otherwise clear stale rows
+		const shouldSkip = await step.do("check-existing", { timeout: "30 seconds" }, async () => {
+			const daytona = makeDaytona()
+			const existing = await tryGetSandboxByName(daytona, name)
+			if (existing) {
+				await withRuntime(
+					Effect.gen(function* () {
+						const { db } = yield* DbService
+						yield* Effect.tryPromise(() => persistSandboxFromInstance(db, userId, existing))
+					}),
+				)
+				return true
+			}
+
 			const [record] = await withRuntime(
 				Effect.gen(function* () {
 					const { db } = yield* DbService
@@ -66,19 +75,27 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 						.limit(1)
 				}),
 			)
-			if (record && record.status !== "error") return true
 
-			// Also check Daytona directly
-			try {
-				await makeDaytona().get(name)
+			if (record?.status === "creating") {
 				return true
-			} catch {
-				return false
 			}
+
+			if (record && record.status !== "error") {
+				await withRuntime(
+					Effect.gen(function* () {
+						const { db } = yield* DbService
+						yield* Effect.tryPromise(() =>
+							db.delete(schema.sandboxes).where(eq(schema.sandboxes.userId, userId)),
+						)
+					}),
+				)
+			}
+
+			return false
 		})
 
-		if (exists) {
-			Sentry.logger.info("Sandbox already exists", {
+		if (shouldSkip) {
+			Sentry.logger.info("Sandbox already exists or provisioning in progress", {
 				sandbox_name: name,
 				user_id: userId,
 			})
@@ -93,6 +110,18 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				retries: { limit: 2, delay: "10 seconds", backoff: "exponential" },
 			},
 			async () => {
+				const daytona = makeDaytona()
+				const pre = await tryGetSandboxByName(daytona, name)
+				if (pre) {
+					await withRuntime(
+						Effect.gen(function* () {
+							const { db } = yield* DbService
+							yield* Effect.tryPromise(() => persistSandboxFromInstance(db, userId, pre, "running"))
+						}),
+					)
+					return pre.id
+				}
+
 				await withRuntime(
 					Effect.gen(function* () {
 						const { db } = yield* DbService
@@ -110,34 +139,36 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 					}),
 				)
 
-				const sandbox = await makeDaytona().create(
-					{
-						name,
-						image: sandboxImage,
-						resources: SANDBOX_RESOURCES,
-						autoStopInterval: AUTO_STOP_MINUTES,
-						autoArchiveInterval: AUTO_ARCHIVE_MINUTES,
-						labels: sandboxLabels(userId, isDev),
-						user: AGENT_USER,
-					},
-					{ timeout: 300 },
-				)
+				const createSpec = buildSandboxCreateParams(userId, isDev)
 
-				await withRuntime(
-					Effect.gen(function* () {
-						const { db } = yield* DbService
-						return db
-							.update(schema.sandboxes)
-							.set({
-								daytonaSandboxId: sandbox.id,
-								status: "running" as const,
-								lastActivityAt: new Date(),
-							})
-							.where(eq(schema.sandboxes.userId, userId))
-					}),
-				)
-
-				return sandbox.id
+				try {
+					const sandbox = await daytona.create(createSpec, { timeout: 300 })
+					await withRuntime(
+						Effect.gen(function* () {
+							const { db } = yield* DbService
+							yield* Effect.tryPromise(() =>
+								persistSandboxFromInstance(db, userId, sandbox, "running"),
+							)
+						}),
+					)
+					return sandbox.id
+				} catch (cause) {
+					if (isDuplicateSandboxNameError(cause)) {
+						const recovered = await tryGetSandboxByName(daytona, name)
+						if (recovered) {
+							await withRuntime(
+								Effect.gen(function* () {
+									const { db } = yield* DbService
+									yield* Effect.tryPromise(() =>
+										persistSandboxFromInstance(db, userId, recovered, "running"),
+									)
+								}),
+							)
+							return recovered.id
+						}
+					}
+					throw cause
+				}
 			},
 		)
 
@@ -149,17 +180,17 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				retries: { limit: 2, delay: "5 seconds", backoff: "exponential" },
 			},
 			async () => {
-				const sandbox = await makeDaytona().get(name)
+				const daytona = makeDaytona()
+				const sandbox = await daytona.get(name)
 				await sandbox.stop()
 				await sandbox.archive()
 
 				await withRuntime(
 					Effect.gen(function* () {
 						const { db } = yield* DbService
-						return db
-							.update(schema.sandboxes)
-							.set({ status: "archived" as const, lastActivityAt: new Date() })
-							.where(eq(schema.sandboxes.userId, userId))
+						yield* Effect.tryPromise(() =>
+							persistSandboxFromInstance(db, userId, sandbox, "archived"),
+						)
 					}),
 				)
 			},
