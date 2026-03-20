@@ -157,11 +157,14 @@ export const makeAgentServiceLive = (userId: string) =>
 			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
 				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
 
-			const extractLastToolUserMessages = (result: {
+			const extractToolUserMessages = (result: {
 				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
 			}): string[] | undefined => {
-				for (let i = result.toolResults.length - 1; i >= 0; i -= 1) {
-					const output = result.toolResults[i]?.output
+				const messages: string[] = []
+				const seen = new Set<string>()
+
+				for (const toolResult of result.toolResults) {
+					const output = toolResult?.output
 					if (
 						typeof output === "object" &&
 						output !== null &&
@@ -169,9 +172,15 @@ export const makeAgentServiceLive = (userId: string) =>
 						Array.isArray(output.userMessages) &&
 						output.userMessages.every((message) => typeof message === "string" && message.trim())
 					) {
-						return output.userMessages
+						for (const message of output.userMessages) {
+							if (seen.has(message)) continue
+							seen.add(message)
+							messages.push(message)
+						}
 					}
 				}
+
+				return messages.length > 0 ? messages : undefined
 			}
 
 			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
@@ -410,7 +419,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							),
 						catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 					})
-					const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
+					const toolUserMessages = onReply ? extractToolUserMessages(result) : undefined
 					if (toolUserMessages && onReply) {
 						yield* sendToolUserMessages(toolUserMessages, onReply)
 					}

@@ -15,7 +15,8 @@ export function createSandboxDelegationTools(
 				"The agent runs autonomously with full computer access and optional browser automation. " +
 				"Returns immediately with a taskId. Use get_task to check results — for long tasks, " +
 				"check back on subsequent turns rather than waiting. " +
-				"Use for: research, file creation, web scraping, data analysis, code generation, multi-step work.",
+				"Use for: research, file creation, web scraping, data analysis, code generation, multi-step work. " +
+				"Do not use for Composio tools like Gmail, Google Calendar, Notion, Slack, Google Drive, or other connected app tasks.",
 			inputSchema: z.object({
 				prompt: z.string().describe("Detailed task description for the background agent"),
 				needsBrowser: z
