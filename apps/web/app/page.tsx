@@ -11,6 +11,7 @@ import { MarketingPageShell } from "@/components/marketing/page-shell"
 import { SectionLabel } from "@/components/marketing/section-label"
 import { GitHubIcon, TelegramIcon } from "@/components/marketing/social-icons"
 import { cn } from "@/lib/cn"
+import { TELEGRAM_BOT_HANDLE } from "@/lib/telegram"
 
 const workflowArtifacts = [
 	{
@@ -594,7 +595,7 @@ export default function HomePage() {
 							</motion.div>
 						</div>
 						<div className="mt-8 flex flex-col items-center gap-1 text-sm text-foreground/54 sm:flex-row sm:justify-center sm:gap-8">
-							<p>Telegram: @my_amby_bot</p>
+							<p>Telegram: {TELEGRAM_BOT_HANDLE}</p>
 							<p>GitHub: github.com/punitarani/amby</p>
 						</div>
 					</div>

@@ -6,6 +6,7 @@ export class EnvError extends Data.TaggedError("EnvError")<{
 
 export interface Env {
 	readonly NODE_ENV: string
+	readonly APP_URL: string
 	readonly OPENROUTER_API_KEY: string
 	readonly OPENAI_API_KEY: string
 	readonly CARTESIA_API_KEY: string
@@ -13,7 +14,15 @@ export interface Env {
 	readonly DAYTONA_API_URL: string
 	readonly DAYTONA_TARGET: string
 	readonly TELEGRAM_BOT_TOKEN: string
+	readonly TELEGRAM_BOT_USERNAME: string
 	readonly TELEGRAM_WEBHOOK_SECRET: string
+	readonly COMPOSIO_API_KEY: string
+	readonly COMPOSIO_WEBHOOK_SECRET: string
+	readonly COMPOSIO_AUTH_CONFIG_GMAIL: string
+	readonly COMPOSIO_AUTH_CONFIG_GOOGLECALENDAR: string
+	readonly COMPOSIO_AUTH_CONFIG_NOTION: string
+	readonly COMPOSIO_AUTH_CONFIG_SLACK: string
+	readonly COMPOSIO_AUTH_CONFIG_GOOGLEDRIVE: string
 	readonly DATABASE_URL: string
 	readonly BETTER_AUTH_SECRET: string
 	readonly BETTER_AUTH_URL: string

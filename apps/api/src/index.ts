@@ -1,5 +1,6 @@
 import { AuthServiceLive } from "@amby/auth"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
+import { ConnectorsServiceLive } from "@amby/connectors"
 import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { EnvServiceLive } from "@amby/env/local"
@@ -9,6 +10,7 @@ import { Effect, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
 import { createAmbyBot } from "./bot"
 import { getHomeResponse } from "./home"
+import { TelegramSenderLite } from "./telegram"
 
 // Shared layers — constructed once at startup
 const SharedLive = Layer.mergeAll(
@@ -16,6 +18,7 @@ const SharedLive = Layer.mergeAll(
 	TaskSupervisorLive,
 	ModelServiceLive,
 	AuthServiceLive,
+	ConnectorsServiceLive,
 ).pipe(
 	Layer.provideMerge(SandboxServiceLive),
 	Layer.provideMerge(DbServiceLive),
@@ -43,6 +46,10 @@ runtime
 				return
 			}
 
+			const botRuntime = ManagedRuntime.make(
+				TelegramSenderLite.pipe(Layer.provideMerge(SharedLive)),
+			)
+
 			// Register bot commands via Telegram API
 			yield* Effect.tryPromise(() =>
 				fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
@@ -59,7 +66,7 @@ runtime
 			)
 
 			// Initialize Chat SDK bot (auto mode: polling in dev, webhook when deployed)
-			const bot = createAmbyBot(runtime, env.TELEGRAM_BOT_TOKEN)
+			const bot = createAmbyBot(botRuntime, env.TELEGRAM_BOT_TOKEN)
 			yield* Effect.tryPromise(() => bot.initialize())
 
 			console.log("Telegram bot: configured and running")

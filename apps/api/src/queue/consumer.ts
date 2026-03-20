@@ -2,10 +2,8 @@ import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { setTelegramScope, setWorkerScope } from "../sentry"
 import type { TelegramQueueMessage } from "../telegram/utils"
-import { handleCommand } from "../telegram/utils"
+import { handleCommand, parseTelegramCommand } from "../telegram/utils"
 import { makeRuntimeForConsumer } from "./runtime"
-
-const COMMANDS = new Set(["/start", "/stop", "/help"])
 
 export async function handleQueueBatch(
 	batch: MessageBatch<TelegramQueueMessage>,
@@ -30,7 +28,8 @@ export async function handleQueueBatch(
 			const text = message.text ?? ""
 			const chatId = message.chat.id
 			const from = message.from
-			const isCommand = COMMANDS.has(text)
+			const parsedCommand = parseTelegramCommand(text, env.TELEGRAM_BOT_USERNAME)
+			const isCommand = Boolean(parsedCommand)
 
 			setTelegramScope({
 				component: "telegram.queue",
@@ -51,22 +50,27 @@ export async function handleQueueBatch(
 					name: isCommand ? "telegram.command" : "telegram.message",
 				},
 				async () => {
-					if (isCommand) {
+					if (parsedCommand) {
 						// Handle simple commands inline — fast, stateless
 						const runtime = makeRuntimeForConsumer(env)
 						try {
 							await runtime.runPromise(
-								handleCommand(text, from, chatId, { sandboxWorkflow: env.SANDBOX_WORKFLOW }),
+								handleCommand(parsedCommand, from, chatId, {
+									sandboxWorkflow: env.SANDBOX_WORKFLOW,
+								}),
 							)
 							Sentry.logger.info("Telegram command processed", {
-								command: text,
+								command: parsedCommand.rawText,
 								telegram_chat_id: chatId,
 								telegram_from_id: from.id,
 								telegram_message_id: message.message_id,
 							})
 						} catch (err) {
 							Sentry.captureException(err)
-							console.error(`[Queue] Command ${text} failed for chat ${chatId}:`, err)
+							console.error(
+								`[Queue] Command ${parsedCommand.rawText} failed for chat ${chatId}:`,
+								err,
+							)
 						} finally {
 							await runtime.dispose()
 						}

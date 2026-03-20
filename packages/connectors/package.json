@@ -1,5 +1,5 @@
 {
-	"name": "@amby/agent",
+	"name": "@amby/connectors",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
@@ -12,18 +12,11 @@
 		"build": "bun build ./src/index.ts --outdir dist --target bun"
 	},
 	"dependencies": {
-		"@ai-sdk/provider": "^3.0.0",
-		"@amby/channels": "workspace:*",
-		"@amby/computer": "workspace:*",
-		"@amby/connectors": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
-		"@amby/memory": "workspace:*",
-		"@amby/models": "workspace:*",
-		"@daytonaio/sdk": "^0.151.0",
+		"@composio/core": "0.6.5",
+		"@composio/vercel": "0.6.5",
 		"ai": "^6.0.0",
-		"braintrust": "^3.4.0",
-		"cron-parser": "^5.5.0",
 		"effect": "^3.19.19",
 		"zod": "^3.24.0"
 	}

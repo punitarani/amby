@@ -1,5 +1,6 @@
 import type { ChannelType } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
+import { ConnectorsService, createConnectorManagementTools } from "@amby/connectors"
 import { DbService, desc, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import {
@@ -118,6 +119,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			const memory = yield* MemoryService
 			const sandbox = yield* SandboxService
 			const taskSupervisor = yield* TaskSupervisor
+			const connectors = yield* ConnectorsService
 			const env = yield* EnvService
 			const enableCua = env.ENABLE_CUA
 			initializeBraintrust(env.BRAINTRUST_API_KEY, env.BRAINTRUST_PROJECT_ID)
@@ -222,11 +224,26 @@ export const makeAgentServiceLive = (userId: string) =>
 						.join("\n\n")
 
 					const delegationTools = createSubagentTools(baseModel, toolGroups, sharedContext)
+					const connectorManagementTools = connectors.isEnabled()
+						? createConnectorManagementTools(connectors, userId)
+						: undefined
+					const connectorSessionTools = connectors.isEnabled()
+						? yield* connectors.getAgentTools(userId).pipe(
+								Effect.catchAll((error) =>
+									Effect.sync(() => {
+										console.error("[Agent] Failed to load Composio tools:", error)
+										return undefined
+									}),
+								),
+							)
+						: undefined
 
 					const { search_memories } = memoryTools
 					const tools = {
 						...delegationTools,
 						search_memories,
+						...(connectorManagementTools ?? {}),
+						...(connectorSessionTools ?? {}),
 						...(sandboxTools ?? {}),
 						...(codexAuthTools ?? {}),
 						...createJobTools(db, userId, userTimezone),
@@ -274,7 +291,7 @@ export const makeAgentServiceLive = (userId: string) =>
 					model: baseModel,
 					instructions: systemPrompt,
 					tools,
-					stopWhen: stepCountIs(10),
+					stopWhen: stepCountIs(14),
 				})
 
 			const createLifecycleCallbacks = (traceMetadata: Record<string, unknown>) => {

@@ -36,6 +36,13 @@
 			"when": 1773827540914,
 			"tag": "0004_premium_tusk",
 			"breakpoints": true
+		},
+		{
+			"idx": 5,
+			"version": "7",
+			"when": 1774034391623,
+			"tag": "0005_tan_thing",
+			"breakpoints": true
 		}
 	]
 }
