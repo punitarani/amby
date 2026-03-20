@@ -39,9 +39,7 @@ export function createConnectorManagementTools(connectors: ConnectorService, use
 					.describe("Optional connected account id when the user wants a specific account removed"),
 			}),
 			execute: async ({ toolkit, connectedAccountId }) =>
-				Effect.runPromise(
-					connectors.disconnectIntegration(userId, toolkit, connectedAccountId),
-				),
+				Effect.runPromise(connectors.disconnectIntegration(userId, toolkit, connectedAccountId)),
 		}),
 
 		set_preferred_integration_account: tool({

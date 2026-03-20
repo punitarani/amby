@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp, uuid, uniqueIndex } from "drizzle-orm/pg-core"
+import { index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 import { users } from "./users"
 
 export const connectorPreferences = pgTable(

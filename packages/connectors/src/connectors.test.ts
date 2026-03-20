@@ -1,14 +1,14 @@
 import { describe, expect, it } from "bun:test"
 import {
-	buildComposioCallbackUrl,
-	buildComposioSessionConfig,
-	filterComposioSessionTools,
-} from "./service"
-import {
 	buildIntegrationStartPayload,
 	parseIntegrationStartPayload,
 	SUPPORTED_INTEGRATION_TOOLKITS,
 } from "./constants"
+import {
+	buildComposioCallbackUrl,
+	buildComposioSessionConfig,
+	filterComposioSessionTools,
+} from "./service"
 
 describe("connectors helpers", () => {
 	it("builds the scoped session config with safety filters and overrides", () => {
@@ -32,13 +32,11 @@ describe("connectors helpers", () => {
 	})
 
 	it("filters out workbench and bash meta tools", () => {
-		const filtered = filterComposioSessionTools(
-			{
-				COMPOSIO_SEARCH_TOOLS: { ok: true },
-				COMPOSIO_REMOTE_WORKBENCH: { ok: false },
-				COMPOSIO_REMOTE_BASH_TOOL: { ok: false },
-			} as unknown as Parameters<typeof filterComposioSessionTools>[0],
-		)
+		const filtered = filterComposioSessionTools({
+			COMPOSIO_SEARCH_TOOLS: { ok: true },
+			COMPOSIO_REMOTE_WORKBENCH: { ok: false },
+			COMPOSIO_REMOTE_BASH_TOOL: { ok: false },
+		} as unknown as Parameters<typeof filterComposioSessionTools>[0])
 
 		expect(Object.keys(filtered)).toEqual(["COMPOSIO_SEARCH_TOOLS"])
 	})

@@ -21,9 +21,7 @@ const EnvConfig = Config.all({
 	TELEGRAM_WEBHOOK_SECRET: Config.redacted("TELEGRAM_WEBHOOK_SECRET").pipe(
 		Config.withDefault(Redacted.make("")),
 	),
-	COMPOSIO_API_KEY: Config.redacted("COMPOSIO_API_KEY").pipe(
-		Config.withDefault(Redacted.make("")),
-	),
+	COMPOSIO_API_KEY: Config.redacted("COMPOSIO_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 	COMPOSIO_WEBHOOK_SECRET: Config.redacted("COMPOSIO_WEBHOOK_SECRET").pipe(
 		Config.withDefault(Redacted.make("")),
 	),
