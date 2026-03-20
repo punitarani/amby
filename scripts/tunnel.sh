@@ -37,9 +37,11 @@ cleanup() {
   wait "$NGROK_PID" 2>/dev/null || true
   echo "Removing Telegram webhook..."
   bun -e "
-    import { Bot } from 'grammy';
-    const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
-    await bot.api.deleteWebhook();
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) { console.error('TELEGRAM_BOT_TOKEN missing'); process.exit(1); }
+    const res = await fetch('https://api.telegram.org/bot' + token + '/deleteWebhook');
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.description ?? 'deleteWebhook failed');
     console.log('Webhook removed.');
   " 2>/dev/null || echo "Warning: could not remove webhook"
   echo "Done."
