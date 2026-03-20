@@ -36,6 +36,13 @@
 			"when": 1773827540914,
 			"tag": "0004_premium_tusk",
 			"breakpoints": true
+		},
+		{
+			"idx": 5,
+			"version": "7",
+			"when": 1774032333680,
+			"tag": "0005_sparkling_proemial_gods",
+			"breakpoints": true
 		}
 	]
 }

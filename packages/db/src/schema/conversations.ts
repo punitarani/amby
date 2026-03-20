@@ -16,20 +16,3 @@ export const conversations = pgTable(
 	},
 	(t) => [index("conversations_user_updated_idx").on(t.userId, t.updatedAt)],
 )
-
-export const messages = pgTable(
-	"messages",
-	{
-		id: uuid("id").primaryKey().defaultRandom(),
-		conversationId: uuid("conversation_id")
-			.notNull()
-			.references(() => conversations.id, { onDelete: "cascade" }),
-		role: text("role").$type<"user" | "assistant" | "system" | "tool">().notNull(),
-		content: text("content").notNull(),
-		toolCalls: jsonb("tool_calls"),
-		toolResults: jsonb("tool_results"),
-		metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-	},
-	(t) => [index("messages_conversation_created_idx").on(t.conversationId, t.createdAt)],
-)

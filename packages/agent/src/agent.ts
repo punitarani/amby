@@ -1,6 +1,6 @@
 import type { ChannelType } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
-import { DbService, desc, eq, schema } from "@amby/db"
+import { and, DbService, desc, eq, isNotNull, ne, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import {
 	buildMemoriesText,
@@ -26,6 +26,12 @@ export type StreamPart =
 	| { type: "tool-result"; toolName: string; result: unknown }
 
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
+import {
+	generateSynopsis,
+	messageThreadFilter,
+	type ResolveThreadResult,
+	resolveThread,
+} from "./router"
 import { createSubagentTools } from "./subagents/spawner"
 import { buildToolGroups } from "./subagents/tool-groups"
 import { createCodexAuthTools } from "./tools/codex-auth"
@@ -82,6 +88,42 @@ const summarizeUsage = (usage?: UsageSummary) =>
 			})
 		: undefined
 
+const THREAD_TAIL_LIMIT = 20
+const ARTIFACT_MSG_LIMIT = 5
+const OTHER_THREAD_CAP = 5
+const DORMANT_MS = 60 * 60 * 1000
+
+function formatArtifactRecap(
+	rows: ReadonlyArray<{ toolResults: unknown; content: string }>,
+	threadLabel: string | null,
+): string {
+	const bullets: string[] = []
+	for (const row of rows) {
+		const tr = row.toolResults
+		if (Array.isArray(tr)) {
+			for (const item of tr) {
+				if (typeof item === "object" && item !== null && "output" in item) {
+					const output = (item as { output?: unknown }).output
+					if (typeof output === "object" && output !== null) {
+						const rec = output as Record<string, unknown>
+						if (typeof rec.summary === "string" && rec.summary.trim()) {
+							bullets.push(rec.summary.trim())
+							continue
+						}
+					}
+					if (typeof output === "string" && output.trim()) {
+						const s = output.length > 400 ? `${output.slice(0, 400)}…` : output
+						bullets.push(s.trim())
+					}
+				}
+			}
+		}
+	}
+	if (bullets.length === 0) return ""
+	const title = threadLabel?.trim() || "this topic"
+	return `## Thread context (${title})\n${bullets.map((b) => `- ${b}`).join("\n")}`
+}
+
 export class AgentService extends Context.Tag("AgentService")<
 	AgentService,
 	{
@@ -125,14 +167,19 @@ export const makeAgentServiceLive = (userId: string) =>
 
 			const computer = createComputerTools(sandbox, userId)
 
-			const loadHistory = (conversationId: string) =>
+			const loadThreadTail = (
+				conversationId: string,
+				threadId: string,
+				defaultThreadId: string,
+				limit = THREAD_TAIL_LIMIT,
+			) =>
 				query((d) =>
 					d
 						.select({ role: schema.messages.role, content: schema.messages.content })
 						.from(schema.messages)
-						.where(eq(schema.messages.conversationId, conversationId))
+						.where(messageThreadFilter(conversationId, threadId, defaultThreadId))
 						.orderBy(desc(schema.messages.createdAt))
-						.limit(20),
+						.limit(limit),
 				).pipe(
 					Effect.map((rows) =>
 						rows
@@ -144,16 +191,92 @@ export const makeAgentServiceLive = (userId: string) =>
 					),
 				)
 
+			const loadOtherThreadSummaries = (conversationId: string, excludeThreadId: string) =>
+				query((d) =>
+					d
+						.select({
+							label: schema.conversationThreads.label,
+							synopsis: schema.conversationThreads.synopsis,
+						})
+						.from(schema.conversationThreads)
+						.where(
+							and(
+								eq(schema.conversationThreads.conversationId, conversationId),
+								eq(schema.conversationThreads.status, "open"),
+								ne(schema.conversationThreads.id, excludeThreadId),
+							),
+						)
+						.orderBy(desc(schema.conversationThreads.lastActiveAt))
+						.limit(OTHER_THREAD_CAP),
+				).pipe(
+					Effect.map((rows) => {
+						const lines = rows
+							.map((r) => {
+								const label = r.label?.trim() || "Untitled"
+								const syn = r.synopsis?.trim() || "(no summary yet)"
+								return `- **${label}**: ${syn}`
+							})
+							.join("\n")
+						return lines.length ? `## Other active threads\n${lines}` : ""
+					}),
+				)
+
+			const loadThreadArtifacts = (
+				conversationId: string,
+				threadId: string,
+				defaultThreadId: string,
+				threadLabel: string | null,
+			) =>
+				query((d) =>
+					d
+						.select({
+							toolResults: schema.messages.toolResults,
+							content: schema.messages.content,
+						})
+						.from(schema.messages)
+						.where(
+							and(
+								messageThreadFilter(conversationId, threadId, defaultThreadId),
+								eq(schema.messages.role, "assistant"),
+								isNotNull(schema.messages.toolResults),
+							),
+						)
+						.orderBy(desc(schema.messages.createdAt))
+						.limit(ARTIFACT_MSG_LIMIT),
+				).pipe(Effect.map((rows) => formatArtifactRecap(rows, threadLabel)))
+
 			const saveMessage = (
 				conversationId: string,
 				role: "user" | "assistant" | "system" | "tool",
 				content: string,
-				metadata?: Record<string, unknown>,
+				opts?: {
+					metadata?: Record<string, unknown>
+					threadId?: string
+					toolCalls?: unknown[]
+					toolResults?: unknown[]
+				},
 			) =>
-				query((d) => d.insert(schema.messages).values({ conversationId, role, content, metadata }))
+				query((d) =>
+					d.insert(schema.messages).values({
+						conversationId,
+						role,
+						content,
+						threadId: opts?.threadId,
+						metadata: opts?.metadata,
+						toolCalls: opts?.toolCalls,
+						toolResults: opts?.toolResults,
+					}),
+				)
 
-			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
-				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
+			const maybeSaveAssistantMessage = (
+				conversationId: string,
+				content: string,
+				opts?: {
+					threadId?: string
+					toolCalls?: unknown[]
+					toolResults?: unknown[]
+				},
+			) => (content.trim() ? saveMessage(conversationId, "assistant", content, opts) : Effect.void)
 
 			const extractLastToolUserMessages = (result: {
 				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
@@ -172,7 +295,11 @@ export const makeAgentServiceLive = (userId: string) =>
 				}
 			}
 
-			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
+			const prepareContext = (
+				conversationId: string,
+				threadCtx: ResolveThreadResult,
+				onReply?: ReplyFn,
+			) =>
 				Effect.gen(function* () {
 					const userRow = yield* query((d) =>
 						d
@@ -193,7 +320,36 @@ export const makeAgentServiceLive = (userId: string) =>
 					const deduped = deduplicateMemories(profile.static, profile.dynamic)
 					const memoryContext = buildMemoriesText(deduped)
 
-					const history = yield* loadHistory(conversationId)
+					const threadRow = yield* query((d) =>
+						d
+							.select({
+								label: schema.conversationThreads.label,
+								synopsis: schema.conversationThreads.synopsis,
+							})
+							.from(schema.conversationThreads)
+							.where(eq(schema.conversationThreads.id, threadCtx.threadId))
+							.limit(1),
+					)
+					const threadLabel = threadRow[0]?.label ?? null
+					const threadSynopsis = threadRow[0]?.synopsis?.trim() ?? ""
+
+					const history = yield* loadThreadTail(
+						conversationId,
+						threadCtx.threadId,
+						threadCtx.defaultThreadId,
+					)
+					const otherThreads = yield* loadOtherThreadSummaries(conversationId, threadCtx.threadId)
+					const artifactRecap = yield* loadThreadArtifacts(
+						conversationId,
+						threadCtx.threadId,
+						threadCtx.defaultThreadId,
+						threadLabel,
+					)
+
+					const threadSynopsisBlock =
+						threadCtx.threadWasDormant && threadSynopsis
+							? `## Resumed thread synopsis\n${threadSynopsis}`
+							: ""
 
 					const memoryTools = createMemoryTools(memory, userId)
 					const sandboxTools = sandbox.enabled
@@ -210,12 +366,25 @@ export const makeAgentServiceLive = (userId: string) =>
 					const basePrompt = enableCua
 						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
 						: buildSystemPrompt(formatted, userTimezone)
-					const systemPrompt = memoryContext
+
+					const extraBlocks = [
+						otherThreads,
+						threadSynopsisBlock,
+						artifactRecap.trim() ? artifactRecap : "",
+					]
+						.filter(Boolean)
+						.join("\n\n")
+
+					const systemPromptWithMemory = memoryContext
 						? `${basePrompt}\n\n# User Memory Context\n${memoryContext}`
 						: basePrompt
+					const systemPrompt = extraBlocks
+						? `${systemPromptWithMemory}\n\n${extraBlocks}`
+						: systemPromptWithMemory
 
 					const sharedContext = [
 						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
+						extraBlocks,
 						`# Current Date/Time\n${formatted} (${userTimezone})`,
 					]
 						.filter(Boolean)
@@ -245,6 +414,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				replyToolEnabled,
 				messageCount,
 				requestMetadata,
+				threadCtx,
 			}: {
 				conversationId: string
 				mode: RequestMode
@@ -254,6 +424,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				replyToolEnabled: boolean
 				messageCount: number
 				requestMetadata?: Record<string, unknown>
+				threadCtx?: ResolveThreadResult
 			}) =>
 				compactRecord({
 					userId,
@@ -267,6 +438,10 @@ export const makeAgentServiceLive = (userId: string) =>
 					modelId: models.defaultModelId,
 					cuaEnabled: enableCua,
 					requestMetadata: summarizeRequestMetadata(requestMetadata),
+					threadId: threadCtx?.threadId,
+					routerAction: threadCtx?.decision.action,
+					routerConfidence: threadCtx?.decision.confidence,
+					threadMessageCount: threadCtx?.threadMessageCount,
 				})
 
 			const createOrchestrator = (systemPrompt: string, tools: ToolSet) =>
@@ -277,7 +452,10 @@ export const makeAgentServiceLive = (userId: string) =>
 					stopWhen: stepCountIs(10),
 				})
 
-			const createLifecycleCallbacks = (traceMetadata: Record<string, unknown>) => {
+			const createLifecycleCallbacks = (
+				traceMetadata: Record<string, unknown>,
+				aggregatedToolCalls: unknown[],
+			) => {
 				const toolNames = new Set<string>()
 				const stepFinishReasons = new Set<string>()
 				let stepCount = 0
@@ -303,6 +481,10 @@ export const makeAgentServiceLive = (userId: string) =>
 					}: StepLifecycleEvent) => {
 						stepCount = Math.max(stepCount, stepNumber)
 						stepFinishReasons.add(finishReason)
+						const calls = toolCalls as unknown[] | undefined
+						if (calls?.length) {
+							aggregatedToolCalls.push(...calls)
+						}
 						for (const toolCall of toolCalls ?? []) {
 							toolNames.add(toolCall.toolName)
 						}
@@ -314,6 +496,102 @@ export const makeAgentServiceLive = (userId: string) =>
 					},
 				}
 			}
+
+			const fetchTranscriptForSynopsis = (
+				conversationId: string,
+				threadId: string,
+				defaultThreadId: string,
+			) =>
+				query((d) =>
+					d
+						.select({ role: schema.messages.role, content: schema.messages.content })
+						.from(schema.messages)
+						.where(messageThreadFilter(conversationId, threadId, defaultThreadId))
+						.orderBy(desc(schema.messages.createdAt))
+						.limit(THREAD_TAIL_LIMIT),
+				).pipe(
+					Effect.map((rows) =>
+						rows
+							.reverse()
+							.map((m) => `${m.role}: ${m.content}`)
+							.join("\n"),
+					),
+				)
+
+			const persistThreadSynopsis = (threadId: string, synopsis: string) =>
+				query((d) =>
+					d
+						.update(schema.conversationThreads)
+						.set({ synopsis })
+						.where(eq(schema.conversationThreads.id, threadId)),
+				)
+
+			const synopsisPreviousThreadIfDormantSwitch = (
+				conversationId: string,
+				threadCtx: ResolveThreadResult,
+			) =>
+				Effect.gen(function* () {
+					const switchedAway =
+						threadCtx.previousLastThreadId !== threadCtx.threadId &&
+						(threadCtx.decision.action === "switch" || threadCtx.decision.action === "new")
+
+					if (!switchedAway) return
+
+					const lastRows = yield* query((d) =>
+						d
+							.select({ createdAt: schema.messages.createdAt })
+							.from(schema.messages)
+							.where(
+								messageThreadFilter(
+									conversationId,
+									threadCtx.previousLastThreadId,
+									threadCtx.defaultThreadId,
+								),
+							)
+							.orderBy(desc(schema.messages.createdAt))
+							.limit(1),
+					)
+					const lastAt = lastRows[0]?.createdAt
+					if (!lastAt || Date.now() - lastAt.getTime() <= DORMANT_MS) return
+
+					const transcript = yield* fetchTranscriptForSynopsis(
+						conversationId,
+						threadCtx.previousLastThreadId,
+						threadCtx.defaultThreadId,
+					)
+					if (!transcript.trim()) return
+
+					const synopsis = yield* Effect.tryPromise({
+						try: () => generateSynopsis(baseModel, transcript),
+						catch: (cause) =>
+							new AgentError({ message: "Synopsis generation failed (previous thread)", cause }),
+					})
+					yield* persistThreadSynopsis(threadCtx.previousLastThreadId, synopsis)
+				}).pipe(Effect.catchAll(() => Effect.void))
+
+			const synopsisCurrentThreadIfOverflowsAfterSave = (
+				conversationId: string,
+				threadCtx: ResolveThreadResult,
+				inboundMessageCount: number,
+			) =>
+				Effect.gen(function* () {
+					const projectedCount = threadCtx.threadMessageCount + inboundMessageCount
+					if (projectedCount <= THREAD_TAIL_LIMIT) return
+
+					const transcript = yield* fetchTranscriptForSynopsis(
+						conversationId,
+						threadCtx.threadId,
+						threadCtx.defaultThreadId,
+					)
+					if (!transcript.trim()) return
+
+					const synopsis = yield* Effect.tryPromise({
+						try: () => generateSynopsis(baseModel, transcript),
+						catch: (cause) =>
+							new AgentError({ message: "Synopsis generation failed (tail overflow)", cause }),
+					})
+					yield* persistThreadSynopsis(threadCtx.threadId, synopsis)
+				}).pipe(Effect.catchAll(() => Effect.void))
 
 			const sendToolUserMessages = (toolUserMessages: string[], onReply: ReplyFn) =>
 				Effect.tryPromise(async () => {
@@ -342,8 +620,14 @@ export const makeAgentServiceLive = (userId: string) =>
 				onTextDelta?: (text: string) => void
 			}) =>
 				Effect.gen(function* () {
+					const inboundText = requestMessages.map((m) => m.content).join("\n\n")
+					const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
+
+					yield* synopsisPreviousThreadIfDormantSwitch(conversationId, threadCtx)
+
 					const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
 						conversationId,
+						threadCtx,
 						onReply,
 					)
 					const traceMetadata = buildTraceMetadata({
@@ -355,8 +639,10 @@ export const makeAgentServiceLive = (userId: string) =>
 						replyToolEnabled: Boolean(onReply),
 						messageCount: requestMessages.length,
 						requestMetadata: metadata,
+						threadCtx,
 					})
-					const lifecycle = createLifecycleCallbacks(traceMetadata)
+					const aggregatedToolCalls: unknown[] = []
+					const lifecycle = createLifecycleCallbacks(traceMetadata, aggregatedToolCalls)
 					const agent = createOrchestrator(systemPrompt, tools as ToolSet)
 
 					const result = yield* Effect.tryPromise({
@@ -383,12 +669,17 @@ export const makeAgentServiceLive = (userId: string) =>
 											])
 											return { text, toolResults }
 										}
-									: () =>
-											agent.generate({
+									: async () => {
+											const genResult = await agent.generate({
 												messages: [...history, ...requestMessages],
 												onStepFinish: lifecycle.onStepFinish,
 												onFinish: lifecycle.onFinish,
-											}),
+											})
+											return {
+												text: genResult.text,
+												toolResults: genResult.toolResults,
+											}
+										},
 								(response) => ({ text: response.text }),
 							),
 						catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
@@ -399,10 +690,36 @@ export const makeAgentServiceLive = (userId: string) =>
 					}
 					const finalText = toolUserMessages ? "" : result.text
 
-					for (const message of requestMessages) {
-						yield* saveMessage(conversationId, "user", message.content, metadata)
+					const toolResultsPersist = result.toolResults?.length
+						? [...result.toolResults]
+						: undefined
+
+					const threadMeta = {
+						threadId: threadCtx.threadId,
+						router: {
+							action: threadCtx.decision.action,
+							confidence: threadCtx.decision.confidence,
+						},
 					}
-					yield* maybeSaveAssistantMessage(conversationId, finalText)
+					const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
+
+					for (const message of requestMessages) {
+						yield* saveMessage(conversationId, "user", message.content, {
+							metadata: userMetadata,
+							threadId: threadCtx.threadId,
+						})
+					}
+					yield* maybeSaveAssistantMessage(conversationId, finalText, {
+						threadId: threadCtx.threadId,
+						toolCalls: aggregatedToolCalls.length > 0 ? aggregatedToolCalls : undefined,
+						toolResults: toolResultsPersist,
+					})
+
+					yield* synopsisCurrentThreadIfOverflowsAfterSave(
+						conversationId,
+						threadCtx,
+						requestMessages.length + 1,
+					)
 
 					return finalText
 				})
@@ -446,8 +763,14 @@ export const makeAgentServiceLive = (userId: string) =>
 
 				streamMessage: (conversationId, content, onPart) =>
 					Effect.gen(function* () {
-						const { tools, systemPrompt, history, userTimezone } =
-							yield* prepareContext(conversationId)
+						const threadCtx = yield* resolveThread(query, conversationId, content, baseModel)
+
+						yield* synopsisPreviousThreadIfDormantSwitch(conversationId, threadCtx)
+
+						const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
+							conversationId,
+							threadCtx,
+						)
 						const traceMetadata = buildTraceMetadata({
 							conversationId,
 							mode: "stream-message",
@@ -456,11 +779,13 @@ export const makeAgentServiceLive = (userId: string) =>
 							userTimezone,
 							replyToolEnabled: false,
 							messageCount: 1,
+							threadCtx,
 						})
-						const lifecycle = createLifecycleCallbacks(traceMetadata)
+						const aggregatedToolCalls: unknown[] = []
+						const lifecycle = createLifecycleCallbacks(traceMetadata, aggregatedToolCalls)
 						const agent = createOrchestrator(systemPrompt, tools as ToolSet)
 
-						const result = yield* Effect.tryPromise({
+						const { text: result, toolResults } = yield* Effect.tryPromise({
 							try: () =>
 								traceBraintrustOperation(
 									"agent.stream-message",
@@ -495,15 +820,32 @@ export const makeAgentServiceLive = (userId: string) =>
 											}
 										}
 
-										return await stream.text
+										const [text, tr] = await Promise.all([stream.text, stream.toolResults])
+										return { text, toolResults: tr }
 									},
-									(text) => ({ text }),
+									({ text }) => ({ text }),
 								),
 							catch: (cause) => new AgentError({ message: "Failed to stream response", cause }),
 						})
 
-						yield* saveMessage(conversationId, "user", content)
-						yield* saveMessage(conversationId, "assistant", result)
+						const threadMeta = {
+							threadId: threadCtx.threadId,
+							router: {
+								action: threadCtx.decision.action,
+								confidence: threadCtx.decision.confidence,
+							},
+						}
+						yield* saveMessage(conversationId, "user", content, {
+							metadata: threadMeta,
+							threadId: threadCtx.threadId,
+						})
+						yield* saveMessage(conversationId, "assistant", result, {
+							threadId: threadCtx.threadId,
+							toolCalls: aggregatedToolCalls.length > 0 ? aggregatedToolCalls : undefined,
+							toolResults: toolResults ? [...toolResults] : undefined,
+						})
+
+						yield* synopsisCurrentThreadIfOverflowsAfterSave(conversationId, threadCtx, 2)
 
 						return result
 					}).pipe(
