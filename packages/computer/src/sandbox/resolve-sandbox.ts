@@ -1,7 +1,6 @@
 import type { Database } from "@amby/db"
 import { eq, schema } from "@amby/db"
-import type { Daytona } from "@daytonaio/sdk"
-import type { Sandbox } from "@daytonaio/sdk"
+import type { Daytona, Sandbox } from "@daytonaio/sdk"
 import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
 import { Effect, Either } from "effect"
 import {
@@ -14,8 +13,8 @@ import {
 	sandboxLabels,
 	sandboxName,
 } from "../config"
-import { sandboxImage as defaultSandboxImage } from "./sandbox-image"
 import { SandboxError } from "../errors"
+import { sandboxImage as defaultSandboxImage } from "./sandbox-image"
 
 export type SandboxDbStatus = "creating" | "running" | "stopped" | "archived" | "error"
 
@@ -198,7 +197,9 @@ export const tryCacheSandbox = (
 /**
  * Core get-or-create for {@link SandboxService.ensure}: get-by-name first, then create with duplicate recovery.
  */
-export const ensureSandboxStarted = (params: EnsureSandboxParams): Effect.Effect<Sandbox, SandboxError> =>
+export const ensureSandboxStarted = (
+	params: EnsureSandboxParams,
+): Effect.Effect<Sandbox, SandboxError> =>
 	Effect.gen(function* () {
 		const { daytona, db, userId, name, cache, isDev } = params
 		const createSpec = buildSandboxCreateParams(userId, isDev)

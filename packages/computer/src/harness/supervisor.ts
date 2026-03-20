@@ -13,7 +13,7 @@ import {
 	POLL_INTERVAL_MS,
 	taskSessionId,
 } from "../config"
-import { sandboxErrorFromDefect, SandboxError } from "../errors"
+import { SandboxError, sandboxErrorFromDefect } from "../errors"
 import { SandboxService } from "../sandbox/service"
 import {
 	asRecord,

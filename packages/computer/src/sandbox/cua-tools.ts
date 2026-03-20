@@ -4,8 +4,8 @@ import type { Context } from "effect"
 import { Effect } from "effect"
 import { z } from "zod"
 import { CUA_LOCK_PATH, CUA_STALE_MINUTES } from "../config"
-import { runWithEnsuredSandbox } from "./tool-run"
 import type { SandboxService } from "./service"
+import { runWithEnsuredSandbox } from "./tool-run"
 
 type SandboxOps = Context.Tag.Service<typeof SandboxService>
 

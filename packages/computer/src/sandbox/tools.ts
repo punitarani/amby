@@ -3,8 +3,8 @@ import { tool } from "ai"
 import type { Context } from "effect"
 import { Effect } from "effect"
 import { z } from "zod"
-import { runWithEnsuredSandbox } from "./tool-run"
 import type { SandboxService } from "./service"
+import { runWithEnsuredSandbox } from "./tool-run"
 
 type SandboxOps = Context.Tag.Service<typeof SandboxService>
 
