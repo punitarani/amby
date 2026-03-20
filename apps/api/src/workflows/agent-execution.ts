@@ -76,7 +76,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 				return
 			}
 
-			// Step 3: Run the agent
+			// Step 3: Run the agent with streaming
 			const finalUserId = userId
 			const messageTexts = messages.map((m) => m.text)
 			const input = parentContext
@@ -90,8 +90,38 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 					timeout: "5 minutes",
 				},
 				async () => {
-					// Typing indicator inside the step — survives retries, no leak
 					const typingInterval = setInterval(sendTyping, 4000)
+
+					// Streaming state — post first chunk, then edit every 500ms
+					let streamedText = ""
+					let streamMessageId: string | null = null
+					let isEditing = false
+
+					const flushStream = async () => {
+						if (isEditing || !streamedText) return
+						isEditing = true
+						try {
+							if (!streamMessageId) {
+								const posted = await adapter.postMessage(chatIdStr, streamedText)
+								streamMessageId = posted.id
+							} else {
+								await adapter.editMessage(chatIdStr, streamMessageId, streamedText)
+							}
+						} catch {
+							/* ignore edit errors */
+						} finally {
+							isEditing = false
+						}
+					}
+
+					const streamInterval = !isSubAgent ? setInterval(flushStream, 500) : null
+
+					const onTextDelta = !isSubAgent
+						? (delta: string) => {
+								streamedText += delta
+							}
+						: undefined
+
 					try {
 						const runtime = makeAgentRuntimeForConsumer(this.env)
 						try {
@@ -110,16 +140,44 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 											telegram: { batched: true, messageCount: messageTexts.length },
 										},
 										sendReply,
+										onTextDelta,
 									)
 								}
-								return yield* agent.handleMessage(convId, input, undefined, sendReply)
+								return yield* agent.handleMessage(convId, input, undefined, sendReply, onTextDelta)
 							}).pipe(Effect.provide(makeAgentServiceLive(finalUserId)))
 
-							return await runtime.runPromise(effect)
+							const result = await runtime.runPromise(effect)
+
+							// Finalize streamed message
+							if (streamInterval) clearInterval(streamInterval)
+							if (streamMessageId) {
+								if (result.trim()) {
+									const [firstChunk, ...moreChunks] = splitTelegramMessage(result)
+									if (firstChunk !== undefined) {
+										await adapter
+											.editMessage(chatIdStr, streamMessageId, firstChunk)
+											.catch(() => {})
+										for (const chunk of moreChunks) {
+											await adapter.postMessage(chatIdStr, chunk)
+										}
+									}
+								} else {
+									// Response empty (tool sent replies) — remove streaming message
+									await adapter.deleteMessage(chatIdStr, streamMessageId).catch(() => {})
+								}
+							} else if (!isSubAgent && result.trim()) {
+								// No streaming happened — post full response
+								for (const chunk of splitTelegramMessage(result)) {
+									await adapter.postMessage(chatIdStr, chunk)
+								}
+							}
+
+							return result
 						} finally {
 							await runtime.dispose()
 						}
 					} finally {
+						if (streamInterval) clearInterval(streamInterval)
 						clearInterval(typingInterval)
 					}
 				},
@@ -131,16 +189,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 				is_sub_agent: Boolean(isSubAgent),
 			})
 
-			// Step 4: Send response to Telegram (split if >4096 chars)
-			if (!isSubAgent && response.trim()) {
-				await step.do("reply", async () => {
-					for (const chunk of splitTelegramMessage(response)) {
-						await adapter.postMessage(chatIdStr, chunk)
-					}
-				})
-			}
-
-			// Step 5: Notify the DO that execution is complete
+			// Step 4: Notify the DO that execution is complete
 			await this.notifyComplete(step, chatId, isSubAgent, userId, conversationId)
 
 			return { response, userId, conversationId }
