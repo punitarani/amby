@@ -20,7 +20,7 @@ export function createConnectorManagementTools(connectors: ConnectorService, use
 
 		connect_integration: tool({
 			description:
-				"Start the secure OAuth flow for Gmail, Google Calendar, Notion, Slack, or Google Drive. Use this when access is missing or expired. Never ask the user for raw credentials.",
+				"Start the secure OAuth flow for Gmail, Google Calendar, Notion, Slack, or Google Drive. Use this when access is missing or expired. Never ask the user for raw credentials. Do not call this more than once for the same app in the same turn.",
 			inputSchema: z.object({
 				toolkit: toolkitEnum.describe("The app to connect"),
 			}),

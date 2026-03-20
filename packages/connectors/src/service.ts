@@ -1,4 +1,4 @@
-import { DbService, eq, schema } from "@amby/db"
+import { and, DbService, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { Composio } from "@composio/core"
 import { VercelProvider } from "@composio/vercel"
@@ -6,8 +6,8 @@ import type { ToolSet } from "ai"
 import { Context, Effect, Layer } from "effect"
 import {
 	COMPOSIO_DESTRUCTIVE_TAG,
-	COMPOSIO_META_TOOL_BLOCKLIST,
 	getIntegrationLabel,
+	getIntegrationSuccessMessage,
 	INTEGRATION_TOOLKITS,
 	SUPPORTED_INTEGRATION_TOOLKITS,
 	type SupportedIntegrationToolkit,
@@ -86,6 +86,14 @@ type ConnectorPreferenceRow = {
 	preferredConnectedAccountId: string
 }
 
+type ConnectorAuthRequestRow = {
+	userId: string
+	toolkit: string
+	redirectUrl: string
+	callbackUrl: string
+	expiresAt: string | Date
+}
+
 type ConnectedAccountRecord = {
 	id: string
 	userId?: string
@@ -109,6 +117,18 @@ const buildOptionalRecord = <T extends string>(
 	entries: ReadonlyArray<readonly [T, string]>,
 ): Partial<Record<T, string>> =>
 	Object.fromEntries(entries.filter(([, value]) => value)) as Partial<Record<T, string>>
+
+const CONNECT_INTEGRATION_LINK_TTL_MS = 5 * 60 * 1000
+
+const buildConnectIntegrationUserMessages = (label: string, redirectUrl: string) => [
+	`Connect ${label} here: ${redirectUrl}`,
+	"When you're done, Telegram should reopen automatically. If it doesn't, come back here and send /start.",
+]
+
+const isConnectorAuthRequestReusable = (
+	request: Pick<ConnectorAuthRequestRow, "expiresAt">,
+	now = new Date(),
+) => new Date(request.expiresAt).getTime() > now.getTime()
 
 const pickConnectedAccountUserId = (account: Partial<ConnectedAccountRecord>) =>
 	typeof account.userId === "string"
@@ -135,15 +155,6 @@ const sortAccounts = (accounts: IntegrationAccountSummary[]) =>
 		}
 		return byUpdatedAtDesc(left.updatedAt, right.updatedAt)
 	})
-
-export function filterComposioSessionTools(tools: ToolSet): ToolSet {
-	return Object.fromEntries(
-		Object.entries(tools).filter(([toolName]) => {
-			const upper = toolName.toUpperCase()
-			return !COMPOSIO_META_TOOL_BLOCKLIST.some((blocked) => upper.includes(blocked))
-		}),
-	)
-}
 
 export function buildComposioCallbackUrl(
 	appUrl: string,
@@ -200,6 +211,10 @@ export class ConnectorsService extends Context.Tag("ConnectorsService")<
 		readonly clearPreferredAccountByConnectedAccountId: (
 			connectedAccountId: string,
 		) => Effect.Effect<ClearedPreferredAccount[], ConnectorsError>
+		readonly clearPendingIntegrationRequest: (
+			userId: string,
+			toolkit: SupportedIntegrationToolkit,
+		) => Effect.Effect<void, ConnectorsError>
 		readonly getConnectedAccountById: (
 			connectedAccountId: string,
 		) => Effect.Effect<ConnectedAccountSummary | undefined, ConnectorsError>
@@ -264,6 +279,74 @@ export const ConnectorsServiceLive = Layer.effect(
 					.from(schema.connectorPreferences)
 					.where(eq(schema.connectorPreferences.userId, userId)),
 			).pipe(Effect.mapError(mapDatabaseError("failed_to_list_connector_preferences")))
+
+		const getPendingAuthRequest = (userId: string, toolkit: SupportedIntegrationToolkit) =>
+			query((database) =>
+				database
+					.select({
+						userId: schema.connectorAuthRequests.userId,
+						toolkit: schema.connectorAuthRequests.toolkit,
+						redirectUrl: schema.connectorAuthRequests.redirectUrl,
+						callbackUrl: schema.connectorAuthRequests.callbackUrl,
+						expiresAt: schema.connectorAuthRequests.expiresAt,
+					})
+					.from(schema.connectorAuthRequests)
+					.where(
+						and(
+							eq(schema.connectorAuthRequests.userId, userId),
+							eq(schema.connectorAuthRequests.toolkit, toolkit),
+						),
+					)
+					.limit(1),
+			).pipe(
+				Effect.map((rows) => rows[0]),
+				Effect.mapError(mapDatabaseError("failed_to_read_pending_connector_auth_request")),
+			)
+
+		const upsertPendingAuthRequest = (
+			userId: string,
+			toolkit: SupportedIntegrationToolkit,
+			redirectUrl: string,
+			callbackUrl: string,
+			expiresAt: Date,
+		) =>
+			Effect.tryPromise({
+				try: () =>
+					db
+						.insert(schema.connectorAuthRequests)
+						.values({
+							userId,
+							toolkit,
+							redirectUrl,
+							callbackUrl,
+							expiresAt,
+						})
+						.onConflictDoUpdate({
+							target: [schema.connectorAuthRequests.userId, schema.connectorAuthRequests.toolkit],
+							set: {
+								redirectUrl,
+								callbackUrl,
+								expiresAt,
+								updatedAt: new Date(),
+							},
+						}),
+				catch: mapDatabaseError("failed_to_write_pending_connector_auth_request"),
+			})
+
+		const clearPendingAuthRequest = (userId: string, toolkit: SupportedIntegrationToolkit) =>
+			query((database) =>
+				database
+					.delete(schema.connectorAuthRequests)
+					.where(
+						and(
+							eq(schema.connectorAuthRequests.userId, userId),
+							eq(schema.connectorAuthRequests.toolkit, toolkit),
+						),
+					),
+			).pipe(
+				Effect.asVoid,
+				Effect.mapError(mapDatabaseError("failed_to_clear_pending_connector_auth_request")),
+			)
 
 		const listAccountsForUser = (userId: string, toolkit?: SupportedIntegrationToolkit) =>
 			Effect.gen(function* () {
@@ -356,7 +439,7 @@ export const ConnectorsServiceLive = Layer.effect(
 							}),
 					})
 
-					return filterComposioSessionTools(sessionTools as ToolSet)
+					return sessionTools as ToolSet
 				}),
 
 			listIntegrations: (userId) =>
@@ -388,6 +471,35 @@ export const ConnectorsServiceLive = Layer.effect(
 			connectIntegration: (userId, toolkit) =>
 				Effect.gen(function* () {
 					const composio = yield* ensureClient()
+					const label = getIntegrationLabel(toolkit)
+					const callbackUrl = buildComposioCallbackUrl(env.APP_URL, toolkit)
+					const accounts = yield* listAccountsForUser(userId, toolkit)
+					const isAlreadyConnected = accounts.some(
+						(account) => account.status === "ACTIVE" && !account.isDisabled,
+					)
+
+					if (isAlreadyConnected) {
+						yield* clearPendingAuthRequest(userId, toolkit)
+						return {
+							toolkit,
+							label,
+							redirectUrl: callbackUrl,
+							callbackUrl,
+							userMessages: [getIntegrationSuccessMessage(toolkit)],
+						}
+					}
+
+					const existingRequest = yield* getPendingAuthRequest(userId, toolkit)
+
+					if (existingRequest && isConnectorAuthRequestReusable(existingRequest)) {
+						return {
+							toolkit,
+							label,
+							redirectUrl: existingRequest.redirectUrl,
+							callbackUrl: existingRequest.callbackUrl,
+							userMessages: buildConnectIntegrationUserMessages(label, existingRequest.redirectUrl),
+						}
+					}
 
 					const session = yield* Effect.tryPromise({
 						try: () =>
@@ -404,7 +516,6 @@ export const ConnectorsServiceLive = Layer.effect(
 							}),
 					})
 
-					const callbackUrl = buildComposioCallbackUrl(env.APP_URL, toolkit)
 					const request = yield* Effect.tryPromise({
 						try: () => session.authorize(toolkit, { callbackUrl }),
 						catch: (cause) =>
@@ -422,16 +533,20 @@ export const ConnectorsServiceLive = Layer.effect(
 						)
 					}
 
-					const label = getIntegrationLabel(toolkit)
+					yield* upsertPendingAuthRequest(
+						userId,
+						toolkit,
+						redirectUrl,
+						callbackUrl,
+						new Date(Date.now() + CONNECT_INTEGRATION_LINK_TTL_MS),
+					)
+
 					return {
 						toolkit,
 						label,
 						redirectUrl,
 						callbackUrl,
-						userMessages: [
-							`Connect ${label} here: ${redirectUrl}`,
-							"When you're done, Telegram should reopen automatically. If it doesn't, come back here and send /start.",
-						],
+						userMessages: buildConnectIntegrationUserMessages(label, redirectUrl),
 					}
 				}),
 
@@ -573,6 +688,8 @@ export const ConnectorsServiceLive = Layer.effect(
 					),
 					Effect.mapError(mapDatabaseError("failed_to_clear_preferred_connected_account")),
 				),
+
+			clearPendingIntegrationRequest: (userId, toolkit) => clearPendingAuthRequest(userId, toolkit),
 
 			getConnectedAccountById: (connectedAccountId) =>
 				Effect.gen(function* () {

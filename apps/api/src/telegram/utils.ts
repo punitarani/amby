@@ -255,6 +255,7 @@ const sendIntegrationStartResult = (userId: string, chatId: number, payload: str
 		const integration = integrations.find((item) => item.toolkit === toolkit)
 
 		if (integration?.connected) {
+			yield* connectors.clearPendingIntegrationRequest(userId, toolkit)
 			yield* Effect.tryPromise(() =>
 				sender.sendMessage(chatId, getIntegrationSuccessMessage(toolkit)),
 			)
