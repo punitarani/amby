@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { buildTelegramStartUrl, normalizeTelegramBotUsername } from "@/lib/telegram"
 
+// Derived from @amby/connectors TOOLKIT_REGISTRY — update when adding a new toolkit
 const INTEGRATION_LABELS: Record<string, string> = {
 	gmail: "Gmail",
 	googlecalendar: "Google Calendar",

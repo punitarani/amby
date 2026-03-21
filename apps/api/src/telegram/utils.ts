@@ -5,7 +5,7 @@ import {
 	parseIntegrationStartPayload,
 } from "@amby/connectors"
 import { and, DbService, desc, eq, schema } from "@amby/db"
-import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService } from "@amby/env"
+import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import { Effect } from "effect"
 import { getPostHogClient } from "../posthog"
@@ -56,9 +56,6 @@ export type ParsedTelegramCommand = {
 	payload?: string
 	rawText: string
 }
-
-const normalizeTelegramBotUsername = (value?: string | null) =>
-	(value?.trim().replace(/^@+/, "").toLowerCase() ?? "") || DEFAULT_TELEGRAM_BOT_USERNAME
 
 /**
  * Best-effort timezone inference from Telegram's language_code.
@@ -230,7 +227,7 @@ const sendIntegrationStartResult = (userId: string, chatId: number, payload: str
 			yield* Effect.tryPromise(() =>
 				sender.sendMessage(
 					chatId,
-					"That app link is not recognized anymore. Send me a message and I can send a fresh connection link.",
+					"That connection link isn't recognized anymore. Just let me know which app you'd like to connect and I'll send a fresh one.",
 				),
 			)
 			return

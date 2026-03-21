@@ -6,32 +6,9 @@ import {
 	createTelemetrySettings,
 	type RequestTraceMetadata,
 } from "../telemetry"
+import { extractToolUserMessages } from "../utils/extract-tool-user-messages"
 import { SUBAGENT_DEFS } from "./definitions"
 import { resolveTools, type ToolGroups } from "./tool-groups"
-
-const extractToolUserMessages = (toolResults: ReadonlyArray<{ output?: unknown } | undefined>) => {
-	const messages: string[] = []
-	const seen = new Set<string>()
-
-	for (const toolResult of toolResults) {
-		const output = toolResult?.output
-		if (
-			typeof output === "object" &&
-			output !== null &&
-			"userMessages" in output &&
-			Array.isArray(output.userMessages) &&
-			output.userMessages.every((message) => typeof message === "string" && message.trim())
-		) {
-			for (const message of output.userMessages) {
-				if (seen.has(message)) continue
-				seen.add(message)
-				messages.push(message)
-			}
-		}
-	}
-
-	return messages.length > 0 ? messages : undefined
-}
 
 export function createSubagentTools(
 	getModel: (id?: string) => LanguageModel,

@@ -8,11 +8,13 @@ import {
 	COMPOSIO_DESTRUCTIVE_TAG,
 	getIntegrationLabel,
 	getIntegrationSuccessMessage,
-	INTEGRATION_TOOLKITS,
-	SUPPORTED_INTEGRATION_TOOLKITS,
-	type SupportedIntegrationToolkit,
 } from "./constants"
 import { ConnectorsError } from "./errors"
+import {
+	SUPPORTED_INTEGRATION_TOOLKITS,
+	type SupportedIntegrationToolkit,
+	TOOLKIT_REGISTRY,
+} from "./registry"
 
 export type IntegrationAccountSummary = {
 	id: string
@@ -127,8 +129,8 @@ const buildOptionalRecord = <T extends string>(
 const CONNECT_INTEGRATION_LINK_TTL_MS = 5 * 60 * 1000
 
 const buildConnectIntegrationUserMessages = (label: string, redirectUrl: string) => [
-	`Connect ${label} here: ${redirectUrl}`,
-	"When you're done, Telegram should reopen automatically. If it doesn't, come back here and send /start.",
+	`Here's the link to connect ${label}: ${redirectUrl}`,
+	"Telegram should reopen when you're done. If not, come back and send /start.",
 ]
 
 const isConnectorAuthRequestReusable = (
@@ -182,7 +184,7 @@ export function buildComposioSessionConfig(params?: {
 		tools: Object.fromEntries(
 			SUPPORTED_INTEGRATION_TOOLKITS.map((toolkit) => [
 				toolkit,
-				{ enable: [...INTEGRATION_TOOLKITS[toolkit].safeTools] },
+				{ enable: [...TOOLKIT_REGISTRY[toolkit].safeTools] },
 			]),
 		),
 		tags: { disable: [COMPOSIO_DESTRUCTIVE_TAG] },
@@ -249,13 +251,12 @@ export const ConnectorsServiceLive = Layer.effect(
 			: null
 
 		const getAuthConfigOverrides = () =>
-			buildOptionalRecord<SupportedIntegrationToolkit>([
-				["gmail", env.COMPOSIO_AUTH_CONFIG_GMAIL],
-				["googlecalendar", env.COMPOSIO_AUTH_CONFIG_GOOGLECALENDAR],
-				["notion", env.COMPOSIO_AUTH_CONFIG_NOTION],
-				["slack", env.COMPOSIO_AUTH_CONFIG_SLACK],
-				["googledrive", env.COMPOSIO_AUTH_CONFIG_GOOGLEDRIVE],
-			])
+			buildOptionalRecord<SupportedIntegrationToolkit>(
+				Object.entries(TOOLKIT_REGISTRY).map(([slug, entry]) => [
+					slug as SupportedIntegrationToolkit,
+					env[entry.envKey as keyof typeof env] as string,
+				]),
+			)
 
 		const ensureClient = () =>
 			client
@@ -384,7 +385,7 @@ export const ConnectorsServiceLive = Layer.effect(
 				})
 
 				return (response.items as ConnectedAccountRecord[]).filter(
-					(item) => item?.toolkit?.slug in INTEGRATION_TOOLKITS,
+					(item) => item?.toolkit?.slug in TOOLKIT_REGISTRY,
 				)
 			})
 
@@ -393,7 +394,7 @@ export const ConnectorsServiceLive = Layer.effect(
 				rows
 					.filter(
 						(row): row is ConnectorPreferenceRow & { toolkit: SupportedIntegrationToolkit } =>
-							row.toolkit in INTEGRATION_TOOLKITS,
+							row.toolkit in TOOLKIT_REGISTRY,
 					)
 					.map((row) => [row.toolkit, row.preferredConnectedAccountId]),
 			) as Partial<Record<SupportedIntegrationToolkit, string>>
@@ -700,9 +701,7 @@ export const ConnectorsServiceLive = Layer.effect(
 						}),
 				).pipe(
 					Effect.map((rows) =>
-						rows.filter(
-							(row): row is ClearedPreferredAccount => row.toolkit in INTEGRATION_TOOLKITS,
-						),
+						rows.filter((row): row is ClearedPreferredAccount => row.toolkit in TOOLKIT_REGISTRY),
 					),
 					Effect.mapError(mapDatabaseError("failed_to_clear_preferred_connected_account")),
 				),
@@ -712,20 +711,8 @@ export const ConnectorsServiceLive = Layer.effect(
 			getConnectedAccountById: (connectedAccountId) =>
 				Effect.gen(function* () {
 					const composio = yield* ensureClient()
-					// Guard against SDK shape changes
-					if (
-						typeof (composio.connectedAccounts as unknown as Record<string, unknown>)?.get !==
-						"function"
-					) {
-						return yield* Effect.fail(
-							new ConnectorsError({ message: "composio_connected_accounts_api_unavailable" }),
-						)
-					}
-					const getAccount = (
-						composio.connectedAccounts as { get: (id: string) => Promise<unknown> }
-					).get.bind(composio.connectedAccounts)
 					const account = (yield* Effect.tryPromise({
-						try: () => getAccount(connectedAccountId),
+						try: () => composio.connectedAccounts.get(connectedAccountId),
 						catch: (cause) =>
 							new ConnectorsError({
 								message: "failed_to_get_connected_account",
@@ -736,7 +723,7 @@ export const ConnectorsServiceLive = Layer.effect(
 					const toolkit = account.toolkit?.slug
 					const userId = pickConnectedAccountUserId(account)
 
-					if (!toolkit || !(toolkit in INTEGRATION_TOOLKITS) || !userId) {
+					if (!toolkit || !(toolkit in TOOLKIT_REGISTRY) || !userId) {
 						return undefined
 					}
 

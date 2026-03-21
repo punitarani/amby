@@ -1,6 +1,6 @@
 import { AuthServiceLive } from "@amby/auth"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { ConnectorsServiceLive } from "@amby/connectors"
+import { buildSafeComposioRedirectUrl, ConnectorsServiceLive } from "@amby/connectors"
 import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { EnvServiceLive } from "@amby/env/local"
@@ -34,8 +34,7 @@ app.get("/health", (c) => c.json({ status: "ok" }))
 
 // OAuth callback proxy — same as Cloudflare Worker; local dev uses ngrok/API_URL for OAuth redirect URIs
 app.get("/composio/redirect", (c) => {
-	const query = new URL(c.req.url).search
-	return c.redirect(`https://backend.composio.dev/api/v3/toolkits/auth/callback${query}`, 302)
+	return c.redirect(buildSafeComposioRedirectUrl(c.req.url), 302)
 })
 
 const port = Number(process.env.PORT) || 3001

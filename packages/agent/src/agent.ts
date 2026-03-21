@@ -29,12 +29,15 @@ export type StreamPart =
 	| { type: "tool-call"; toolName: string; args: Record<string, unknown> }
 	| { type: "tool-result"; toolName: string; result: unknown }
 
+const ORCHESTRATOR_MAX_STEPS = 14
+
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
 import { createSubagentTools } from "./subagents/spawner"
 import { buildToolGroups } from "./subagents/tool-groups"
 import { createCodexAuthTools } from "./tools/codex-auth"
 import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
+import { extractToolUserMessages } from "./utils/extract-tool-user-messages"
 
 export class AgentService extends Context.Tag("AgentService")<
 	AgentService,
@@ -116,39 +119,6 @@ export const makeAgentServiceLive = (userId: string) =>
 
 			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
 				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
-
-			/**
-			 * Collect user-facing messages from all tool results in a step, deduplicated.
-			 *
-			 * Iterates all results (not just the last) because connector tools may appear
-			 * at any position. Only codex-auth and connector tools emit userMessages, and
-			 * Set-based dedup prevents repeats.
-			 */
-			const extractToolUserMessages = (result: {
-				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
-			}): string[] | undefined => {
-				const messages: string[] = []
-				const seen = new Set<string>()
-
-				for (const toolResult of result.toolResults) {
-					const output = toolResult?.output
-					if (
-						typeof output === "object" &&
-						output !== null &&
-						"userMessages" in output &&
-						Array.isArray(output.userMessages) &&
-						output.userMessages.every((message) => typeof message === "string" && message.trim())
-					) {
-						for (const message of output.userMessages) {
-							if (seen.has(message)) continue
-							seen.add(message)
-							messages.push(message)
-						}
-					}
-				}
-
-				return messages.length > 0 ? messages : undefined
-			}
 
 			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
 				Effect.gen(function* () {
@@ -249,7 +219,7 @@ export const makeAgentServiceLive = (userId: string) =>
 					tools,
 					// Delegation-heavy turns, especially connected-app work, need extra
 					// roundtrips on top of the base agent steps.
-					stopWhen: stepCountIs(14),
+					stopWhen: stepCountIs(ORCHESTRATOR_MAX_STEPS),
 					experimental_telemetry: createTelemetrySettings({
 						functionId,
 						metadata: conversationTraceMetadata,
@@ -329,7 +299,9 @@ export const makeAgentServiceLive = (userId: string) =>
 							},
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
-						const toolUserMessages = onReply ? extractToolUserMessages(result) : undefined
+						const toolUserMessages = onReply
+							? extractToolUserMessages(result.toolResults)
+							: undefined
 						if (toolUserMessages && onReply) {
 							yield* sendToolUserMessages(toolUserMessages, onReply)
 						}

@@ -1,4 +1,4 @@
-import { DEFAULT_TELEGRAM_BOT_USERNAME } from "@amby/env"
+import { normalizeTelegramBotUsername } from "@amby/env"
 
 function normalizeApiBaseUrl(url: string | undefined): string {
 	if (!url) return ""
@@ -8,10 +8,8 @@ function normalizeApiBaseUrl(url: string | undefined): string {
 }
 
 function getTelegramBotUrl(): string {
-	const username = (process.env.TELEGRAM_BOT_USERNAME ?? DEFAULT_TELEGRAM_BOT_USERNAME)
-		.trim()
-		.replace(/^@+/, "")
-	return `https://t.me/${username || DEFAULT_TELEGRAM_BOT_USERNAME}`
+	const username = normalizeTelegramBotUsername(process.env.TELEGRAM_BOT_USERNAME)
+	return `https://t.me/${username}`
 }
 
 export function getHomeResponse() {

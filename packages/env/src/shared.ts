@@ -35,4 +35,7 @@ export interface Env {
 
 export const DEFAULT_TELEGRAM_BOT_USERNAME = "my_amby_bot"
 
+export const normalizeTelegramBotUsername = (value?: string | null): string =>
+	(value?.trim().replace(/^@+/, "").toLowerCase() ?? "") || DEFAULT_TELEGRAM_BOT_USERNAME
+
 export class EnvService extends Context.Tag("EnvService")<EnvService, Env>() {}
