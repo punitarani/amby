@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test"
-import { routeMessage } from "./router"
 import {
 	buildReplayMessages,
 	extractTraceData,
@@ -7,6 +6,7 @@ import {
 	formatToolAnnotation,
 	summarizeToolOutput,
 } from "./agent"
+import { routeMessage } from "./router"
 
 describe("routeMessage", () => {
 	const threads = [
@@ -57,10 +57,7 @@ describe("buildReplayMessages", () => {
 			role: i % 2 === 0 ? "user" : "assistant",
 			content: `msg-${i}`,
 			toolCalls: null,
-			toolResults:
-				i % 2 === 1
-					? [{ toolName: "search", output: { summary: "found it" } }]
-					: null,
+			toolResults: i % 2 === 1 ? [{ toolName: "search", output: { summary: "found it" } }] : null,
 		}))
 		const result = buildReplayMessages(rows)
 		// Last RECENT_WITH_TOOLS=4 filtered messages get annotations
