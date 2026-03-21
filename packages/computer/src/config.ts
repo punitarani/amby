@@ -29,11 +29,17 @@ export const NPM_INSTALL_TIMEOUT = 120
 // ── Task supervisor ────────────────────────────────────────────────────
 
 export const DEFAULT_TASK_TIMEOUT_SECONDS = 300
+/** Stale `preparing` tasks older than this are marked `lost` (slow cold start tolerance). */
+export const PREPARING_TIMEOUT_MS = 10 * 60 * 1000
 export const HEARTBEAT_INTERVAL_MS = 60_000
 export const POLL_INTERVAL_MS = 2_000
 export const MAX_WAIT_SECONDS = 15
 export const MAX_ACTIVE_TASKS_PER_USER = 5
 export const MAX_HEARTBEAT_FAILURES = 3
+/** Treat harness heartbeats older than this as stale for reconciliation (ms). */
+export const STALE_HEARTBEAT_MS = 3 * 60 * 1000
+/** Harness heartbeat interval sent to callback response (ms). */
+export const CALLBACK_HEARTBEAT_INTERVAL_MS = 30_000
 
 // ── Codex auth URLs ───────────────────────────────────────────────────
 

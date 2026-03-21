@@ -13,6 +13,8 @@ import { Hono } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { handleExpiredConnectedAccount } from "./composio/expired-account"
 import { ConversationSession as ConversationSessionBase } from "./durable-objects/conversation-session"
+import { handleScheduledReconciliation } from "./handlers/reconciliation"
+import { handleTaskEventPost } from "./handlers/task-events"
 import { getHomeResponse } from "./home"
 import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
@@ -127,6 +129,15 @@ app.post("/telegram/webhook", async (c) => {
 	})
 })
 
+app.post("/internal/task-events", async (c) => {
+	const rt = makeRuntimeForConsumer(c.env)
+	try {
+		return await rt.runPromise(handleTaskEventPost(c.req.raw))
+	} finally {
+		await rt.dispose()
+	}
+})
+
 app.post("/composio/webhook", async (c) => {
 	if (!c.env.COMPOSIO_API_KEY || !c.env.COMPOSIO_WEBHOOK_SECRET) {
 		return c.json({ error: "Composio webhook not configured" }, 503)
@@ -193,6 +204,11 @@ const worker: ExportedHandler<WorkerBindings, TelegramQueueMessage> = {
 	async queue(batch: MessageBatch<TelegramQueueMessage>, env: WorkerBindings) {
 		await handleQueueBatch(batch, env)
 	},
+
+	async scheduled(_controller: ScheduledController, env: WorkerBindings, _ctx: ExecutionContext) {
+		await handleScheduledReconciliation(env)
+	},
 }
 
+// `withSentry` wraps the full `ExportedHandler` (fetch + queue + scheduled); cron is preserved.
 export default Sentry.withSentry<WorkerBindings, TelegramQueueMessage>(getSentryOptions, worker)

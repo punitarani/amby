@@ -24,8 +24,8 @@
 		"api:dev": "doppler run -- bun run --hot apps/api/src/index.ts",
 		"dev:vars": "doppler run -- ./scripts/generate-dev-vars.sh",
 		"api:dev:worker": "bun run dev:vars && cd apps/api && wrangler dev",
-		"computer:build": "./docker/computer/build.sh",
-		"computer:push": "./docker/computer/push.sh",
+		"computer:docker:build": "./docker/computer/build.sh",
+		"computer:docker:push": "./docker/computer/push.sh",
 		"tunnel": "doppler run -- ./scripts/tunnel.sh"
 	},
 	"packageManager": "bun@1.3.0",
