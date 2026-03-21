@@ -2,14 +2,13 @@ import {
 	CALLBACK_HEARTBEAT_INTERVAL_MS,
 	hashSecret,
 	isLegalTransition,
+	isTerminal,
 	isTimestampValid,
 	verifyHmacSignature,
 } from "@amby/computer"
 import type { TaskEventSource, TaskStatus } from "@amby/db"
 import { DbService, eq, schema } from "@amby/db"
 import { Effect } from "effect"
-
-const TERMINAL: TaskStatus[] = ["succeeded", "failed", "cancelled", "timed_out", "lost"]
 
 type TaskEventBody = {
 	eventId: string
@@ -21,6 +20,12 @@ type TaskEventBody = {
 	exitCode?: number | null
 	sentAt?: string
 	payload?: Record<string, unknown>
+}
+
+const jsonHeaders = { "Content-Type": "application/json" } as const
+
+function jsonResponse(body: Record<string, unknown>, status: number): Response {
+	return new Response(JSON.stringify(body), { status, headers: jsonHeaders })
 }
 
 function sourceFromEventType(eventType: string): TaskEventSource {
@@ -60,7 +65,7 @@ export const handleTaskEventPost = (request: Request) =>
 		const auth = request.headers.get("authorization")
 
 		if (!callbackId || !timestamp || !signature || !auth?.startsWith("Bearer ")) {
-			return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 })
+			return jsonResponse({ error: "Unauthorized" }, 401)
 		}
 
 		const bearer = auth.slice("Bearer ".length).trim()
@@ -72,15 +77,15 @@ export const handleTaskEventPost = (request: Request) =>
 		})
 		const task = taskRows[0]
 		if (!task) {
-			return new Response(JSON.stringify({ error: "Not found" }), { status: 404 })
+			return jsonResponse({ error: "Not found" }, 404)
 		}
 
-		if (TERMINAL.includes(task.status as TaskStatus)) {
-			return new Response(JSON.stringify({ error: "Task not accepting events" }), { status: 409 })
+		if (isTerminal(task.status as TaskStatus)) {
+			return jsonResponse({ error: "Task not accepting events" }, 409)
 		}
 
 		if (!task.callbackSecretHash) {
-			return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 })
+			return jsonResponse({ error: "Unauthorized" }, 401)
 		}
 
 		const bearerHash = yield* Effect.tryPromise({
@@ -88,12 +93,12 @@ export const handleTaskEventPost = (request: Request) =>
 			catch: () => new Error("hash"),
 		})
 		if (bearerHash !== task.callbackSecretHash) {
-			return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 })
+			return jsonResponse({ error: "Unauthorized" }, 401)
 		}
 
 		const ts = Number(timestamp)
 		if (!isTimestampValid(ts)) {
-			return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 })
+			return jsonResponse({ error: "Unauthorized" }, 401)
 		}
 
 		const okSig = yield* Effect.tryPromise({
@@ -101,69 +106,66 @@ export const handleTaskEventPost = (request: Request) =>
 			catch: () => false,
 		})
 		if (!okSig) {
-			return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 })
+			return jsonResponse({ error: "Unauthorized" }, 401)
 		}
 
 		let body: TaskEventBody
 		try {
 			body = JSON.parse(rawBody) as TaskEventBody
 		} catch {
-			return new Response(JSON.stringify({ error: "Invalid JSON" }), { status: 400 })
+			return jsonResponse({ error: "Invalid JSON" }, 400)
 		}
 
 		if (body.taskId !== task.id) {
-			return new Response(JSON.stringify({ error: "Task mismatch" }), { status: 400 })
+			return jsonResponse({ error: "Task mismatch" }, 400)
 		}
 
 		const seq = body.seq
 		/** Monotonic `seq` applies only to harness-originated events; `codex.notify` uses `seq: null`. */
 		const isHarnessSeq = typeof seq === "number" && Number.isFinite(seq)
 		if (isHarnessSeq && seq <= task.lastEventSeq) {
-			return new Response(
-				JSON.stringify({
+			return jsonResponse(
+				{
 					ack: true,
 					cancelRequested: false,
 					nextHeartbeatMs: CALLBACK_HEARTBEAT_INTERVAL_MS,
-				}),
-				{ status: 200, headers: { "Content-Type": "application/json" } },
+				},
+				200,
 			)
 		}
 
 		const occurredAt = body.sentAt ? new Date(body.sentAt) : new Date()
 		const source = sourceFromEventType(body.eventType)
 
-		const inserted = yield* Effect.tryPromise({
-			try: async () => {
-				try {
-					await db.insert(schema.taskEvents).values({
-						taskId: task.id,
-						eventId: body.eventId,
-						source,
-						eventType: body.eventType,
-						seq: seq ?? null,
-						payload: body.payload ?? {
-							status: body.status,
-							message: body.message,
-							exitCode: body.exitCode,
-						},
-						occurredAt,
-					})
-					return true
-				} catch (e) {
-					console.error("[task-events] insert skipped:", e)
-					return false
-				}
-			},
-			catch: () => false,
+		const inserted = yield* Effect.promise(async () => {
+			try {
+				await db.insert(schema.taskEvents).values({
+					taskId: task.id,
+					eventId: body.eventId,
+					source,
+					eventType: body.eventType,
+					seq: seq ?? null,
+					payload: body.payload ?? {
+						status: body.status,
+						message: body.message,
+						exitCode: body.exitCode,
+					},
+					occurredAt,
+				})
+				return true
+			} catch (e) {
+				console.error("[task-events] insert skipped:", e)
+				return false
+			}
 		})
 		if (!inserted) {
-			return new Response(
-				JSON.stringify({
+			return jsonResponse(
+				{
 					ack: true,
 					cancelRequested: false,
 					nextHeartbeatMs: CALLBACK_HEARTBEAT_INTERVAL_MS,
-				}),
-				{ status: 200, headers: { "Content-Type": "application/json" } },
+				},
+				200,
 			)
 		}
 
@@ -210,12 +212,12 @@ export const handleTaskEventPost = (request: Request) =>
 			})
 		}
 
-		return new Response(
-			JSON.stringify({
+		return jsonResponse(
+			{
 				ack: true,
 				cancelRequested: false,
 				nextHeartbeatMs: CALLBACK_HEARTBEAT_INTERVAL_MS,
-			}),
-			{ status: 200, headers: { "Content-Type": "application/json" } },
+			},
+			200,
 		)
 	})

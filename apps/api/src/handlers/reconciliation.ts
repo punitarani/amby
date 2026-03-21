@@ -25,6 +25,7 @@ export async function handleScheduledReconciliation(env: WorkerBindings): Promis
 						}),
 					catch: (e) => {
 						console.error("[ReconciliationCron]", e)
+						return e instanceof Error ? e : new Error(String(e))
 					},
 				})
 			}),

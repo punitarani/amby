@@ -760,7 +760,6 @@ export const TaskSupervisorLive = Layer.scoped(
 
 					let channelType: string | undefined
 					let replyTarget: Record<string, unknown> | undefined
-					const convId: string | undefined = conversationId
 
 					if (conversationId) {
 						const convRows = yield* query((d) =>
@@ -816,7 +815,7 @@ export const TaskSupervisorLive = Layer.scoped(
 								prompt,
 								needsBrowser: needsBrowser ? "true" : "false",
 								sandboxId: sandbox.id,
-								conversationId: convId,
+								conversationId,
 								channelType,
 								replyTarget,
 								callbackId,
@@ -847,7 +846,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							source: "server",
 							eventType: "task.created",
 							seq: 0,
-							payload: { conversationId: convId ?? null },
+							payload: { conversationId: conversationId ?? null },
 							occurredAt: new Date(),
 						}),
 					).pipe(
@@ -871,7 +870,7 @@ export const TaskSupervisorLive = Layer.scoped(
 									authMode,
 									needsBrowser,
 									timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
-									conversationId: convId,
+									conversationId: conversationId,
 									callbackUrl,
 									callbackId,
 									callbackSecret: creds.raw,

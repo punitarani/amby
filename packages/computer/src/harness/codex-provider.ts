@@ -29,16 +29,16 @@ function utf8SizeLimited(buf: Buffer): string {
 	}
 	const head = buf.subarray(0, HEAD_TAIL_BYTES).toString("utf-8")
 	const tail = buf.subarray(buf.length - HEAD_TAIL_BYTES).toString("utf-8")
-	return `\n… [truncated ${buf.length} bytes] …\n\n--- first ${HEAD_TAIL_BYTES} bytes ---\n${head}\n\n--- last ${HEAD_TAIL_BYTES} bytes ---\n${tail}`
+	return `${head}\n\n… [truncated ${buf.length} bytes] …\n\n${tail}`
 }
 
 function buildCodexConfigToml(needsBrowser: boolean, includeNotify: boolean): string {
 	const parts: string[] = []
-	if (needsBrowser) {
-		parts.push(PLAYWRIGHT_CONFIG.trim())
-	}
 	if (includeNotify) {
 		parts.push(`notify = ["node", "../notify.js"]`)
+	}
+	if (needsBrowser) {
+		parts.push(PLAYWRIGHT_CONFIG.trim())
 	}
 	return parts.join("\n\n")
 }
@@ -53,6 +53,9 @@ export class CodexProvider implements TaskProvider {
 
 		// Create directory structure
 		await sandbox.process.executeCommand(`mkdir -p ${workspaceDir}/.codex ${artifactsDir}`)
+
+		// Initialize git repo (Codex requires it)
+		await sandbox.process.executeCommand(`cd ${workspaceDir} && git init`)
 
 		const hasCallback = Boolean(config.callbackUrl && config.callbackSecret && config.callbackId)
 
