@@ -253,6 +253,12 @@ app.onError(async (err, c) => {
 app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
 
+// OAuth callback proxy — OAuth providers redirect here; we 302 to Composio so the browser shows your API domain (not backend.composio.dev)
+app.get("/composio/redirect", (c) => {
+	const query = new URL(c.req.url).search
+	return c.redirect(`https://backend.composio.dev/api/v3/toolkits/auth/callback${query}`, 302)
+})
+
 // Webhook handler — Chat SDK handles secret verification, parsing, and routing via waitUntil
 app.post("/telegram/webhook", async (c) => {
 	const { chat } = getOrCreateChat(c.env)
