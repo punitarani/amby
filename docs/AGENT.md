@@ -13,6 +13,7 @@ User Message → Orchestrator Agent
                  ├── delegate_research       → Research Subagent (read-only tools)
                  ├── delegate_builder        → Builder Subagent (full sandbox tools)
                  ├── delegate_planner        → Planner Subagent (no tools, pure reasoning)
+                 ├── delegate_integration    → Integration Subagent (Composio + connected apps)
                  ├── delegate_computer       → Computer Subagent (CUA/GUI tools)
                  ├── delegate_memory_manager → Memory Subagent (memory tools)
                  ├── search_memories         → Direct read-only memory access
@@ -49,6 +50,7 @@ All definitions live in `packages/agent/src/subagents/definitions.ts`.
 | `research` | `memory-read`, `computer-read` | 8 | Gather info, read files, search memories, run read-only commands |
 | `builder` | `memory-read`, `computer-read`, `computer-write` | 10 | Create/modify files, run code, install packages |
 | `planner` | _(none)_ | 3 | Break down complex tasks, pure reasoning |
+| `integration` | `integration` | 12 | Handle Composio-backed connected-app tasks and integration management |
 | `computer` | `cua` | 15 | GUI interaction via desktop (only available when CUA is enabled) |
 | `memory_manager` | `memory-read`, `memory-write` | 5 | Save/organize/search user memories |
 
@@ -66,11 +68,12 @@ Tools are organized into named groups in `packages/agent/src/subagents/tool-grou
 | `memory-write` | `save_memory` | `@amby/memory` |
 | `computer-read` | `execute_command`, `read_file` | `@amby/computer` |
 | `computer-write` | `write_file` | `@amby/computer` |
+| `integration` | `list_integrations`, `connect_integration`, `disconnect_integration`, `set_preferred_integration_account`, plus user-scoped Composio session tools | `@amby/connectors` |
 | `cua` | `cua_start`, `cua_end`, `cua_screenshot`, `cua_click`, `cua_type`, `cua_key_press`, `cua_scroll`, `cua_cursor_position` | `@amby/computer` |
 
 Both memory and computer tools are split into read/write groups. This gives the research and builder agents read-only memory access (`search_memories`) while restricting `save_memory` to the memory_manager. Similarly, the research agent gets sandbox access without `write_file`. The research agent's `execute_command` is prompt-constrained to read-only operations (ls, cat, grep, find) — the tool itself is the same, but the subagent's system prompt instructs it not to run destructive commands.
 
-### `buildToolGroups(memoryTools, computerTools, cuaTools?)`
+### `buildToolGroups(memoryTools, computerTools, cuaTools?, integrationTools?)`
 
 Takes the already-created tool objects from memory, computer, and CUA packages and organizes them into the group structure. CUA tools are optional — the group is omitted when CUA is disabled.
 
@@ -86,10 +89,11 @@ Merges the requested tool groups into a single flat `ToolSet` for a subagent.
 
 ```ts
 createSubagentTools(
-  model: LanguageModel,
+  getModel: (id?: string) => LanguageModel,
   toolGroups: ToolGroups,
   sharedPromptContext: string,
-  sharedTraceMetadata: SharedTraceMetadata,
+  config: AgentConfig,
+  requestTraceMetadata: RequestTraceMetadata,
 ): ToolSet
 ```
 
@@ -98,9 +102,9 @@ Each delegation tool:
 - Resolves its tools from `toolGroups` using the definition's `toolKeys`
 - Creates a fresh `ToolLoopAgent` inside the tool execution with the subagent's instructions, scoped tools, `maxSteps`, and invocation-specific telemetry metadata
 - Calls `subagent.generate({ prompt, abortSignal })` so cancellation propagates through tool execution
-- Returns `{ summary: result.text }` on success
+- Returns `{ summary: result.text }` on success, and forwards nested connector `userMessages` when present
 - Returns `{ error: true, summary: "..." }` on failure (errors don't crash the orchestrator)
-- Skips the `computer` subagent entirely when CUA tools aren't available
+- Skips any subagent whose required tool groups are unavailable
 
 ---
 
@@ -109,12 +113,13 @@ Each delegation tool:
 In `packages/agent/src/agent.ts`, the `prepareContext()` function assembles the orchestrator's tool set:
 
 ```ts
-const sharedTraceMetadata = buildSharedTraceMetadata(...)
+const requestTraceMetadata = buildRequestTraceMetadata({ conversationId, requestMode, ... })
 const delegationTools = createSubagentTools(
-  baseModel,
+  models.getModel,
   toolGroups,
   sharedPromptContext,
-  sharedTraceMetadata,
+  agentConfig,
+  requestTraceMetadata,
 )
 
 const { search_memories } = memoryTools
@@ -145,11 +150,11 @@ The orchestrator's system prompt (`packages/agent/src/prompts/system.ts`) includ
 ### Orchestrator-only delegation
 Subagents cannot spawn other subagents. The orchestrator chains them sequentially when needed (e.g., `delegate_planner` then `delegate_builder`). Simpler, easier to debug.
 
-### Same model for all agents
-All subagents use the base model (`models.getModel()`). The `modelId` field exists in `SubagentDef` for future per-agent overrides but isn't wired yet. Tracing is handled through AI SDK `experimental_telemetry` with one shared OpenTelemetry tracer, so orchestrator, tool, and subagent spans nest through the active context instead of custom Braintrust wrappers.
+### Per-agent model overrides
+Subagents default to the default model ID from `ModelService`, but `SubagentDef.modelId` can override it (for example research, planner, and integration use a higher-intelligence model). Tracing is handled through AI SDK `experimental_telemetry` with a shared OpenTelemetry tracer, so orchestrator, tool, and subagent spans nest through the active context.
 
 ### Shared no-PII trace metadata
-Each top-level request builds one shared metadata object that contains only internal IDs, enums, and counters (`request_id`, `user_id`, `conversation_id`, request mode, counts, model ID, and source flags). That metadata is attached to orchestrator and subagent AI SDK spans. Prompt context such as memories and formatted time stays in prompts only and is not copied into trace metadata.
+Each top-level request builds trace metadata with internal IDs, enums, and counters (`request_id`, `user_id`, `conversation_id`, request mode, model ID, and related flags). That metadata is attached to orchestrator and subagent AI SDK spans. Prompt context such as memories and formatted time stays in prompts only and is not copied into trace metadata.
 
 ### Read-only memory on orchestrator
 The orchestrator gets `search_memories` directly (destructured from the full memory tools) rather than the full `save_memory` + `search_memories` set. This lets the orchestrator check user context before deciding how to delegate without being tempted to write memories itself.
@@ -181,7 +186,7 @@ The research agent receives the same `execute_command` tool as the builder but i
 
 | File | Role |
 |------|------|
-| `packages/agent/src/subagents/definitions.ts` | Subagent type + 5 definitions (data only) |
+| `packages/agent/src/subagents/definitions.ts` | Subagent type + definitions (data only) |
 | `packages/agent/src/subagents/tool-groups.ts` | Tool grouping + resolution |
 | `packages/agent/src/subagents/spawner.ts` | Factory that creates delegation tools |
 | `packages/agent/src/subagents/index.ts` | Barrel exports |

@@ -6,9 +6,7 @@ import { Chat } from "chat"
 import { makeRuntimeForConsumer } from "../queue/runtime"
 import { setTelegramScope } from "../sentry"
 import type { TelegramFrom } from "./utils"
-import { handleCommand } from "./utils"
-
-const COMMANDS = new Set(["/start", "/stop", "/help"])
+import { handleCommand, parseTelegramCommand } from "./utils"
 
 let _chat: Chat | null = null
 
@@ -60,6 +58,7 @@ async function routeIncomingMessage(
 	const from = raw.from
 	const chatId = raw.chat.id
 	const text = raw.text
+	const parsedCommand = parseTelegramCommand(text, env.TELEGRAM_BOT_USERNAME)
 
 	if (!from || !chatId) return
 
@@ -70,20 +69,22 @@ async function routeIncomingMessage(
 		attributes: {
 			telegram_message_id: raw.message_id,
 			has_text: Boolean(text),
-			is_command: Boolean(text && COMMANDS.has(text)),
+			is_command: Boolean(parsedCommand),
 		},
 	})
 
 	// Commands: handle inline
-	if (text && COMMANDS.has(text)) {
+	if (parsedCommand) {
 		const runtime = makeRuntimeForConsumer(env)
 		try {
 			await runtime.runPromise(
-				handleCommand(text, from, chatId, { sandboxWorkflow: env.SANDBOX_WORKFLOW }),
+				handleCommand(parsedCommand, from, chatId, {
+					sandboxWorkflow: env.SANDBOX_WORKFLOW,
+				}),
 			)
 		} catch (err) {
 			Sentry.captureException(err)
-			console.error(`[ChatSDK] Command ${text} failed for chat ${chatId}:`, err)
+			console.error(`[ChatSDK] Command ${parsedCommand.rawText} failed for chat ${chatId}:`, err)
 		} finally {
 			await runtime.dispose()
 		}

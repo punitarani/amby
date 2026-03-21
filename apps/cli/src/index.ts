@@ -6,6 +6,7 @@ import {
 } from "@amby/agent"
 import { CLIChannel } from "@amby/channels"
 import { SandboxService, SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
+import { ConnectorsServiceLive } from "@amby/connectors"
 import { DbService, DbServiceLive, eq, schema } from "@amby/db"
 import { EnvServiceLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
@@ -94,7 +95,9 @@ const program = Effect.gen(function* () {
 })
 
 const AppLive = Layer.mergeAll(makeAgentServiceLive(userId), JobRunnerServiceLive).pipe(
-	Layer.provideMerge(Layer.mergeAll(MemoryServiceLive, TaskSupervisorLive, ModelServiceLive)),
+	Layer.provideMerge(
+		Layer.mergeAll(MemoryServiceLive, TaskSupervisorLive, ModelServiceLive, ConnectorsServiceLive),
+	),
 	Layer.provideMerge(SandboxServiceLive),
 	Layer.provideMerge(DbServiceLive),
 	Layer.provideMerge(EnvServiceLive),

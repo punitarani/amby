@@ -1,3 +1,5 @@
+export * from "./connector-auth-requests"
+export * from "./connector-preferences"
 export * from "./conversations"
 export * from "./jobs"
 export * from "./memories"

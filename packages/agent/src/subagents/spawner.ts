@@ -6,11 +6,12 @@ import {
 	createTelemetrySettings,
 	type RequestTraceMetadata,
 } from "../telemetry"
+import { extractToolUserMessages } from "../utils/extract-tool-user-messages"
 import { SUBAGENT_DEFS } from "./definitions"
 import { resolveTools, type ToolGroups } from "./tool-groups"
 
 export function createSubagentTools(
-	model: LanguageModel,
+	getModel: (id?: string) => LanguageModel,
 	toolGroups: ToolGroups,
 	sharedPromptContext: string,
 	config: AgentConfig,
@@ -23,6 +24,8 @@ export function createSubagentTools(
 		if (def.name === "computer" && !toolGroups.cua) continue
 
 		const subagentTools = resolveTools(def.toolKeys, toolGroups)
+		if (def.toolKeys.length > 0 && Object.keys(subagentTools).length === 0) continue
+
 		const systemPrompt = sharedPromptContext
 			? `${def.systemPrompt}\n\n# Context\n${sharedPromptContext}`
 			: def.systemPrompt
@@ -50,7 +53,7 @@ export function createSubagentTools(
 					}
 					const subagent = new ToolLoopAgent({
 						id: `subagent.${def.name}`,
-						model,
+						model: getModel(def.modelId),
 						instructions: systemPrompt,
 						tools: subagentTools,
 						stopWhen: stepCountIs(def.maxSteps),
@@ -62,8 +65,9 @@ export function createSubagentTools(
 					const userMessage = context ? `${task}\n\nAdditional context: ${context}` : task
 
 					const result = await subagent.generate({ prompt: userMessage, abortSignal })
+					const userMessages = extractToolUserMessages(result.toolResults)
 
-					return { summary: result.text }
+					return userMessages ? { summary: result.text, userMessages } : { summary: result.text }
 				} catch (error) {
 					return {
 						error: true,

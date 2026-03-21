@@ -2,24 +2,60 @@
 ## Derived from WorkerBindings in packages/env/src/workers.ts,
 ## excluding Cloudflare primitives (queues, DOs, workflows, Hyperdrive, version metadata).
 ## Used by: generate-dev-vars.sh, ci-cd.yml (secret sync)
+## Note: generate-dev-vars.sh only writes keys that currently have non-empty values.
 
+# Environment
 NODE_ENV
+
+# API URLs
+API_URL=
+APP_URL
+
+# Database
+DATABASE_URL
+
+# Auth — BetterAuth
+BETTER_AUTH_SECRET
+BETTER_AUTH_URL
+
+# LLM, STT, TTS
 OPENROUTER_API_KEY
 OPENAI_API_KEY
 CARTESIA_API_KEY
+
+# Daytona Sandbox
 DAYTONA_API_KEY
 DAYTONA_API_URL
 DAYTONA_TARGET
+
+# Telegram Bot
+TELEGRAM_BOT_TOKEN
+TELEGRAM_BOT_USERNAME
+TELEGRAM_WEBHOOK_SECRET
+
+# Computer / Sandbox
+ENABLE_CUA
+
+# Composio connectors
+COMPOSIO_API_KEY
+COMPOSIO_WEBHOOK_SECRET
+
+# Optional toolkit-specific auth config overrides
+COMPOSIO_AUTH_CONFIG_GMAIL
+COMPOSIO_AUTH_CONFIG_GOOGLECALENDAR
+COMPOSIO_AUTH_CONFIG_NOTION
+COMPOSIO_AUTH_CONFIG_SLACK
+COMPOSIO_AUTH_CONFIG_GOOGLEDRIVE
+
+# Braintrust — agent observability & tracing
+BRAINTRUST_API_KEY
+BRAINTRUST_PROJECT_ID
+
+# Sentry — error tracking
 SENTRY_DSN
 SENTRY_ENVIRONMENT
 SENTRY_RELEASE
-TELEGRAM_BOT_TOKEN
-TELEGRAM_WEBHOOK_SECRET
-DATABASE_URL
-BETTER_AUTH_SECRET
-BETTER_AUTH_URL
-ENABLE_CUA
-BRAINTRUST_API_KEY
-BRAINTRUST_PROJECT_ID
+
+# PostHog analytics
 POSTHOG_KEY
 POSTHOG_HOST

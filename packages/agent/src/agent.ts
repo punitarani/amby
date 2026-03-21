@@ -1,5 +1,6 @@
 import type { ChannelType } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
+import { ConnectorsService, createConnectorManagementTools } from "@amby/connectors"
 import { DbService, desc, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import {
@@ -28,12 +29,15 @@ export type StreamPart =
 	| { type: "tool-call"; toolName: string; args: Record<string, unknown> }
 	| { type: "tool-result"; toolName: string; result: unknown }
 
+const ORCHESTRATOR_MAX_STEPS = 14
+
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
 import { createSubagentTools } from "./subagents/spawner"
 import { buildToolGroups } from "./subagents/tool-groups"
 import { createCodexAuthTools } from "./tools/codex-auth"
 import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
+import { extractToolUserMessages } from "./utils/extract-tool-user-messages"
 
 export class AgentService extends Context.Tag("AgentService")<
 	AgentService,
@@ -71,6 +75,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			const memory = yield* MemoryService
 			const sandbox = yield* SandboxService
 			const taskSupervisor = yield* TaskSupervisor
+			const connectors = yield* ConnectorsService
 			const env = yield* EnvService
 			initializeTelemetry({
 				apiKey: env.BRAINTRUST_API_KEY,
@@ -115,23 +120,6 @@ export const makeAgentServiceLive = (userId: string) =>
 			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
 				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
 
-			const extractLastToolUserMessages = (result: {
-				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
-			}): string[] | undefined => {
-				for (let i = result.toolResults.length - 1; i >= 0; i -= 1) {
-					const output = result.toolResults[i]?.output
-					if (
-						typeof output === "object" &&
-						output !== null &&
-						"userMessages" in output &&
-						Array.isArray(output.userMessages) &&
-						output.userMessages.every((message) => typeof message === "string" && message.trim())
-					) {
-						return output.userMessages
-					}
-				}
-			}
-
 			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
 				Effect.gen(function* () {
 					const userRow = yield* query((d) =>
@@ -165,7 +153,32 @@ export const makeAgentServiceLive = (userId: string) =>
 					const cuaTools = agentConfig.cuaEnabled
 						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 						: undefined
-					const toolGroups = buildToolGroups(memoryTools, computer.tools, cuaTools)
+					const connectorManagementTools = connectors.isEnabled()
+						? createConnectorManagementTools(connectors, userId)
+						: undefined
+					const connectorSessionTools = connectors.isEnabled()
+						? yield* connectors.getAgentTools(userId).pipe(
+								Effect.catchAll((error) =>
+									Effect.sync(() => {
+										console.error("[Agent] Failed to load Composio tools:", error)
+										return undefined
+									}),
+								),
+							)
+						: undefined
+					const integrationTools =
+						connectorManagementTools || connectorSessionTools
+							? ({
+									...(connectorManagementTools ?? {}),
+									...(connectorSessionTools ?? {}),
+								} as ToolSet)
+							: undefined
+					const toolGroups = buildToolGroups(
+						memoryTools,
+						computer.tools,
+						cuaTools,
+						integrationTools,
+					)
 
 					const basePrompt = agentConfig.cuaEnabled
 						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
@@ -204,7 +217,9 @@ export const makeAgentServiceLive = (userId: string) =>
 					model: baseModel,
 					instructions: systemPrompt,
 					tools,
-					stopWhen: stepCountIs(10),
+					// Delegation-heavy turns, especially connected-app work, need extra
+					// roundtrips on top of the base agent steps.
+					stopWhen: stepCountIs(ORCHESTRATOR_MAX_STEPS),
 					experimental_telemetry: createTelemetrySettings({
 						functionId,
 						metadata: conversationTraceMetadata,
@@ -243,7 +258,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							requestMetadata: metadata,
 						})
 						const delegationTools = createSubagentTools(
-							baseModel,
+							models.getModel,
 							toolGroups,
 							sharedPromptContext,
 							agentConfig,
@@ -278,14 +293,15 @@ export const makeAgentServiceLive = (userId: string) =>
 									const [text, toolResults] = await Promise.all([stream.text, stream.toolResults])
 									return { text, toolResults }
 								}
-
 								return await agent.generate({
 									messages: [...history, ...requestMessages],
 								})
 							},
 							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
 						})
-						const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
+						const toolUserMessages = onReply
+							? extractToolUserMessages(result.toolResults)
+							: undefined
 						if (toolUserMessages && onReply) {
 							yield* sendToolUserMessages(toolUserMessages, onReply)
 						}
@@ -343,7 +359,7 @@ export const makeAgentServiceLive = (userId: string) =>
 								requestMode: "stream-message",
 							})
 							const delegationTools = createSubagentTools(
-								baseModel,
+								models.getModel,
 								toolGroups,
 								sharedPromptContext,
 								agentConfig,

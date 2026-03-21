@@ -1,5 +1,11 @@
+import {
+	ConnectorsService,
+	getIntegrationLabel,
+	getIntegrationSuccessMessage,
+	parseIntegrationStartPayload,
+} from "@amby/connectors"
 import { and, DbService, desc, eq, schema } from "@amby/db"
-import { EnvService } from "@amby/env"
+import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import { Effect } from "effect"
 import { getPostHogClient } from "../posthog"
@@ -39,6 +45,16 @@ export interface BufferedMessage {
 	text: string
 	messageId: number
 	date: number
+}
+
+export const TELEGRAM_COMMANDS = ["/start", "/stop", "/help"] as const
+
+export type TelegramCommandName = (typeof TELEGRAM_COMMANDS)[number]
+
+export type ParsedTelegramCommand = {
+	command: TelegramCommandName
+	payload?: string
+	rawText: string
 }
 
 /**
@@ -150,12 +166,145 @@ export const findOrCreateUser = (from: TelegramFrom, chatId: number) =>
 		})
 	})
 
+const ensureTelegramConversation = (userId: string) =>
+	Effect.gen(function* () {
+		const { db } = yield* DbService
+
+		yield* Effect.tryPromise(async () =>
+			db.transaction(async (tx) => {
+				const existing = await tx
+					.select({ id: schema.conversations.id })
+					.from(schema.conversations)
+					.where(eq(schema.conversations.userId, userId))
+					.orderBy(desc(schema.conversations.updatedAt))
+					.limit(1)
+
+				if (existing[0]) return
+
+				await tx.insert(schema.conversations).values({ userId, channelType: "telegram" })
+			}),
+		)
+	})
+
+const startTelegramSession = (
+	userId: string,
+	from: TelegramFrom,
+	options?: { sandboxWorkflow?: WorkerBindings["SANDBOX_WORKFLOW"] },
+) =>
+	Effect.gen(function* () {
+		const env = yield* EnvService
+		const posthog = getPostHogClient(env.POSTHOG_KEY, env.POSTHOG_HOST)
+
+		yield* ensureTelegramConversation(userId)
+
+		if (options?.sandboxWorkflow) {
+			options.sandboxWorkflow
+				.create({
+					id: `sandbox-provision-${userId}`,
+					params: { userId },
+				})
+				.catch((err) => console.error("[Sandbox] Provision workflow:", err))
+		}
+
+		posthog.capture({
+			distinctId: userId,
+			event: "bot_started",
+			properties: {
+				channel: "telegram",
+				username: from.username ?? null,
+				language_code: from.language_code ?? null,
+				is_premium: from.is_premium ?? false,
+			},
+		})
+	})
+
+const sendIntegrationStartResult = (userId: string, chatId: number, payload: string) =>
+	Effect.gen(function* () {
+		const sender = yield* TelegramSender
+		const toolkit = parseIntegrationStartPayload(payload)
+
+		if (!toolkit) {
+			yield* Effect.tryPromise(() =>
+				sender.sendMessage(
+					chatId,
+					"That connection link isn't recognized anymore. Just let me know which app you'd like to connect and I'll send a fresh one.",
+				),
+			)
+			return
+		}
+
+		const connectors = yield* ConnectorsService
+		const label = getIntegrationLabel(toolkit)
+
+		if (!connectors.isEnabled()) {
+			yield* Effect.tryPromise(() =>
+				sender.sendMessage(
+					chatId,
+					`I couldn't verify ${label} because app connections aren't configured on this deployment yet.`,
+				),
+			)
+			return
+		}
+
+		const integrations = yield* connectors.listIntegrations(userId)
+		const integration = integrations.find((item) => item.toolkit === toolkit)
+
+		if (integration?.connected) {
+			yield* connectors.clearPendingIntegrationRequest(userId, toolkit)
+			yield* Effect.tryPromise(() =>
+				sender.sendMessage(chatId, getIntegrationSuccessMessage(toolkit)),
+			)
+			return
+		}
+
+		yield* Effect.tryPromise(() =>
+			sender.sendMessage(
+				chatId,
+				`I couldn't confirm the ${label} connection yet. If you just finished authorizing it, wait a few seconds and send /start again. If you need a fresh link, ask me to connect ${label}.`,
+			),
+		)
+	})
+
+export const parseTelegramCommand = (
+	text?: string | null,
+	botUsername?: string | null,
+): ParsedTelegramCommand | undefined => {
+	if (!text) return undefined
+
+	const trimmed = text.trim()
+	if (!trimmed.startsWith("/")) return undefined
+
+	const [token, ...rest] = trimmed.split(/\s+/)
+	if (!token) return undefined
+	const loweredToken = token.toLowerCase()
+	const [command, targetBotUsername, ...extraParts] = loweredToken.split("@")
+
+	if (!command || extraParts.length > 0) return undefined
+
+	if (targetBotUsername) {
+		const normalizedBotUsername = normalizeTelegramBotUsername(botUsername)
+		if (targetBotUsername !== normalizedBotUsername) {
+			return undefined
+		}
+	}
+
+	if (!TELEGRAM_COMMANDS.includes(command as TelegramCommandName)) {
+		return undefined
+	}
+
+	return {
+		command: command as TelegramCommandName,
+		payload: rest.join(" ").trim() || undefined,
+		rawText: trimmed,
+	}
+}
+
 /**
  * Handle simple stateless commands (/start, /stop, /help) inline.
  * Returns an Effect that sends the appropriate response via the Telegram Bot API.
  */
 export const handleCommand = (
-	command: string,
+	command: ParsedTelegramCommand,
 	from: TelegramFrom,
 	chatId: number,
 	options?: { sandboxWorkflow?: WorkerBindings["SANDBOX_WORKFLOW"] },
@@ -166,42 +315,14 @@ export const handleCommand = (
 		const userId = yield* findOrCreateUser(from, chatId)
 		const posthog = getPostHogClient(env.POSTHOG_KEY, env.POSTHOG_HOST)
 
-		switch (command) {
+		switch (command.command) {
 			case "/start": {
-				const { db } = yield* DbService
-				yield* Effect.tryPromise(async () =>
-					db.transaction(async (tx) => {
-						const existing = await tx
-							.select({ id: schema.conversations.id })
-							.from(schema.conversations)
-							.where(eq(schema.conversations.userId, userId))
-							.orderBy(desc(schema.conversations.updatedAt))
-							.limit(1)
-						if (existing[0]) return
-						await tx.insert(schema.conversations).values({ userId, channelType: "telegram" })
-					}),
-				)
+				yield* startTelegramSession(userId, from, options)
 
-				// Kick off sandbox provisioning via durable workflow
-				if (options?.sandboxWorkflow) {
-					options.sandboxWorkflow
-						.create({
-							id: `sandbox-provision-${userId}`,
-							params: { userId },
-						})
-						.catch((err) => console.error("[Sandbox] Provision workflow:", err))
+				if (command.payload) {
+					yield* sendIntegrationStartResult(userId, chatId, command.payload)
+					break
 				}
-
-				posthog.capture({
-					distinctId: userId,
-					event: "bot_started",
-					properties: {
-						channel: "telegram",
-						username: from.username ?? null,
-						language_code: from.language_code ?? null,
-						is_premium: from.is_premium ?? false,
-					},
-				})
 
 				yield* Effect.tryPromise(() =>
 					sender.sendMessage(

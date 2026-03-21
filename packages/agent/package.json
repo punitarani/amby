@@ -21,6 +21,7 @@
 		"@ai-sdk/provider": "^3.0.0",
 		"@amby/channels": "workspace:*",
 		"@amby/computer": "workspace:*",
+		"@amby/connectors": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",
