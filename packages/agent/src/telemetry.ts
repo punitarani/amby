@@ -1,5 +1,5 @@
 import { BraintrustSpanProcessor } from "@braintrust/otel"
-import { context, trace, type AttributeValue, type Tracer } from "@opentelemetry/api"
+import { type AttributeValue, context, type Tracer, trace } from "@opentelemetry/api"
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks"
 import { BasicTracerProvider, type SpanProcessor } from "@opentelemetry/sdk-trace-base"
 import type { TelemetrySettings } from "ai"
@@ -40,10 +40,9 @@ type AgentTraceMetadataOptional = Partial<{
 	agent_invocation_index: number
 }>
 
-export type AgentTraceMetadata =
-	& SharedTraceMetadata
-	& AgentTraceMetadataRequired
-	& AgentTraceMetadataOptional
+export type AgentTraceMetadata = SharedTraceMetadata &
+	AgentTraceMetadataRequired &
+	AgentTraceMetadataOptional
 
 type TraceAttributes = Record<string, AttributeValue | undefined>
 type TelemetryInitOptions = {

@@ -11,6 +11,7 @@ import {
 import { ModelService } from "@amby/models"
 import { stepCountIs, ToolLoopAgent, type ToolSet } from "ai"
 import { Context, Effect, Layer } from "effect"
+import { AgentError } from "./errors"
 import {
 	buildSharedTraceMetadata,
 	createOrchestratorTraceMetadata,
@@ -20,7 +21,6 @@ import {
 	type TraceRequestMode,
 	withTelemetryFlush,
 } from "./telemetry"
-import { AgentError } from "./errors"
 
 export type StreamPart =
 	| { type: "text-delta"; text: string }
@@ -234,16 +234,8 @@ export const makeAgentServiceLive = (userId: string) =>
 			}) =>
 				withTelemetryFlush(
 					Effect.gen(function* () {
-						const {
-							tools,
-							systemPrompt,
-							history,
-							sharedPromptContext,
-							toolGroups,
-						} = yield* prepareContext(
-							conversationId,
-							onReply,
-						)
+						const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
+							yield* prepareContext(conversationId, onReply)
 						const delegationToolCount = getDelegationToolCount(toolGroups)
 						const sharedTraceMetadata = buildSharedTraceMetadata({
 							conversationId,

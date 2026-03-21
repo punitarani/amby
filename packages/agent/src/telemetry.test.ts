@@ -1,20 +1,20 @@
+import { afterEach, describe, expect, test } from "bun:test"
 import type { LanguageModelV2, LanguageModelV2Content } from "@ai-sdk/provider"
 import { trace } from "@opentelemetry/api"
 import {
 	InMemorySpanExporter,
-	SimpleSpanProcessor,
 	type ReadableSpan,
+	SimpleSpanProcessor,
 	type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base"
-import { afterEach, describe, expect, test } from "bun:test"
 import { stepCountIs, ToolLoopAgent } from "ai"
 import { Effect } from "effect"
 import { createSubagentTools } from "./subagents/spawner"
 import {
 	buildSharedTraceMetadata,
 	createOrchestratorTraceMetadata,
-	createSubagentTraceMetadata,
 	createSubagentInvocationTracker,
+	createSubagentTraceMetadata,
 	createTelemetrySettings,
 	initializeTelemetry,
 	resetTelemetryForTests,
@@ -87,7 +87,9 @@ const model = (calls = 1): LanguageModelV2 => {
 		supportedUrls: {},
 		doGenerate: generate as LanguageModelV2["doGenerate"],
 		doStream: (async ({ prompt }) => {
-			const output = await generate({ prompt } as { prompt: Array<{ role: string; content: unknown }> })
+			const output = await generate({ prompt } as {
+				prompt: Array<{ role: string; content: unknown }>
+			})
 
 			return {
 				stream: new ReadableStream({
@@ -101,7 +103,11 @@ const model = (calls = 1): LanguageModelV2 => {
 							}
 							if (part.type === "tool-call") controller.enqueue(part)
 						}
-						controller.enqueue({ type: "finish", finishReason: output.finishReason, usage: output.usage })
+						controller.enqueue({
+							type: "finish",
+							finishReason: output.finishReason,
+							usage: output.usage,
+						})
 						controller.close()
 					},
 				}),
@@ -141,13 +147,14 @@ const setup = ({
 
 const run = async (mode: "generate" | "stream", calls = 1) => {
 	await resetTelemetryForTests()
-	const functionId =
-		mode === "generate" ? "amby.orchestrator.generate" : "amby.orchestrator.stream"
+	const functionId = mode === "generate" ? "amby.orchestrator.generate" : "amby.orchestrator.stream"
 	const requestMode = mode === "generate" ? "message" : "stream-message"
 	const { exporter, orchestrator } = setup({ functionId, requestMode, calls })
 
 	if (mode === "generate") {
-		expect((await orchestrator.generate({ prompt: "Plan this task." })).text).toBe("orchestrator final")
+		expect((await orchestrator.generate({ prompt: "Plan this task." })).text).toBe(
+			"orchestrator final",
+		)
 	} else {
 		const streamResult = await orchestrator.stream({ prompt: "Stream this task." })
 		for await (const _part of streamResult.fullStream) {
@@ -247,9 +254,7 @@ describe("telemetry", () => {
 			expect(parentId(subagent!)).toBe(tool!.spanContext().spanId)
 			expect(parentId(subagentCall!)).toBe(subagent!.spanContext().spanId)
 			expect(subagent!.attributes["ai.telemetry.metadata.agent_name"]).toBe("planner")
-			expect(subagent!.attributes["ai.telemetry.metadata.parent_agent_name"]).toBe(
-				"orchestrator",
-			)
+			expect(subagent!.attributes["ai.telemetry.metadata.parent_agent_name"]).toBe("orchestrator")
 		}
 	})
 
