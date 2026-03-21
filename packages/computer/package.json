@@ -15,7 +15,7 @@
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@daytonaio/sdk": "^0.151.0",
-		"ai": "^6.0.0",
+		"ai": "6.0.116",
 		"effect": "^3.19.19",
 		"zod": "^3.24.0"
 	}

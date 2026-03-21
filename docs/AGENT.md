@@ -85,13 +85,18 @@ Merges the requested tool groups into a single flat `ToolSet` for a subagent.
 `packages/agent/src/subagents/spawner.ts` contains `createSubagentTools()`, which iterates over all subagent definitions and creates one `delegate_<name>` tool per definition.
 
 ```ts
-createSubagentTools(model: LanguageModel, toolGroups: ToolGroups, sharedContext: string): ToolSet
+createSubagentTools(
+  model: LanguageModel,
+  toolGroups: ToolGroups,
+  sharedPromptContext: string,
+  sharedTraceMetadata: SharedTraceMetadata,
+): ToolSet
 ```
 
 Each delegation tool:
 - Has schema `{ task: string, context?: string }`
 - Resolves its tools from `toolGroups` using the definition's `toolKeys`
-- Creates a `ToolLoopAgent` with the subagent's instructions, scoped tools, and `maxSteps`
+- Creates a fresh `ToolLoopAgent` inside the tool execution with the subagent's instructions, scoped tools, `maxSteps`, and invocation-specific telemetry metadata
 - Calls `subagent.generate({ prompt, abortSignal })` so cancellation propagates through tool execution
 - Returns `{ summary: result.text }` on success
 - Returns `{ error: true, summary: "..." }` on failure (errors don't crash the orchestrator)
@@ -104,7 +109,13 @@ Each delegation tool:
 In `packages/agent/src/agent.ts`, the `prepareContext()` function assembles the orchestrator's tool set:
 
 ```ts
-const delegationTools = createSubagentTools(baseModel, toolGroups, sharedContext)
+const sharedTraceMetadata = buildSharedTraceMetadata(...)
+const delegationTools = createSubagentTools(
+  baseModel,
+  toolGroups,
+  sharedPromptContext,
+  sharedTraceMetadata,
+)
 
 const { search_memories } = memoryTools
 const tools = {
@@ -135,7 +146,10 @@ The orchestrator's system prompt (`packages/agent/src/prompts/system.ts`) includ
 Subagents cannot spawn other subagents. The orchestrator chains them sequentially when needed (e.g., `delegate_planner` then `delegate_builder`). Simpler, easier to debug.
 
 ### Same model for all agents
-All subagents use the base model (`models.getModel()`). The `modelId` field exists in `SubagentDef` for future per-agent overrides but isn't wired yet. Braintrust wraps the AI SDK `ToolLoopAgent` class, so orchestrator and subagent runs both emit traced agent spans; the orchestrator also adds a parent span with request metadata and lightweight step summaries.
+All subagents use the base model (`models.getModel()`). The `modelId` field exists in `SubagentDef` for future per-agent overrides but isn't wired yet. Tracing is handled through AI SDK `experimental_telemetry` with one shared OpenTelemetry tracer, so orchestrator, tool, and subagent spans nest through the active context instead of custom Braintrust wrappers.
+
+### Shared no-PII trace metadata
+Each top-level request builds one shared metadata object that contains only internal IDs, enums, and counters (`request_id`, `user_id`, `conversation_id`, request mode, counts, model ID, and source flags). That metadata is attached to orchestrator and subagent AI SDK spans. Prompt context such as memories and formatted time stays in prompts only and is not copied into trace metadata.
 
 ### Read-only memory on orchestrator
 The orchestrator gets `search_memories` directly (destructured from the full memory tools) rather than the full `save_memory` + `search_memories` set. This lets the orchestrator check user context before deciding how to delegate without being tempted to write memories itself.
@@ -172,6 +186,6 @@ The research agent receives the same `execute_command` tool as the builder but i
 | `packages/agent/src/subagents/spawner.ts` | Factory that creates delegation tools |
 | `packages/agent/src/subagents/index.ts` | Barrel exports |
 | `packages/agent/src/agent.ts` | Orchestrator wiring in `prepareContext()` |
-| `packages/agent/src/braintrust.ts` | Braintrust-backed AI SDK wrapper + parent span helper |
+| `packages/agent/src/telemetry.ts` | Shared OpenTelemetry bootstrap + AI SDK telemetry helpers |
 | `packages/agent/src/prompts/system.ts` | Orchestrator system prompt with delegation instructions |
 | `packages/agent/src/tools/messaging.ts` | `createReplyTools` + `createJobTools` (orchestrator-only) |
