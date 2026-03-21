@@ -17,18 +17,18 @@ describe("routeMessage", () => {
 	it("returns continue when gap is short", () => {
 		const result = routeMessage("hello", "t1", new Date(), threads)
 		expect(result).not.toBeNull()
-		expect(result!.action).toBe("continue")
-		expect(result!.threadId).toBe("t1")
-		expect(result!.confidence).toBe(0.85)
+		expect(result?.action).toBe("continue")
+		expect(result?.threadId).toBe("t1")
+		expect(result?.confidence).toBe(0.85)
 	})
 
 	it("returns switch when message matches a thread label", () => {
 		const oldDate = new Date(Date.now() - 300_000)
 		const result = routeMessage("let's check billing", "t1", oldDate, threads)
 		expect(result).not.toBeNull()
-		expect(result!.action).toBe("switch")
-		expect(result!.threadId).toBe("t2")
-		expect(result!.confidence).toBe(0.8)
+		expect(result?.action).toBe("switch")
+		expect(result?.threadId).toBe("t2")
+		expect(result?.confidence).toBe(0.8)
 	})
 
 	it("returns null when ambiguous (no heuristic match)", () => {
@@ -48,8 +48,8 @@ describe("buildReplayMessages", () => {
 		]
 		const result = buildReplayMessages(rows)
 		expect(result).toHaveLength(2)
-		expect(result[0]!.role).toBe("user")
-		expect(result[1]!.role).toBe("assistant")
+		expect(result[0]?.role).toBe("user")
+		expect(result[1]?.role).toBe("assistant")
 	})
 
 	it("annotates recent assistant messages with tool results", () => {
@@ -61,8 +61,8 @@ describe("buildReplayMessages", () => {
 		}))
 		const result = buildReplayMessages(rows)
 		// Last RECENT_WITH_TOOLS=4 filtered messages get annotations
-		const lastAssistant = result[result.length - 1]!
-		expect(lastAssistant.content).toContain("[Tools used:")
+		const lastAssistant = result.at(-1)
+		expect(lastAssistant?.content).toContain("[Tools used:")
 	})
 })
 
@@ -147,7 +147,7 @@ describe("extractTraceData", () => {
 		const result = extractTraceData(steps)
 		expect(result.toolCalls).toHaveLength(2)
 		expect(result.toolResults).toHaveLength(2)
-		expect(result.toolCalls![0]!.toolName).toBe("search")
-		expect(result.toolCalls![1]!.toolName).toBe("read")
+		expect(result.toolCalls?.[0]?.toolName).toBe("search")
+		expect(result.toolCalls?.[1]?.toolName).toBe("read")
 	})
 })

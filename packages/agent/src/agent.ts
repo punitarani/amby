@@ -33,6 +33,7 @@ const ORCHESTRATOR_MAX_STEPS = 14
 
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
 import {
+	DORMANT_MS,
 	generateSynopsis,
 	messageThreadFilter,
 	type ResolveThreadResult,
@@ -48,7 +49,6 @@ import { extractToolUserMessages } from "./utils/extract-tool-user-messages"
 const THREAD_TAIL_LIMIT = 20
 const ARTIFACT_MSG_LIMIT = 5
 const OTHER_THREAD_CAP = 5
-const DORMANT_MS = 60 * 60 * 1000
 const RECENT_WITH_TOOLS = 4
 
 type TraceData = {
@@ -112,11 +112,15 @@ function buildThreadMeta(threadCtx: ResolveThreadResult) {
 export function formatToolAnnotation(toolResults: unknown[]): string {
 	if (toolResults.length === 0) return ""
 	const parts = toolResults.map((tr: unknown) => {
-		const item = tr as { toolName?: string; output?: unknown }
-		const name = item.toolName ?? "unknown"
+		if (typeof tr !== "object" || tr === null) return "unknown"
+		const name = "toolName" in tr && typeof tr.toolName === "string" ? tr.toolName : "unknown"
+		const output = "output" in tr ? tr.output : undefined
 		const summary =
-			typeof item.output === "object" && item.output !== null && "summary" in item.output
-				? String((item.output as { summary: unknown }).summary).slice(0, 200)
+			typeof output === "object" &&
+			output !== null &&
+			"summary" in output &&
+			typeof output.summary === "string"
+				? output.summary.slice(0, 200)
 				: ""
 		return summary ? `${name}: ${summary}` : name
 	})
@@ -163,19 +167,21 @@ export function formatArtifactRecap(
 		const tr = row.toolResults
 		if (Array.isArray(tr)) {
 			for (const item of tr) {
-				if (typeof item === "object" && item !== null && "output" in item) {
-					const output = (item as { output?: unknown }).output
-					if (typeof output === "object" && output !== null) {
-						const rec = output as Record<string, unknown>
-						if (typeof rec.summary === "string" && rec.summary.trim()) {
-							bullets.push(rec.summary.trim())
-							continue
-						}
-					}
-					if (typeof output === "string" && output.trim()) {
-						const s = output.length > 400 ? `${output.slice(0, 400)}…` : output
-						bullets.push(s.trim())
-					}
+				if (typeof item !== "object" || item === null || !("output" in item)) continue
+				const output = item.output
+				if (
+					typeof output === "object" &&
+					output !== null &&
+					"summary" in output &&
+					typeof output.summary === "string" &&
+					output.summary.trim()
+				) {
+					bullets.push(output.summary.trim())
+					continue
+				}
+				if (typeof output === "string" && output.trim()) {
+					const s = output.length > 400 ? `${output.slice(0, 400)}…` : output
+					bullets.push(s.trim())
 				}
 			}
 		}

@@ -6,7 +6,7 @@ import { z } from "zod"
 import { AgentError } from "./errors"
 
 const GAP_CONTINUE_MS = 120_000
-const DORMANT_MS = 60 * 60 * 1000
+export const DORMANT_MS = 60 * 60 * 1000
 const STALE_ARCHIVE_MS = 24 * 60 * 60 * 1000
 const OPEN_THREADS_CAP = 10
 const TAIL_BUDGET = 20
@@ -152,7 +152,6 @@ ${transcript}`,
 export function archiveStaleThreads(
 	query: QueryFn,
 	conversationId: string,
-	defaultThreadId: string,
 	model: LanguageModel,
 ): Effect.Effect<void, AgentError> {
 	const cutoff = new Date(Date.now() - STALE_ARCHIVE_MS)
@@ -283,7 +282,9 @@ export function ensureDefaultThread(
 		)
 
 		const row = rows[0]
-		if (!row) throw new Error("Failed to create default thread")
+		if (!row) {
+			return yield* Effect.fail(new AgentError({ message: "Failed to create default thread" }))
+		}
 
 		return row.id
 	}).pipe(
@@ -328,7 +329,7 @@ export function resolveThread(
 	return Effect.gen(function* () {
 		const defaultThreadId = yield* ensureDefaultThread(query, conversationId)
 
-		yield* archiveStaleThreads(query, conversationId, defaultThreadId, model)
+		yield* archiveStaleThreads(query, conversationId, model)
 
 		const [openThreadRows, lastMsg] = yield* Effect.all(
 			[

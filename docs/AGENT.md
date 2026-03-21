@@ -185,7 +185,7 @@ Every assistant message stores two jsonb columns alongside the text:
 - **`toolCalls`** — `Array<{ toolCallId, toolName, input }>` — every tool the orchestrator invoked during that turn
 - **`toolResults`** — `Array<{ toolCallId, toolName, output }>` — every tool result, with large string outputs truncated to 500 chars. Subagent results retain their `{ summary, toolsUsed? }` structure, so the trace captures delegation depth.
 
-Extraction happens via `extractTraceData()`, which flattens all `steps` from the generation result into these two arrays. Both streaming and non-streaming paths capture steps identically.
+Extraction happens via `extractTraceData()`, which flattens all `steps` from the generation result into these two arrays. Both streaming and non-streaming paths capture steps identically. Long string outputs are truncated at the nearest word boundary before 500 characters to avoid cutting mid-word.
 
 ### How context replay works
 
@@ -211,6 +211,44 @@ The DB stores the complete trace (every tool call input/output). The context win
 
 ---
 
+## Thread Routing
+
+The router (`packages/agent/src/router.ts`) resolves which conversation thread each inbound message belongs to. It runs once per request before context assembly.
+
+### Routing strategy
+
+1. **Heuristic fast-path** — zero-latency checks:
+   - Time gap < 2 min → continue current thread (confidence: 0.85)
+   - Message contains an open thread's label → switch to that thread (confidence: 0.80)
+2. **Model fallback** — `generateObject` call with structured output when heuristics are ambiguous. Returns continue (0.65), switch (0.72), or new (0.70).
+
+Confidence values are trace-only metadata for observability — they do not gate downstream logic.
+
+### Archival
+
+Stale threads (>24h inactive) are auto-archived with a generated synopsis. The archival pass:
+- Throttles to once per 5 minutes per conversation (`_archiveLastCheck` map, capped at 100 entries with LRU eviction)
+- Batch-fetches messages for all threads needing synopsis in a single `inArray` query (avoids N+1)
+- Caps synopsis generation at 3 threads per pass to bound LLM cost
+
+### Query optimization
+
+`resolveThread` parallelizes independent DB queries using `Effect.all({ concurrency: 2 })`:
+- Open-thread listing and last-message lookup run concurrently
+- Thread metadata (status + lastActiveAt) is fetched in a single query that serves both the dormancy check and the status update
+
+### Thread lifecycle
+
+```
+new → open → archived
+       ↑        |
+       +--------+ (re-opened by router)
+```
+
+Synopsis generation triggers: thread dormancy (>1h idle), archival (>24h idle), and message count exceeding the tail budget.
+
+---
+
 ## Adding a New Subagent
 
 1. Add a `SubagentDef` object to the `SUBAGENT_DEFS` array in `definitions.ts`
@@ -230,6 +268,7 @@ The DB stores the complete trace (every tool call input/output). The context win
 | `packages/agent/src/subagents/index.ts` | Barrel exports |
 | `packages/agent/src/agent.ts` | Orchestrator wiring, trace persistence, context replay |
 | `packages/agent/src/router.ts` | Thread routing (heuristic + model fallback), synopsis generation, archival |
+| `packages/agent/src/router.test.ts` | Tests for routing heuristics, context replay, artifact recap, trace extraction |
 | `packages/agent/src/telemetry.ts` | Shared OpenTelemetry bootstrap + AI SDK telemetry helpers |
 | `packages/agent/src/prompts/system.ts` | Orchestrator system prompt with delegation instructions |
 | `packages/agent/src/tools/messaging.ts` | `createReplyTools` + `createJobTools` (orchestrator-only) |
