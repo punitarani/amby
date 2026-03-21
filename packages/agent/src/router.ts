@@ -10,6 +10,9 @@ const DORMANT_MS = 60 * 60 * 1000
 const STALE_ARCHIVE_MS = 24 * 60 * 60 * 1000
 const OPEN_THREADS_CAP = 10
 const TAIL_BUDGET = 20
+const ARCHIVE_THROTTLE_MS = 5 * 60 * 1000
+
+const _archiveLastCheck = new Map<string, number>()
 
 export type RouteAction = "continue" | "switch" | "new"
 
@@ -111,6 +114,9 @@ export async function routeWithModel(
 		if (picked) {
 			return { action: "switch", threadId: picked.id, confidence: 0.72 }
 		}
+		console.warn(
+			`[Router] threadIndex=${idx} out of bounds (max=${candidateThreads.length - 1}), falling back to continue`,
+		)
 	}
 
 	return { action: "continue", threadId: lastThreadId, confidence: 0.65 }
@@ -139,6 +145,9 @@ export function archiveStaleThreads(
 ): Effect.Effect<void, AgentError> {
 	const cutoff = new Date(Date.now() - STALE_ARCHIVE_MS)
 	return Effect.gen(function* () {
+		const lastCheck = _archiveLastCheck.get(conversationId)
+		if (lastCheck && Date.now() - lastCheck < ARCHIVE_THROTTLE_MS) return
+
 		const stale = yield* query((d) =>
 			d
 				.select({
@@ -191,6 +200,8 @@ export function archiveStaleThreads(
 					.where(eq(schema.conversationThreads.id, row.id)),
 			)
 		}
+
+		_archiveLastCheck.set(conversationId, Date.now())
 	}).pipe(
 		Effect.mapError((e) =>
 			e instanceof AgentError
@@ -204,27 +215,30 @@ export function ensureDefaultThread(
 	query: QueryFn,
 	conversationId: string,
 ): Effect.Effect<string, AgentError> {
-	return query((d) =>
-		d.transaction(async (tx) => {
-			const existing = await tx
+	return Effect.gen(function* () {
+		const existing = yield* query((d) =>
+			d
 				.select({ id: schema.conversationThreads.id })
 				.from(schema.conversationThreads)
 				.where(eq(schema.conversationThreads.conversationId, conversationId))
 				.orderBy(asc(schema.conversationThreads.createdAt))
-				.limit(1)
+				.limit(1),
+		)
 
-			if (existing[0]) return existing[0].id
+		if (existing[0]) return existing[0].id
 
-			const rows = await tx
+		const rows = yield* query((d) =>
+			d
 				.insert(schema.conversationThreads)
 				.values({ conversationId, status: "open" })
-				.returning({ id: schema.conversationThreads.id })
+				.returning({ id: schema.conversationThreads.id }),
+		)
 
-			const row = rows[0]
-			if (!row) throw new Error("Failed to create default thread")
-			return row.id
-		}),
-	).pipe(
+		const row = rows[0]
+		if (!row) throw new Error("Failed to create default thread")
+
+		return row.id
+	}).pipe(
 		Effect.mapError(
 			(e) =>
 				new AgentError({

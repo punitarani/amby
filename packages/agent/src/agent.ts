@@ -49,6 +49,107 @@ const THREAD_TAIL_LIMIT = 20
 const ARTIFACT_MSG_LIMIT = 5
 const OTHER_THREAD_CAP = 5
 const DORMANT_MS = 60 * 60 * 1000
+const RECENT_WITH_TOOLS = 4
+
+type TraceData = {
+	toolCalls?: Array<{ toolCallId: string; toolName: string; input: unknown }>
+	toolResults?: Array<{ toolCallId: string; toolName: string; output: unknown }>
+}
+
+function extractTraceData(
+	steps: ReadonlyArray<{
+		toolCalls: ReadonlyArray<{ toolCallId: string; toolName: string; input: unknown }>
+		toolResults: ReadonlyArray<{
+			toolCallId: string
+			toolName: string
+			output: unknown
+		}>
+	}>,
+): TraceData {
+	const toolCalls = steps.flatMap((s) =>
+		s.toolCalls.map((tc) => ({
+			toolCallId: tc.toolCallId,
+			toolName: tc.toolName,
+			input: tc.input,
+		})),
+	)
+	const toolResults = steps.flatMap((s) =>
+		s.toolResults.map((tr) => ({
+			toolCallId: tr.toolCallId,
+			toolName: tr.toolName,
+			output: summarizeToolOutput(tr.output),
+		})),
+	)
+	return {
+		toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+		toolResults: toolResults.length > 0 ? toolResults : undefined,
+	}
+}
+
+function summarizeToolOutput(output: unknown): unknown {
+	if (typeof output === "object" && output !== null && "summary" in output) {
+		return output
+	}
+	if (typeof output === "string") {
+		return output.length > 500 ? `${output.slice(0, 500)}…` : output
+	}
+	return output
+}
+
+function buildThreadMeta(threadCtx: ResolveThreadResult) {
+	return {
+		threadId: threadCtx.threadId,
+		router: {
+			action: threadCtx.decision.action,
+			confidence: threadCtx.decision.confidence,
+		},
+	}
+}
+
+function formatToolAnnotation(toolResults: unknown[]): string {
+	if (toolResults.length === 0) return ""
+	const parts = toolResults.map((tr: unknown) => {
+		const item = tr as { toolName?: string; output?: unknown }
+		const name = item.toolName ?? "unknown"
+		const summary =
+			typeof item.output === "object" && item.output !== null && "summary" in item.output
+				? String((item.output as { summary: unknown }).summary).slice(0, 200)
+				: ""
+		return summary ? `${name}: ${summary}` : name
+	})
+	return `[Tools used: ${parts.join("; ")}]`
+}
+
+function buildReplayMessages(
+	rows: Array<{
+		role: string
+		content: string
+		toolCalls: unknown
+		toolResults: unknown
+	}>,
+): Array<{ role: "user" | "assistant"; content: string }> {
+	const filtered = rows.filter(
+		(
+			r,
+		): r is {
+			role: "user" | "assistant"
+			content: string
+			toolCalls: unknown
+			toolResults: unknown
+		} => r.role === "user" || r.role === "assistant",
+	)
+	const recentStart = Math.max(0, filtered.length - RECENT_WITH_TOOLS)
+	return filtered.map((row, i) => {
+		if (i < recentStart || row.role !== "assistant" || !Array.isArray(row.toolResults)) {
+			return { role: row.role, content: row.content }
+		}
+		const annotation = formatToolAnnotation(row.toolResults)
+		return {
+			role: row.role,
+			content: annotation ? `${row.content}\n\n${annotation}` : row.content,
+		}
+	})
+}
 
 function formatArtifactRecap(
 	rows: ReadonlyArray<{ toolResults: unknown; content: string }>,
@@ -140,21 +241,17 @@ export const makeAgentServiceLive = (userId: string) =>
 			) =>
 				query((d) =>
 					d
-						.select({ role: schema.messages.role, content: schema.messages.content })
+						.select({
+							role: schema.messages.role,
+							content: schema.messages.content,
+							toolCalls: schema.messages.toolCalls,
+							toolResults: schema.messages.toolResults,
+						})
 						.from(schema.messages)
 						.where(messageThreadFilter(conversationId, threadId, defaultThreadId))
 						.orderBy(desc(schema.messages.createdAt))
 						.limit(limit),
-				).pipe(
-					Effect.map((rows) =>
-						rows
-							.reverse()
-							.filter(
-								(r): r is { role: "user" | "assistant"; content: string } =>
-									r.role === "user" || r.role === "assistant",
-							),
-					),
-				)
+				).pipe(Effect.map((rows) => buildReplayMessages(rows.reverse())))
 
 			const loadOtherThreadSummaries = (conversationId: string, excludeThreadId: string) =>
 				query((d) =>
@@ -351,9 +448,10 @@ export const makeAgentServiceLive = (userId: string) =>
 					const systemPromptWithMemory = memoryContext
 						? `${basePrompt}\n\n# User Memory Context\n${memoryContext}`
 						: basePrompt
-					const systemPrompt = extraBlocks
-						? `${systemPromptWithMemory}\n\n${extraBlocks}`
-						: systemPromptWithMemory
+					const systemPrompt =
+						extraBlocks.length > 0
+							? `${systemPromptWithMemory}\n\n${extraBlocks}`
+							: systemPromptWithMemory
 
 					const sharedPromptContext = [
 						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
@@ -560,8 +658,12 @@ export const makeAgentServiceLive = (userId: string) =>
 											onTextDelta(part.text)
 										}
 									}
-									const [text, toolResults] = await Promise.all([stream.text, stream.toolResults])
-									return { text, toolResults }
+									const [text, toolResults, steps] = await Promise.all([
+										stream.text,
+										stream.toolResults,
+										stream.steps,
+									])
+									return { text, toolResults, steps }
 								}
 								return await agent.generate({
 									messages: [...history, ...requestMessages],
@@ -577,14 +679,9 @@ export const makeAgentServiceLive = (userId: string) =>
 						}
 						const finalText = toolUserMessages ? "" : result.text
 
-						const threadMeta = {
-							threadId: threadCtx.threadId,
-							router: {
-								action: threadCtx.decision.action,
-								confidence: threadCtx.decision.confidence,
-							},
-						}
+						const threadMeta = buildThreadMeta(threadCtx)
 						const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
+						const trace = extractTraceData(result.steps ?? [])
 
 						for (const message of requestMessages) {
 							yield* saveMessage(conversationId, "user", message.content, {
@@ -594,6 +691,8 @@ export const makeAgentServiceLive = (userId: string) =>
 						}
 						yield* maybeSaveAssistantMessage(conversationId, finalText, {
 							threadId: threadCtx.threadId,
+							toolCalls: trace.toolCalls,
+							toolResults: trace.toolResults,
 						})
 
 						yield* synopsisCurrentThreadIfOverflowsAfterSave(
@@ -702,29 +801,27 @@ export const makeAgentServiceLive = (userId: string) =>
 										}
 									}
 
-									return await stream.text
+									const [text, steps] = await Promise.all([stream.text, stream.steps])
+									return { text, steps }
 								},
 								catch: (cause) => new AgentError({ message: "Failed to stream response", cause }),
 							})
 
-							const threadMeta = {
-								threadId: threadCtx.threadId,
-								router: {
-									action: threadCtx.decision.action,
-									confidence: threadCtx.decision.confidence,
-								},
-							}
+							const threadMeta = buildThreadMeta(threadCtx)
+							const trace = extractTraceData(result.steps ?? [])
 							yield* saveMessage(conversationId, "user", content, {
 								metadata: threadMeta,
 								threadId: threadCtx.threadId,
 							})
-							yield* saveMessage(conversationId, "assistant", result, {
+							yield* saveMessage(conversationId, "assistant", result.text, {
 								threadId: threadCtx.threadId,
+								toolCalls: trace.toolCalls,
+								toolResults: trace.toolResults,
 							})
 
 							yield* synopsisCurrentThreadIfOverflowsAfterSave(conversationId, threadCtx, 2)
 
-							return result
+							return result.text
 						}),
 					).pipe(
 						Effect.mapError((e) =>

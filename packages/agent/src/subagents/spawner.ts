@@ -67,7 +67,12 @@ export function createSubagentTools(
 					const result = await subagent.generate({ prompt: userMessage, abortSignal })
 					const userMessages = extractToolUserMessages(result.toolResults)
 
-					return userMessages ? { summary: result.text, userMessages } : { summary: result.text }
+					const toolsUsed = result.steps.flatMap((step) => step.toolCalls.map((tc) => tc.toolName))
+
+					const base: Record<string, unknown> = { summary: result.text }
+					if (toolsUsed.length > 0) base.toolsUsed = toolsUsed
+
+					return userMessages ? { ...base, userMessages } : base
 				} catch (error) {
 					return {
 						error: true,

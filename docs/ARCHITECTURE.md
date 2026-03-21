@@ -162,8 +162,9 @@ Owns all database schemas (Drizzle ORM) and the database client. Single source o
 | `users`             | User accounts (BetterAuth compatible)     |
 | `sessions`          | Auth sessions (BetterAuth)                |
 | `accounts`          | OAuth accounts and tokens (BetterAuth)    |
-| `conversations`     | Conversation threads per user per channel |
-| `messages`          | Individual messages within conversations  |
+| `conversations`     | Top-level conversation containers per user per channel |
+| `conversationThreads` | Topic threads within a conversation (routing, archival, synopsis) |
+| `messages`          | Individual messages within conversations (with execution traces) |
 | `channels`          | Registered channel configurations         |
 | `documents`         | Raw ingested content (memory sources)     |
 | `chunks`            | Semantic chunks for vector retrieval      |
@@ -521,13 +522,14 @@ worker process, but the interface stays the same.
 
 ### Conversation & Message Persistence
 
-Every message — incoming and outgoing — is stored in the database. This provides:
+Every message — incoming and outgoing — is stored in the database with full execution traces. This provides:
 
 - Full conversation history for context windows
-- Audit trail for all agent actions
+- Complete tool execution audit trail (every tool call input and output)
+- Thread-scoped context with intelligent replay
 - Continuity across sessions and channels
 
-**Conversation schema:**
+**Schema:**
 
 ```
 conversations {
@@ -541,17 +543,34 @@ conversations {
   updatedAt:   timestamp
 }
 
+conversation_threads {
+  id:              uuid
+  conversationId:  string
+  label:           string (nullable, topic name)
+  synopsis:        text (nullable, auto-generated summary)
+  status:          'open' | 'archived'
+  lastActiveAt:    timestamp
+  createdAt:       timestamp
+}
+
 messages {
   id:             uuid
   conversationId: string
+  threadId:       string (nullable, FK to conversation_threads)
   role:           'user' | 'assistant' | 'system' | 'tool'
   content:        text
-  toolCalls:      jsonb (nullable)
-  toolResults:    jsonb (nullable)
+  toolCalls:      jsonb (nullable) — Array<{ toolCallId, toolName, input }>
+  toolResults:    jsonb (nullable) — Array<{ toolCallId, toolName, output }>
   metadata:       jsonb
   createdAt:      timestamp
 }
 ```
+
+**Thread routing:** Each inbound message is routed to a thread via heuristic (time gap < 2 min → continue) or model-based classification (continue / switch / new). Stale threads (>24h inactive) are auto-archived with a generated synopsis. The router throttles archival checks to once per 5 minutes per conversation.
+
+**Trace persistence:** Assistant messages store the complete execution trace — every orchestrator tool call and result, including subagent delegation results with their `toolsUsed` arrays. Large string outputs are truncated to 500 chars; structured outputs (like subagent `{ summary, toolsUsed }`) are stored as-is.
+
+**Context replay:** When loading history, the last 4 assistant messages get lightweight `[Tools used: ...]` annotations appended. Older messages load as plain text. This balances execution context against token budget.
 
 ---
 
@@ -696,6 +715,7 @@ amby/
 │   │       │   ├── sessions.ts
 │   │       │   ├── accounts.ts
 │   │       │   ├── conversations.ts
+│   │       │   ├── threads.ts
 │   │       │   ├── messages.ts
 │   │       │   ├── channels.ts
 │   │       │   ├── documents.ts
@@ -761,7 +781,8 @@ amby/
 │       ├── package.json
 │       ├── tsconfig.json
 │       └── src/
-│           ├── agent.ts            ← Orchestrator wiring (prepareContext, handleMessage)
+│           ├── agent.ts            ← Orchestrator wiring, trace persistence, context replay
+│           ├── router.ts           ← Thread routing, synopsis generation, archival
 │           ├── subagents/
 │           │   ├── definitions.ts  ← Subagent types and 5 definitions
 │           │   ├── tool-groups.ts  ← Tool grouping and resolution
@@ -783,7 +804,9 @@ amby/
 ├── supabase/
 │   └── config.toml                 ← Supabase local config
 ├── docs/
+│   ├── AGENT.md
 │   ├── ARCHITECTURE.md
+│   ├── COMPUTER.md
 │   ├── MARKET.md
 │   ├── MEMORY.md
 │   └── MISSION.md

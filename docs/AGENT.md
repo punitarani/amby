@@ -28,14 +28,15 @@ The orchestrator keeps lightweight coordination tools (reply, jobs, read-only me
 
 ## Message Flow
 
-1. User message arrives → orchestrator loads conversation history + memory profile
-2. Memory context + datetime injected into orchestrator's system prompt
-3. Orchestrator decides how to handle — answer directly or delegate
-4. If delegating: calls e.g. `delegate_builder({ task: "...", context: "..." })`
-5. Subagent receives: its own system prompt + shared context (memories, datetime) + task
+1. User message arrives → **thread router** resolves which thread to use (heuristic fast-path or model-based routing)
+2. Thread-scoped conversation history loaded — recent assistant messages include tool usage annotations for richer context
+3. Memory context + datetime + thread synopsis (if resuming a dormant thread) injected into orchestrator's system prompt
+4. Orchestrator decides how to handle — answer directly or delegate
+5. If delegating: calls e.g. `delegate_builder({ task: "...", context: "..." })`
 6. Subagent runs its `ToolLoopAgent` loop (up to `maxSteps`), interacting with sandbox/memory/etc.
-7. Subagent's `result.text` returned as tool result to orchestrator
+7. Subagent returns `{ summary, toolsUsed? }` — the orchestrator sees both the text and what tools were invoked
 8. Orchestrator synthesizes the summary into a natural, user-facing response
+9. **Trace persistence**: all tool calls and tool results from the generation steps are extracted and saved to `messages.toolCalls` / `messages.toolResults` (jsonb). Subagent results include `toolsUsed` arrays, so the stored trace captures the full execution tree.
 
 Shared context (memories, datetime) is baked into subagent system prompts at spawn time — subagents don't re-query for it.
 
@@ -102,7 +103,7 @@ Each delegation tool:
 - Resolves its tools from `toolGroups` using the definition's `toolKeys`
 - Creates a fresh `ToolLoopAgent` inside the tool execution with the subagent's instructions, scoped tools, `maxSteps`, and invocation-specific telemetry metadata
 - Calls `subagent.generate({ prompt, abortSignal })` so cancellation propagates through tool execution
-- Returns `{ summary: result.text }` on success, and forwards nested connector `userMessages` when present
+- Returns `{ summary, toolsUsed? }` on success — `toolsUsed` is a flat array of tool names extracted from `result.steps`, giving the orchestrator (and trace persistence) visibility into what the subagent did. Forwards nested connector `userMessages` when present.
 - Returns `{ error: true, summary: "..." }` on failure (errors don't crash the orchestrator)
 - Skips any subagent whose required tool groups are unavailable
 
@@ -173,6 +174,43 @@ The research agent receives the same `execute_command` tool as the builder but i
 
 ---
 
+## Execution Trace Persistence & Context Replay
+
+The agent persists full execution traces and replays them selectively for context-aware follow-ups.
+
+### What gets persisted
+
+Every assistant message stores two jsonb columns alongside the text:
+
+- **`toolCalls`** — `Array<{ toolCallId, toolName, input }>` — every tool the orchestrator invoked during that turn
+- **`toolResults`** — `Array<{ toolCallId, toolName, output }>` — every tool result, with large string outputs truncated to 500 chars. Subagent results retain their `{ summary, toolsUsed? }` structure, so the trace captures delegation depth.
+
+Extraction happens via `extractTraceData()`, which flattens all `steps` from the generation result into these two arrays. Both streaming and non-streaming paths capture steps identically.
+
+### How context replay works
+
+When loading thread history (`loadThreadTail`), the last 4 assistant messages get tool usage annotations appended:
+
+```
+Assistant response text here.
+
+[Tools used: delegate_research: Found 3 relevant documents; delegate_builder: Created auth middleware]
+```
+
+Older messages load as plain text. This gives the model enough execution context for follow-ups ("can you fix that auth middleware you just created?") without bloating the context window with full tool traces from 20 turns ago.
+
+The `formatArtifactRecap` function separately loads recent tool results with summaries into the system prompt as a "Thread context" section — this provides artifact-level awareness even when the conversation history is truncated.
+
+### Design: persist richly, replay selectively
+
+The DB stores the complete trace (every tool call input/output). The context window sees only lightweight annotations. This means:
+
+- **Debugging**: query `messages.toolCalls` / `messages.toolResults` directly for full execution history
+- **Context**: the model gets enough to maintain coherence without wasting tokens on raw tool I/O
+- **No new tables**: uses the existing `toolCalls` / `toolResults` jsonb columns on the `messages` table
+
+---
+
 ## Adding a New Subagent
 
 1. Add a `SubagentDef` object to the `SUBAGENT_DEFS` array in `definitions.ts`
@@ -190,7 +228,8 @@ The research agent receives the same `execute_command` tool as the builder but i
 | `packages/agent/src/subagents/tool-groups.ts` | Tool grouping + resolution |
 | `packages/agent/src/subagents/spawner.ts` | Factory that creates delegation tools |
 | `packages/agent/src/subagents/index.ts` | Barrel exports |
-| `packages/agent/src/agent.ts` | Orchestrator wiring in `prepareContext()` |
+| `packages/agent/src/agent.ts` | Orchestrator wiring, trace persistence, context replay |
+| `packages/agent/src/router.ts` | Thread routing (heuristic + model fallback), synopsis generation, archival |
 | `packages/agent/src/telemetry.ts` | Shared OpenTelemetry bootstrap + AI SDK telemetry helpers |
 | `packages/agent/src/prompts/system.ts` | Orchestrator system prompt with delegation instructions |
 | `packages/agent/src/tools/messaging.ts` | `createReplyTools` + `createJobTools` (orchestrator-only) |
