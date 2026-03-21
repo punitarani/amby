@@ -46,7 +46,7 @@ export const tasks = pgTable(
 		}),
 		channelType: text("channel_type"),
 		replyTarget: jsonb("reply_target").$type<Record<string, unknown>>(),
-		callbackId: uuid("callback_id").defaultRandom(),
+		callbackId: uuid("callback_id"),
 		callbackSecretHash: text("callback_secret_hash"),
 		lastEventSeq: integer("last_event_seq").notNull().default(0),
 		lastEventAt: timestamp("last_event_at", { withTimezone: true }),
@@ -58,5 +58,6 @@ export const tasks = pgTable(
 	(t) => [
 		index("tasks_user_status_idx").on(t.userId, t.status),
 		index("tasks_callback_id_idx").on(t.callbackId),
+		index("tasks_status_heartbeat_idx").on(t.status, t.heartbeatAt),
 	],
 )

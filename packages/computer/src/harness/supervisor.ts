@@ -344,9 +344,10 @@ export const TaskSupervisorLive = Layer.scoped(
 
 					const cmd = await task.sandbox.process.getSessionCommand(task.sessionId, task.commandId)
 
+					const hbNow = new Date()
 					await db
 						.update(schema.tasks)
-						.set({ heartbeatAt: new Date(), updatedAt: new Date() })
+						.set({ heartbeatAt: hbNow, updatedAt: hbNow })
 						.where(eq(schema.tasks.id, task.taskId))
 
 					task.consecutiveFailures = 0
@@ -426,12 +427,13 @@ export const TaskSupervisorLive = Layer.scoped(
 		async function timeoutTask(task: ActiveTask) {
 			await deletePendingSession(task.sandbox, task.sessionId)
 
+			const toNow = new Date()
 			await db
 				.update(schema.tasks)
 				.set({
 					status: "timed_out",
-					completedAt: new Date(),
-					updatedAt: new Date(),
+					completedAt: toNow,
+					updatedAt: toNow,
 				})
 				.where(
 					and(eq(schema.tasks.id, task.taskId), notInArray(schema.tasks.status, TERMINAL_STATUSES)),
@@ -451,13 +453,14 @@ export const TaskSupervisorLive = Layer.scoped(
 
 			const preparingStaleBefore = new Date(Date.now() - PREPARING_TIMEOUT_MS)
 			try {
+				const lpNow = new Date()
 				const lostPreparing = await db
 					.update(schema.tasks)
 					.set({
 						status: "lost",
 						error: "Task did not start in time.",
-						completedAt: new Date(),
-						updatedAt: new Date(),
+						completedAt: lpNow,
+						updatedAt: lpNow,
 					})
 					.where(
 						and(
@@ -912,13 +915,14 @@ export const TaskSupervisorLive = Layer.scoped(
 								return { taskId, status: "running" as const }
 							} catch (cause) {
 								// Roll back: mark as failed and clean up the session
+								const failNow = new Date()
 								await db
 									.update(schema.tasks)
 									.set({
 										status: "failed",
 										error: cause instanceof Error ? cause.message : String(cause),
-										completedAt: new Date(),
-										updatedAt: new Date(),
+										completedAt: failNow,
+										updatedAt: failNow,
 									})
 									.where(eq(schema.tasks.id, taskId))
 								await deletePendingSession(sandbox, sessionId)

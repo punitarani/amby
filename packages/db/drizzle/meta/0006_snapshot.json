@@ -1,5 +1,5 @@
 {
-	"id": "61b8e2b1-0ee7-4b13-891a-8bccb948a807",
+	"id": "433774cf-c58f-44dd-a2d1-0d32aaf1650c",
 	"prevId": "8a9e4386-2977-4ae5-95d8-6ba02224cbee",
 	"version": "7",
 	"dialect": "postgresql",
@@ -1067,8 +1067,7 @@
 					"name": "callback_id",
 					"type": "uuid",
 					"primaryKey": false,
-					"notNull": false,
-					"default": "gen_random_uuid()"
+					"notNull": false
 				},
 				"callback_secret_hash": {
 					"name": "callback_secret_hash",
@@ -1135,6 +1134,27 @@
 					"columns": [
 						{
 							"expression": "callback_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"tasks_status_heartbeat_idx": {
+					"name": "tasks_status_heartbeat_idx",
+					"columns": [
+						{
+							"expression": "status",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						},
+						{
+							"expression": "heartbeat_at",
 							"isExpression": false,
 							"asc": true,
 							"nulls": "last"

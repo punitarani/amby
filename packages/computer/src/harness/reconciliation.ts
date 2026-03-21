@@ -18,6 +18,7 @@ export interface ReconciliationContext {
 
 const ACTIVE = ["preparing", "running"] as const
 
+/** Intentionally module-level: CodexProvider is stateless (no mutable fields). */
 const provider = new CodexProvider()
 
 /** Skip probe-driven terminal updates when harness callbacks are still flowing recently. */
@@ -76,9 +77,10 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 	}
 
 	if (!task.sessionId || !task.commandId) {
+		const now = new Date()
 		await db
 			.update(schema.tasks)
-			.set({ status: "lost", completedAt: new Date(), updatedAt: new Date() })
+			.set({ status: "lost", completedAt: now, updatedAt: now })
 			.where(nonTerminalTaskWhere(task.id))
 		await insertReconcilerEvent(db, task.id, "task.lost", { reason: "missing_session" })
 		return
@@ -88,9 +90,10 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 		const cmd = await sandbox.process.getSessionCommand(task.sessionId, task.commandId)
 		if (cmd.exitCode != null) {
 			if (shouldSkipProbeFinalize(task)) {
+				const skipNow = new Date()
 				await db
 					.update(schema.tasks)
-					.set({ lastProbeAt: new Date(), updatedAt: new Date() })
+					.set({ lastProbeAt: skipNow, updatedAt: skipNow })
 					.where(eq(schema.tasks.id, task.id))
 				await insertReconcilerEvent(db, task.id, "reconciler.probe", {
 					exitCode: cmd.exitCode,
@@ -103,15 +106,16 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 
 			const result = await provider.collectResult(sandbox, provider.getArtifactRoot(task.id))
 			const nextStatus: TaskStatus = cmd.exitCode === 0 ? "succeeded" : "failed"
+			const probeNow = new Date()
 			const updated = await db
 				.update(schema.tasks)
 				.set({
 					status: nextStatus,
 					exitCode: cmd.exitCode,
 					outputSummary: result.summary.slice(0, 2000),
-					completedAt: new Date(),
-					heartbeatAt: new Date(),
-					updatedAt: new Date(),
+					completedAt: probeNow,
+					heartbeatAt: probeNow,
+					updatedAt: probeNow,
 					callbackSecretHash: null,
 				})
 				.where(nonTerminalTaskWhere(task.id))
@@ -136,15 +140,16 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 			const result = await provider.collectResult(sandbox, provider.getArtifactRoot(task.id))
 			const success = statusJson.status === "succeeded"
 			const nextStatus: TaskStatus = success ? "succeeded" : "failed"
+			const sjNow = new Date()
 			const updated = await db
 				.update(schema.tasks)
 				.set({
 					status: nextStatus,
 					exitCode: statusJson.exitCode ?? (success ? 0 : 1),
 					outputSummary: result.summary.slice(0, 2000),
-					completedAt: new Date(),
-					heartbeatAt: new Date(),
-					updatedAt: new Date(),
+					completedAt: sjNow,
+					heartbeatAt: sjNow,
+					updatedAt: sjNow,
 					callbackSecretHash: null,
 				})
 				.where(nonTerminalTaskWhere(task.id))
@@ -159,9 +164,10 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 			!trustStatusJson &&
 			(statusJson?.status === "succeeded" || statusJson?.status === "failed")
 		) {
+			const naNow = new Date()
 			await db
 				.update(schema.tasks)
-				.set({ lastProbeAt: new Date(), updatedAt: new Date() })
+				.set({ lastProbeAt: naNow, updatedAt: naNow })
 				.where(eq(schema.tasks.id, task.id))
 			await insertReconcilerEvent(db, task.id, "reconciler.probe", {
 				source: "still_running",
@@ -169,17 +175,19 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 				note: "status_json_not_authoritative_lastEventSeq_gt_0",
 			})
 		} else {
+			const elseNow = new Date()
 			await db
 				.update(schema.tasks)
-				.set({ lastProbeAt: new Date(), updatedAt: new Date() })
+				.set({ lastProbeAt: elseNow, updatedAt: elseNow })
 				.where(eq(schema.tasks.id, task.id))
 			await insertReconcilerEvent(db, task.id, "reconciler.probe", { source: "still_running" })
 		}
 	} catch (e) {
 		console.error(`[probeSingleTask] failed for task ${task.id}:`, e)
+		const errNow = new Date()
 		await db
 			.update(schema.tasks)
-			.set({ lastProbeAt: new Date(), updatedAt: new Date() })
+			.set({ lastProbeAt: errNow, updatedAt: errNow })
 			.where(eq(schema.tasks.id, task.id))
 	}
 }
@@ -284,12 +292,13 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 
 		try {
 			await sendTelegram(chatId, text)
+			const notifyNow = new Date()
 			await db
 				.update(schema.tasks)
 				.set({
 					notifiedStatus: task.status,
-					lastNotificationAt: new Date(),
-					updatedAt: new Date(),
+					lastNotificationAt: notifyNow,
+					updatedAt: notifyNow,
 				})
 				.where(eq(schema.tasks.id, task.id))
 		} catch (e) {

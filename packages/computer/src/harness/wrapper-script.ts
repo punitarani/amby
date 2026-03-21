@@ -129,8 +129,11 @@ send() {
 }
 
 write_status() {
-  jq -n --arg st "$1" --arg exit "$2" --arg msg "$3" --arg seq "$SEQ" --arg tid "$AMBY_TASK_ID" \\
-    '{taskId:$tid, status:$st, seq:($seq|tonumber), exitCode:(if $exit=="" then null else ($exit|tonumber) end), message:$msg, updatedAt:(now|todate)}' > "$ARTIFACTS/status.json"
+  node -e '
+    var a=process.argv, s=a[1], x=a[2], m=a[3], q=a[4], t=a[5];
+    var j=JSON.stringify({taskId:t,status:s,seq:Number(q),exitCode:x===""?null:Number(x),message:m,updatedAt:new Date().toISOString()});
+    require("fs").writeFileSync(a[6]+"/status.json",j);
+  ' "$1" "$2" "$3" "$SEQ" "$AMBY_TASK_ID" "$ARTIFACTS" 2>/dev/null || true
 }
 
 write_status "running" "" "preparing"

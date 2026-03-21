@@ -23,12 +23,24 @@ startup_timeout_sec = 30
 const MAX_ARTIFACT_BYTES = 1024 * 1024
 const HEAD_TAIL_BYTES = 10 * 1024
 
+function trimTrailingReplacement(s: string): string {
+	let end = s.length
+	while (end > 0 && s[end - 1] === "\uFFFD") end--
+	return end === s.length ? s : s.slice(0, end)
+}
+
+function trimLeadingReplacement(s: string): string {
+	let start = 0
+	while (start < s.length && s[start] === "\uFFFD") start++
+	return start === 0 ? s : s.slice(start)
+}
+
 function utf8SizeLimited(buf: Buffer): string {
 	if (buf.length <= MAX_ARTIFACT_BYTES) {
 		return buf.toString("utf-8")
 	}
-	const head = buf.subarray(0, HEAD_TAIL_BYTES).toString("utf-8")
-	const tail = buf.subarray(buf.length - HEAD_TAIL_BYTES).toString("utf-8")
+	const head = trimTrailingReplacement(buf.subarray(0, HEAD_TAIL_BYTES).toString("utf-8"))
+	const tail = trimLeadingReplacement(buf.subarray(buf.length - HEAD_TAIL_BYTES).toString("utf-8"))
 	return `${head}\n\n… [truncated ${buf.length} bytes] …\n\n${tail}`
 }
 

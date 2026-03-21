@@ -7,7 +7,7 @@ import {
 	verifyHmacSignature,
 } from "@amby/computer"
 import type { TaskEventSource, TaskStatus } from "@amby/db"
-import { DbService, eq, schema } from "@amby/db"
+import { and, DbService, eq, lt, schema } from "@amby/db"
 import { Effect } from "effect"
 
 type TaskEventBody = {
@@ -170,13 +170,14 @@ export const handleTaskEventPost = (request: Request) =>
 		}
 
 		if (body.eventType === "codex.notify") {
+			const now = new Date()
 			yield* Effect.tryPromise({
 				try: () =>
 					db
 						.update(schema.tasks)
 						.set({
 							lastEventAt: occurredAt,
-							updatedAt: new Date(),
+							updatedAt: now,
 						})
 						.where(eq(schema.tasks.id, task.id)),
 				catch: () => undefined,
@@ -185,12 +186,12 @@ export const handleTaskEventPost = (request: Request) =>
 			const nextStatus = mapHarnessEventToStatus(body.eventType)
 			const fromStatus = task.status as TaskStatus
 			const statusOk = !nextStatus || isLegalTransition(fromStatus, nextStatus)
-			const heartbeatAt = new Date()
+			const now = new Date()
 			const patch: Partial<typeof schema.tasks.$inferInsert> = {
 				lastEventSeq: isHarnessSeq ? seq : task.lastEventSeq,
 				lastEventAt: occurredAt,
-				heartbeatAt,
-				updatedAt: new Date(),
+				heartbeatAt: now,
+				updatedAt: now,
 			}
 
 			if (nextStatus && statusOk) {
@@ -206,10 +207,21 @@ export const handleTaskEventPost = (request: Request) =>
 				}
 			}
 
-			yield* Effect.tryPromise({
-				try: () => db.update(schema.tasks).set(patch).where(eq(schema.tasks.id, task.id)),
-				catch: () => undefined,
+			const casResult = yield* Effect.tryPromise({
+				try: () =>
+					db
+						.update(schema.tasks)
+						.set(patch)
+						.where(
+							isHarnessSeq
+								? and(eq(schema.tasks.id, task.id), lt(schema.tasks.lastEventSeq, seq))
+								: eq(schema.tasks.id, task.id),
+						)
+						.returning({ id: schema.tasks.id }),
+				catch: () => [] as { id: string }[],
 			})
+			// CAS returned 0 rows → lost race; still ack so sender doesn't retry
+			void casResult
 		}
 
 		return jsonResponse(

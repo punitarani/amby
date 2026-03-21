@@ -13,7 +13,7 @@ CREATE TABLE "task_events" (
 ALTER TABLE "tasks" ADD COLUMN "conversation_id" uuid;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "channel_type" text;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "reply_target" jsonb;--> statement-breakpoint
-ALTER TABLE "tasks" ADD COLUMN "callback_id" uuid DEFAULT gen_random_uuid();--> statement-breakpoint
+ALTER TABLE "tasks" ADD COLUMN "callback_id" uuid;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "callback_secret_hash" text;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "last_event_seq" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "last_event_at" timestamp with time zone;--> statement-breakpoint
@@ -26,4 +26,5 @@ CREATE INDEX "task_events_task_id_idx" ON "task_events" USING btree ("task_id");
 CREATE INDEX "task_events_task_seq_idx" ON "task_events" USING btree ("task_id","seq");--> statement-breakpoint
 CREATE INDEX "task_events_task_occurred_idx" ON "task_events" USING btree ("task_id","occurred_at");--> statement-breakpoint
 ALTER TABLE "tasks" ADD CONSTRAINT "tasks_conversation_id_conversations_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversations"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "tasks_callback_id_idx" ON "tasks" USING btree ("callback_id");
+CREATE INDEX "tasks_callback_id_idx" ON "tasks" USING btree ("callback_id");--> statement-breakpoint
+CREATE INDEX "tasks_status_heartbeat_idx" ON "tasks" USING btree ("status","heartbeat_at");
