@@ -12,6 +12,12 @@
 		"build": "bun build ./src/index.ts --outdir dist --target bun"
 	},
 	"dependencies": {
+		"@braintrust/otel": "^0.2.0",
+		"@opentelemetry/api": "^1.9.0",
+		"@opentelemetry/context-async-hooks": "^2.2.0",
+		"@opentelemetry/core": "^2.2.0",
+		"@opentelemetry/exporter-trace-otlp-http": "^0.207.0",
+		"@opentelemetry/sdk-trace-base": "^2.6.0",
 		"@ai-sdk/provider": "^3.0.0",
 		"@amby/channels": "workspace:*",
 		"@amby/computer": "workspace:*",
@@ -21,9 +27,11 @@
 		"@amby/memory": "workspace:*",
 		"@amby/models": "workspace:*",
 		"@daytonaio/sdk": "^0.151.0",
-		"ai": "^6.0.0",
 		"braintrust": "^3.4.0",
-		"cron-parser": "^5.5.0",
+		"cron-parser": "^5.5.0"
+	},
+	"peerDependencies": {
+		"ai": "^6.0.116",
 		"effect": "^3.19.19",
 		"zod": "^3.24.0"
 	}

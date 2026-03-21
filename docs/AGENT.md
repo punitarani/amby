@@ -91,14 +91,16 @@ Merges the requested tool groups into a single flat `ToolSet` for a subagent.
 createSubagentTools(
   getModel: (id?: string) => LanguageModel,
   toolGroups: ToolGroups,
-  sharedContext: string
+  sharedPromptContext: string,
+  config: AgentConfig,
+  requestTraceMetadata: RequestTraceMetadata,
 ): ToolSet
 ```
 
 Each delegation tool:
 - Has schema `{ task: string, context?: string }`
 - Resolves its tools from `toolGroups` using the definition's `toolKeys`
-- Creates a `ToolLoopAgent` with the subagent's instructions, scoped tools, and `maxSteps`
+- Creates a fresh `ToolLoopAgent` inside the tool execution with the subagent's instructions, scoped tools, `maxSteps`, and invocation-specific telemetry metadata
 - Calls `subagent.generate({ prompt, abortSignal })` so cancellation propagates through tool execution
 - Returns `{ summary: result.text }` on success, and forwards nested connector `userMessages` when present
 - Returns `{ error: true, summary: "..." }` on failure (errors don't crash the orchestrator)
@@ -111,7 +113,14 @@ Each delegation tool:
 In `packages/agent/src/agent.ts`, the `prepareContext()` function assembles the orchestrator's tool set:
 
 ```ts
-const delegationTools = createSubagentTools(models.getModel, toolGroups, sharedContext)
+const requestTraceMetadata = buildRequestTraceMetadata({ conversationId, requestMode, ... })
+const delegationTools = createSubagentTools(
+  models.getModel,
+  toolGroups,
+  sharedPromptContext,
+  agentConfig,
+  requestTraceMetadata,
+)
 
 const { search_memories } = memoryTools
 const tools = {
@@ -142,7 +151,10 @@ The orchestrator's system prompt (`packages/agent/src/prompts/system.ts`) includ
 Subagents cannot spawn other subagents. The orchestrator chains them sequentially when needed (e.g., `delegate_planner` then `delegate_builder`). Simpler, easier to debug.
 
 ### Per-agent model overrides
-Subagents default to the base model, but `SubagentDef.modelId` can override it. Research, planner, and integration use `z-ai/glm-4.7` for stronger reasoning; builder, computer, and memory_manager still use the base model. Braintrust wraps the AI SDK `ToolLoopAgent` class, so orchestrator and subagent runs both emit traced agent spans; the orchestrator also adds a parent span with request metadata and lightweight step summaries.
+Subagents default to the default model ID from `ModelService`, but `SubagentDef.modelId` can override it (for example research, planner, and integration use a higher-intelligence model). Tracing is handled through AI SDK `experimental_telemetry` with a shared OpenTelemetry tracer, so orchestrator, tool, and subagent spans nest through the active context.
+
+### Shared no-PII trace metadata
+Each top-level request builds trace metadata with internal IDs, enums, and counters (`request_id`, `user_id`, `conversation_id`, request mode, model ID, and related flags). That metadata is attached to orchestrator and subagent AI SDK spans. Prompt context such as memories and formatted time stays in prompts only and is not copied into trace metadata.
 
 ### Read-only memory on orchestrator
 The orchestrator gets `search_memories` directly (destructured from the full memory tools) rather than the full `save_memory` + `search_memories` set. This lets the orchestrator check user context before deciding how to delegate without being tempted to write memories itself.
@@ -179,6 +191,6 @@ The research agent receives the same `execute_command` tool as the builder but i
 | `packages/agent/src/subagents/spawner.ts` | Factory that creates delegation tools |
 | `packages/agent/src/subagents/index.ts` | Barrel exports |
 | `packages/agent/src/agent.ts` | Orchestrator wiring in `prepareContext()` |
-| `packages/agent/src/braintrust.ts` | Braintrust-backed AI SDK wrapper + parent span helper |
+| `packages/agent/src/telemetry.ts` | Shared OpenTelemetry bootstrap + AI SDK telemetry helpers |
 | `packages/agent/src/prompts/system.ts` | Orchestrator system prompt with delegation instructions |
 | `packages/agent/src/tools/messaging.ts` | `createReplyTools` + `createJobTools` (orchestrator-only) |
