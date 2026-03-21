@@ -1,11 +1,22 @@
+import {
+	buildSafeComposioRedirectUrl,
+	ConnectorsService,
+	getExpiredConnectedAccountId,
+	getWebhookType,
+	normalizeWebhookPayload,
+	WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
+} from "@amby/connectors"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
+import { Effect, Either } from "effect"
 import { Hono } from "hono"
 import { HTTPException } from "hono/http-exception"
+import { handleExpiredConnectedAccount } from "./composio/expired-account"
 import { ConversationSession as ConversationSessionBase } from "./durable-objects/conversation-session"
 import { getHomeResponse } from "./home"
 import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
+import { makeRuntimeForConsumer } from "./queue/runtime"
 import { getSentryOptions, getSentryOptionsOrFallback } from "./sentry"
 import { getOrCreateChat } from "./telegram/chat-sdk"
 import type { TelegramQueueMessage } from "./telegram/utils"
@@ -86,12 +97,94 @@ app.onError(async (err, c) => {
 app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
 
+// White-label connect link — resolves UUID to the underlying Composio auth URL
+app.get("/link/:id", async (c) => {
+	const rt = makeRuntimeForConsumer(c.env)
+	try {
+		const result = await rt.runPromise(
+			Effect.gen(function* () {
+				const connectors = yield* ConnectorsService
+				return yield* connectors.resolveConnectLink(c.req.param("id"))
+			}).pipe(Effect.either),
+		)
+		const url = Either.isRight(result) ? result.right : undefined
+		return url ? c.redirect(url, 302) : c.notFound()
+	} finally {
+		await rt.dispose()
+	}
+})
+
+// OAuth callback proxy — OAuth providers redirect here; we 302 to Composio so the browser shows your API domain (not backend.composio.dev)
+app.get("/composio/redirect", (c) => {
+	return c.redirect(buildSafeComposioRedirectUrl(c.req.url), 302)
+})
+
 // Webhook handler — Chat SDK handles secret verification, parsing, and routing via waitUntil
 app.post("/telegram/webhook", async (c) => {
 	const { chat } = getOrCreateChat(c.env)
 	return chat.webhooks.telegram(c.req.raw, {
 		waitUntil: (task) => c.executionCtx.waitUntil(task),
 	})
+})
+
+app.post("/composio/webhook", async (c) => {
+	if (!c.env.COMPOSIO_API_KEY || !c.env.COMPOSIO_WEBHOOK_SECRET) {
+		return c.json({ error: "Composio webhook not configured" }, 503)
+	}
+
+	const signature = c.req.header("webhook-signature")
+	const webhookId = c.req.header("webhook-id")
+	const webhookTimestamp = c.req.header("webhook-timestamp")
+
+	if (!signature || !webhookId || !webhookTimestamp) {
+		return c.json({ error: "Unauthorized" }, 401)
+	}
+
+	const timestampAge = Math.abs(Math.floor(Date.now() / 1000) - Number(webhookTimestamp))
+	if (!Number.isFinite(timestampAge) || timestampAge > WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS) {
+		return c.json({ error: "Unauthorized" }, 401)
+	}
+
+	const payload = await c.req.text()
+	const runtime = makeRuntimeForConsumer(c.env)
+
+	try {
+		const verification = await runtime.runPromise(
+			Effect.gen(function* () {
+				const connectors = yield* ConnectorsService
+				return yield* connectors.verifyWebhook(payload, {
+					signature,
+					webhookId,
+					webhookTimestamp,
+				})
+			}).pipe(Effect.either),
+		)
+
+		if (Either.isLeft(verification)) {
+			return c.json({ error: "Unauthorized" }, 401)
+		}
+
+		const verifiedPayload =
+			normalizeWebhookPayload(verification.right.rawPayload) ??
+			normalizeWebhookPayload(verification.right.payload)
+		const eventType = getWebhookType(verifiedPayload)
+
+		if (eventType !== "composio.connected_account.expired") {
+			return c.json({ status: "ignored", eventType: eventType ?? null }, 202)
+		}
+
+		const connectedAccountId = getExpiredConnectedAccountId(verifiedPayload)
+		if (!connectedAccountId) {
+			console.error("[Composio] Expired webhook missing connected account id:", verifiedPayload)
+			return c.json({ status: "ignored", reason: "missing_connected_account_id" }, 202)
+		}
+
+		const result = await runtime.runPromise(handleExpiredConnectedAccount(connectedAccountId))
+
+		return c.json(result)
+	} finally {
+		await runtime.dispose()
+	}
 })
 
 const worker: ExportedHandler<WorkerBindings, TelegramQueueMessage> = {

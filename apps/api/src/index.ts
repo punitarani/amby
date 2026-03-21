@@ -1,14 +1,20 @@
 import { AuthServiceLive } from "@amby/auth"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
+import {
+	buildSafeComposioRedirectUrl,
+	ConnectorsService,
+	ConnectorsServiceLive,
+} from "@amby/connectors"
 import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { EnvServiceLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
 import { ModelServiceLive } from "@amby/models"
-import { Effect, Layer, ManagedRuntime } from "effect"
+import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
 import { createAmbyBot } from "./bot"
 import { getHomeResponse } from "./home"
+import { TelegramSenderLite } from "./telegram"
 
 // Shared layers — constructed once at startup
 const SharedLive = Layer.mergeAll(
@@ -16,6 +22,7 @@ const SharedLive = Layer.mergeAll(
 	TaskSupervisorLive,
 	ModelServiceLive,
 	AuthServiceLive,
+	ConnectorsServiceLive,
 ).pipe(
 	Layer.provideMerge(SandboxServiceLive),
 	Layer.provideMerge(DbServiceLive),
@@ -28,6 +35,23 @@ const app = new Hono()
 
 app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
+
+// White-label connect link — resolves UUID to the underlying Composio auth URL
+app.get("/link/:id", async (c) => {
+	const result = await runtime.runPromise(
+		Effect.gen(function* () {
+			const connectors = yield* ConnectorsService
+			return yield* connectors.resolveConnectLink(c.req.param("id"))
+		}).pipe(Effect.either),
+	)
+	const url = Either.isRight(result) ? result.right : undefined
+	return url ? c.redirect(url, 302) : c.notFound()
+})
+
+// OAuth callback proxy — same as Cloudflare Worker; local dev uses ngrok/API_URL for OAuth redirect URIs
+app.get("/composio/redirect", (c) => {
+	return c.redirect(buildSafeComposioRedirectUrl(c.req.url), 302)
+})
 
 const port = Number(process.env.PORT) || 3001
 
@@ -42,6 +66,10 @@ runtime
 				console.log("Telegram bot: not configured (TELEGRAM_BOT_TOKEN not set)")
 				return
 			}
+
+			const botRuntime = ManagedRuntime.make(
+				TelegramSenderLite.pipe(Layer.provideMerge(SharedLive)),
+			)
 
 			// Register bot commands via Telegram API
 			yield* Effect.tryPromise(() =>
@@ -59,7 +87,7 @@ runtime
 			)
 
 			// Initialize Chat SDK bot (auto mode: polling in dev, webhook when deployed)
-			const bot = createAmbyBot(runtime, env.TELEGRAM_BOT_TOKEN)
+			const bot = createAmbyBot(botRuntime, env.TELEGRAM_BOT_TOKEN)
 			yield* Effect.tryPromise(() => bot.initialize())
 
 			console.log("Telegram bot: configured and running")

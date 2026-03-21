@@ -1,3 +1,5 @@
+import { HIGH_INTELLIGENCE_MODEL_ID } from "@amby/models"
+
 export type SubagentDef = {
 	name: string
 	description: string
@@ -7,17 +9,37 @@ export type SubagentDef = {
 	maxSteps: number
 }
 
-const SUBAGENT_BASE = `You are executing a task delegated by an orchestrator agent. Follow these rules:
+const buildSubagentBasePrompt = (options?: { allowConnectedApps?: boolean }) =>
+	`You are executing a task delegated by an orchestrator agent. Follow these rules:
 - Execute the task using your available tools
 - Return a concise summary of what you did or found
 - Do not address the user directly — the orchestrator handles user communication
-- Do not mention tools, agents, delegation, or internal processes`
+- Do not mention tools, agents, delegation, or internal processes
+- ${
+		options?.allowConnectedApps
+			? "Use connected-app tools only when they are available in your toolset"
+			: "You do not have access to Gmail, Google Calendar, Notion, Slack, Google Drive, or other connected app credentials"
+	}
+- ${
+		options?.allowConnectedApps
+			? "If access is missing or expired, use the available connection-management flow instead of inventing a manual workaround"
+			: "If a task depends on connected apps, say that it must go through the integration specialist"
+	}
+- Never guess or invent local sandbox files, cache paths, .composio directories, or exported files as a substitute for connected app access
+- Paths like /home/user/.composio/mex/... belong to Composio's remote workbench, not the local sandbox. ${
+		options?.allowConnectedApps
+			? "Do not try to read them locally; handle them only with connected-app tooling when available"
+			: "Do not try to read them locally; tell the orchestrator that Composio workbench handling must stay there"
+	}`
+
+const SUBAGENT_BASE = buildSubagentBasePrompt()
+const CONNECTED_APP_SUBAGENT_BASE = buildSubagentBasePrompt({ allowConnectedApps: true })
 
 export const SUBAGENT_DEFS: SubagentDef[] = [
 	{
 		name: "research",
 		description:
-			"Gather information, read files, search memories, run read-only commands. Use for questions that need lookup or investigation.",
+			"Gather information, read files, search memories, run read-only commands. Use for questions that need lookup or investigation. Do not use for Gmail, Google Calendar, Notion, Slack, or Google Drive tasks.",
 		systemPrompt: `${SUBAGENT_BASE}
 You are a research specialist. Your job is to find information using available tools.
 - Use search_memories to check what you know about the user
@@ -25,12 +47,13 @@ You are a research specialist. Your job is to find information using available t
 - Use execute_command for read-only operations (ls, cat, grep, find, etc.)
 - Do NOT modify files or run destructive commands`,
 		toolKeys: ["memory-read", "computer-read"],
+		modelId: HIGH_INTELLIGENCE_MODEL_ID,
 		maxSteps: 8,
 	},
 	{
 		name: "builder",
 		description:
-			"Create or modify files, run code, install packages, execute commands. Use for any task that changes the filesystem.",
+			"Create or modify files, run code, install packages, execute commands. Use for any task that changes the filesystem. Do not use for Gmail, Google Calendar, Notion, Slack, or Google Drive tasks.",
 		systemPrompt: `${SUBAGENT_BASE}
 You are a builder specialist. Your job is to create and modify things.
 - Use write_file to create or update files
@@ -51,7 +74,24 @@ You are a planning specialist. Your job is to think through complex tasks.
 - Output a structured plan the orchestrator can follow
 - You have no tools — reason purely from the information given`,
 		toolKeys: [],
+		modelId: HIGH_INTELLIGENCE_MODEL_ID,
 		maxSteps: 3,
+	},
+	{
+		name: "integration",
+		description:
+			"Handle Gmail, Google Calendar, Notion, Slack, Google Drive, and other Composio-backed integration tasks, including connection management and connected-app actions.",
+		systemPrompt: `${CONNECTED_APP_SUBAGENT_BASE}
+You are an integration specialist. Your job is to handle connected-app work safely and directly.
+- Use connection-management tools to inspect, connect, disconnect, or switch preferred accounts when needed
+- Use connected-app tools to read or act in Gmail, Google Calendar, Notion, Slack, Google Drive, or other available integrations
+- Reuse an existing connection link within the same task instead of requesting another one
+- If more than one account is connected, inspect the available accounts and surface the options clearly
+- Before sending email, posting to chat, creating events, or editing external systems, require confirmation unless the task already clearly requested that exact write
+- If Composio offloads data to its remote workbench, continue with connected-app tooling there when available instead of local filesystem tools`,
+		toolKeys: ["integration"],
+		modelId: HIGH_INTELLIGENCE_MODEL_ID,
+		maxSteps: 12,
 	},
 	{
 		name: "computer",

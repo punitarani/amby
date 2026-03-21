@@ -18,8 +18,10 @@
 	"dependencies": {
 		"@amby/env": "workspace:*",
 		"drizzle-orm": "^0.45.1",
-		"effect": "^3.19.19",
 		"postgres": "^3.4.7"
+	},
+	"peerDependencies": {
+		"effect": "^3.19.19"
 	},
 	"devDependencies": {
 		"drizzle-kit": "^0.31.0"

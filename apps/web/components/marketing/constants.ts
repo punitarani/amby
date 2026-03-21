@@ -1,9 +1,10 @@
 import { APP_URL } from "@/lib/app-url"
+import { TELEGRAM_BOT_URL } from "@/lib/telegram"
 
 export const marketingLinks = {
 	website: APP_URL,
 	github: "https://github.com/punitarani/amby",
-	telegram: "https://t.me/my_amby_bot",
+	telegram: TELEGRAM_BOT_URL,
 } as const
 
 export const marketingBrandLine =

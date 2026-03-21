@@ -23,6 +23,7 @@
 		"@amby/agent": "workspace:*",
 		"@amby/auth": "workspace:*",
 		"@amby/computer": "workspace:*",
+		"@amby/connectors": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",

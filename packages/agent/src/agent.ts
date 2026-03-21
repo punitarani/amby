@@ -1,5 +1,6 @@
 import type { ChannelType } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
+import { ConnectorsService, createConnectorManagementTools } from "@amby/connectors"
 import { and, DbService, desc, eq, isNotNull, ne, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import {
@@ -9,21 +10,26 @@ import {
 	MemoryService,
 } from "@amby/memory"
 import { ModelService } from "@amby/models"
-import type { ToolSet } from "ai"
+import { stepCountIs, ToolLoopAgent, type ToolSet } from "ai"
 import { Context, Effect, Layer } from "effect"
-import {
-	flushBraintrust,
-	initializeBraintrust,
-	stepCountIs,
-	ToolLoopAgent,
-	traceBraintrustOperation,
-} from "./braintrust"
 import { AgentError } from "./errors"
+import {
+	type AgentConfig,
+	type AgentTraceMetadata,
+	buildRequestTraceMetadata,
+	createTelemetrySettings,
+	initializeTelemetry,
+	shutdownTelemetry,
+	type TraceRequestMode,
+	withTelemetryFlush,
+} from "./telemetry"
 
 export type StreamPart =
 	| { type: "text-delta"; text: string }
 	| { type: "tool-call"; toolName: string; args: Record<string, unknown> }
 	| { type: "tool-result"; toolName: string; result: unknown }
+
+const ORCHESTRATOR_MAX_STEPS = 14
 
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
 import {
@@ -37,56 +43,7 @@ import { buildToolGroups } from "./subagents/tool-groups"
 import { createCodexAuthTools } from "./tools/codex-auth"
 import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
-
-type RequestMode = "message" | "batched-message" | "stream-message"
-type UsageSummary = {
-	inputTokens?: number
-	outputTokens?: number
-	totalTokens?: number
-}
-type StepLifecycleEvent = {
-	stepNumber: number
-	finishReason: string
-	toolCalls?: Array<{ toolName: string }>
-	usage?: UsageSummary
-}
-type FinishLifecycleEvent = {
-	steps: unknown[]
-	totalUsage?: UsageSummary
-}
-
-const compactRecord = (record: Record<string, unknown>) =>
-	Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined))
-
-const summarizeRequestMetadata = (metadata?: Record<string, unknown>) => {
-	if (!metadata) return undefined
-
-	const telegram = metadata.telegram
-	const telegramMetadata =
-		telegram && typeof telegram === "object" && !Array.isArray(telegram)
-			? (telegram as Record<string, unknown>)
-			: undefined
-
-	return compactRecord({
-		keys: Object.keys(metadata),
-		source: Object.hasOwn(metadata, "telegram") ? "telegram" : undefined,
-		telegramBatched:
-			typeof telegramMetadata?.batched === "boolean" ? telegramMetadata.batched : undefined,
-		telegramMessageCount:
-			typeof telegramMetadata?.messageCount === "number"
-				? telegramMetadata.messageCount
-				: undefined,
-	})
-}
-
-const summarizeUsage = (usage?: UsageSummary) =>
-	usage
-		? compactRecord({
-				inputTokens: usage.inputTokens,
-				outputTokens: usage.outputTokens,
-				totalTokens: usage.totalTokens,
-			})
-		: undefined
+import { extractToolUserMessages } from "./utils/extract-tool-user-messages"
 
 const THREAD_TAIL_LIMIT = 20
 const ARTIFACT_MSG_LIMIT = 5
@@ -160,10 +117,18 @@ export const makeAgentServiceLive = (userId: string) =>
 			const memory = yield* MemoryService
 			const sandbox = yield* SandboxService
 			const taskSupervisor = yield* TaskSupervisor
+			const connectors = yield* ConnectorsService
 			const env = yield* EnvService
-			const enableCua = env.ENABLE_CUA
-			initializeBraintrust(env.BRAINTRUST_API_KEY, env.BRAINTRUST_PROJECT_ID)
+			initializeTelemetry({
+				apiKey: env.BRAINTRUST_API_KEY,
+				projectId: env.BRAINTRUST_PROJECT_ID,
+			})
 			const baseModel = models.getModel()
+			const agentConfig: AgentConfig = {
+				userId,
+				modelId: models.defaultModelId,
+				cuaEnabled: env.ENABLE_CUA,
+			}
 
 			const computer = createComputerTools(sandbox, userId)
 
@@ -278,23 +243,6 @@ export const makeAgentServiceLive = (userId: string) =>
 				},
 			) => (content.trim() ? saveMessage(conversationId, "assistant", content, opts) : Effect.void)
 
-			const extractLastToolUserMessages = (result: {
-				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
-			}): string[] | undefined => {
-				for (let i = result.toolResults.length - 1; i >= 0; i -= 1) {
-					const output = result.toolResults[i]?.output
-					if (
-						typeof output === "object" &&
-						output !== null &&
-						"userMessages" in output &&
-						Array.isArray(output.userMessages) &&
-						output.userMessages.every((message) => typeof message === "string" && message.trim())
-					) {
-						return output.userMessages
-					}
-				}
-			}
-
 			const prepareContext = (
 				conversationId: string,
 				threadCtx: ResolveThreadResult,
@@ -358,12 +306,37 @@ export const makeAgentServiceLive = (userId: string) =>
 					const codexAuthTools = sandbox.enabled
 						? createCodexAuthTools(taskSupervisor, userId)
 						: undefined
-					const cuaTools = enableCua
+					const cuaTools = agentConfig.cuaEnabled
 						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 						: undefined
-					const toolGroups = buildToolGroups(memoryTools, computer.tools, cuaTools)
+					const connectorManagementTools = connectors.isEnabled()
+						? createConnectorManagementTools(connectors, userId)
+						: undefined
+					const connectorSessionTools = connectors.isEnabled()
+						? yield* connectors.getAgentTools(userId).pipe(
+								Effect.catchAll((error) =>
+									Effect.sync(() => {
+										console.error("[Agent] Failed to load Composio tools:", error)
+										return undefined
+									}),
+								),
+							)
+						: undefined
+					const integrationTools =
+						connectorManagementTools || connectorSessionTools
+							? ({
+									...(connectorManagementTools ?? {}),
+									...(connectorSessionTools ?? {}),
+								} as ToolSet)
+							: undefined
+					const toolGroups = buildToolGroups(
+						memoryTools,
+						computer.tools,
+						cuaTools,
+						integrationTools,
+					)
 
-					const basePrompt = enableCua
+					const basePrompt = agentConfig.cuaEnabled
 						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
 						: buildSystemPrompt(formatted, userTimezone)
 
@@ -382,7 +355,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						? `${systemPromptWithMemory}\n\n${extraBlocks}`
 						: systemPromptWithMemory
 
-					const sharedContext = [
+					const sharedPromptContext = [
 						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
 						extraBlocks,
 						`# Current Date/Time\n${formatted} (${userTimezone})`,
@@ -390,11 +363,8 @@ export const makeAgentServiceLive = (userId: string) =>
 						.filter(Boolean)
 						.join("\n\n")
 
-					const delegationTools = createSubagentTools(baseModel, toolGroups, sharedContext)
-
 					const { search_memories } = memoryTools
 					const tools = {
-						...delegationTools,
 						search_memories,
 						...(sandboxTools ?? {}),
 						...(codexAuthTools ?? {}),
@@ -402,100 +372,28 @@ export const makeAgentServiceLive = (userId: string) =>
 						...(onReply ? createReplyTools(onReply) : {}),
 					}
 
-					return { tools, systemPrompt, history, userTimezone }
+					return { tools, systemPrompt, history, userTimezone, sharedPromptContext, toolGroups }
 				})
 
-			const buildTraceMetadata = ({
-				conversationId,
-				mode,
-				historyLength,
-				toolCount,
-				userTimezone,
-				replyToolEnabled,
-				messageCount,
-				requestMetadata,
-				threadCtx,
-			}: {
-				conversationId: string
-				mode: RequestMode
-				historyLength: number
-				toolCount: number
-				userTimezone: string
-				replyToolEnabled: boolean
-				messageCount: number
-				requestMetadata?: Record<string, unknown>
-				threadCtx?: ResolveThreadResult
-			}) =>
-				compactRecord({
-					userId,
-					conversationId,
-					mode,
-					messageCount,
-					historyLength,
-					toolCount,
-					replyToolEnabled,
-					userTimezone,
-					modelId: models.defaultModelId,
-					cuaEnabled: enableCua,
-					requestMetadata: summarizeRequestMetadata(requestMetadata),
-					threadId: threadCtx?.threadId,
-					routerAction: threadCtx?.decision.action,
-					routerConfidence: threadCtx?.decision.confidence,
-					threadMessageCount: threadCtx?.threadMessageCount,
-				})
-
-			const createOrchestrator = (systemPrompt: string, tools: ToolSet) =>
+			const createOrchestrator = (
+				systemPrompt: string,
+				tools: ToolSet,
+				functionId: "amby.orchestrator.generate" | "amby.orchestrator.stream",
+				conversationTraceMetadata: AgentTraceMetadata,
+			) =>
 				new ToolLoopAgent({
+					id: "orchestrator",
 					model: baseModel,
 					instructions: systemPrompt,
 					tools,
-					stopWhen: stepCountIs(10),
+					// Delegation-heavy turns, especially connected-app work, need extra
+					// roundtrips on top of the base agent steps.
+					stopWhen: stepCountIs(ORCHESTRATOR_MAX_STEPS),
+					experimental_telemetry: createTelemetrySettings({
+						functionId,
+						metadata: conversationTraceMetadata,
+					}),
 				})
-
-			const createLifecycleCallbacks = (
-				traceMetadata: Record<string, unknown>,
-				aggregatedToolCalls: unknown[],
-			) => {
-				const toolNames = new Set<string>()
-				const stepFinishReasons = new Set<string>()
-				let stepCount = 0
-
-				const syncTraceMetadata = (totalUsage?: UsageSummary) => {
-					Object.assign(
-						traceMetadata,
-						compactRecord({
-							stepCount,
-							stepFinishReasons: stepFinishReasons.size > 0 ? [...stepFinishReasons] : undefined,
-							toolNames: toolNames.size > 0 ? [...toolNames] : undefined,
-							totalUsage: summarizeUsage(totalUsage),
-						}),
-					)
-				}
-
-				return {
-					onStepFinish: async ({
-						stepNumber,
-						finishReason,
-						toolCalls,
-						usage,
-					}: StepLifecycleEvent) => {
-						stepCount = Math.max(stepCount, stepNumber)
-						stepFinishReasons.add(finishReason)
-						const calls = toolCalls as unknown[] | undefined
-						if (calls?.length) {
-							aggregatedToolCalls.push(...calls)
-						}
-						for (const toolCall of toolCalls ?? []) {
-							toolNames.add(toolCall.toolName)
-						}
-						syncTraceMetadata(usage)
-					},
-					onFinish: async ({ steps, totalUsage }: FinishLifecycleEvent) => {
-						stepCount = Math.max(stepCount, steps.length)
-						syncTraceMetadata(totalUsage)
-					},
-				}
-			}
 
 			const fetchTranscriptForSynopsis = (
 				conversationId: string,
@@ -603,134 +501,116 @@ export const makeAgentServiceLive = (userId: string) =>
 			const runGenerateRequest = ({
 				conversationId,
 				mode,
-				operationName,
-				input,
 				requestMessages,
 				metadata,
 				onReply,
 				onTextDelta,
 			}: {
 				conversationId: string
-				mode: Extract<RequestMode, "message" | "batched-message">
-				operationName: "agent.handle-message" | "agent.handle-batched-messages"
-				input: { content: string } | { messages: string[] }
+				mode: Extract<TraceRequestMode, "message" | "batched-message">
 				requestMessages: ReadonlyArray<{ role: "user"; content: string }>
 				metadata?: Record<string, unknown>
 				onReply?: ReplyFn
 				onTextDelta?: (text: string) => void
 			}) =>
-				Effect.gen(function* () {
-					const inboundText = requestMessages.map((m) => m.content).join("\n\n")
-					const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
+				withTelemetryFlush(
+					Effect.gen(function* () {
+						const inboundText = requestMessages.map((m) => m.content).join("\n\n")
+						const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
 
-					yield* synopsisPreviousThreadIfDormantSwitch(conversationId, threadCtx)
+						yield* synopsisPreviousThreadIfDormantSwitch(conversationId, threadCtx)
 
-					const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
-						conversationId,
-						threadCtx,
-						onReply,
-					)
-					const traceMetadata = buildTraceMetadata({
-						conversationId,
-						mode,
-						historyLength: history.length,
-						toolCount: Object.keys(tools).length,
-						userTimezone,
-						replyToolEnabled: Boolean(onReply),
-						messageCount: requestMessages.length,
-						requestMetadata: metadata,
-						threadCtx,
-					})
-					const aggregatedToolCalls: unknown[] = []
-					const lifecycle = createLifecycleCallbacks(traceMetadata, aggregatedToolCalls)
-					const agent = createOrchestrator(systemPrompt, tools as ToolSet)
+						const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
+							yield* prepareContext(conversationId, threadCtx, onReply)
+						const requestTraceMetadata = buildRequestTraceMetadata({
+							conversationId,
+							requestMode: mode,
+							requestMetadata: metadata,
+						})
+						const delegationTools = createSubagentTools(
+							models.getModel,
+							toolGroups,
+							sharedPromptContext,
+							agentConfig,
+							requestTraceMetadata,
+						)
+						const orchestratorMetadata: AgentTraceMetadata = {
+							...requestTraceMetadata,
+							user_id: agentConfig.userId,
+							model_id: agentConfig.modelId,
+							cua_enabled: agentConfig.cuaEnabled,
+							agent_role: "orchestrator",
+							agent_name: "orchestrator",
+						}
+						const agent = createOrchestrator(
+							systemPrompt,
+							{ ...delegationTools, ...tools } as ToolSet,
+							"amby.orchestrator.generate",
+							orchestratorMetadata,
+						)
 
-					const result = yield* Effect.tryPromise({
-						try: () =>
-							traceBraintrustOperation(
-								operationName,
-								input,
-								traceMetadata,
-								onTextDelta
-									? async () => {
-											const stream = await agent.stream({
-												messages: [...history, ...requestMessages],
-												onStepFinish: lifecycle.onStepFinish,
-												onFinish: lifecycle.onFinish,
-											})
-											for await (const part of stream.fullStream) {
-												if (part.type === "text-delta") {
-													onTextDelta(part.text)
-												}
-											}
-											const [text, toolResults] = await Promise.all([
-												stream.text,
-												stream.toolResults,
-											])
-											return { text, toolResults }
+						const result = yield* Effect.tryPromise({
+							try: async () => {
+								if (onTextDelta) {
+									const stream = await agent.stream({
+										messages: [...history, ...requestMessages],
+									})
+									for await (const part of stream.fullStream) {
+										if (part.type === "text-delta") {
+											onTextDelta(part.text)
 										}
-									: async () => {
-											const genResult = await agent.generate({
-												messages: [...history, ...requestMessages],
-												onStepFinish: lifecycle.onStepFinish,
-												onFinish: lifecycle.onFinish,
-											})
-											return {
-												text: genResult.text,
-												toolResults: genResult.toolResults,
-											}
-										},
-								(response) => ({ text: response.text }),
-							),
-						catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
-					})
-					const toolUserMessages = onReply ? extractLastToolUserMessages(result) : undefined
-					if (toolUserMessages && onReply) {
-						yield* sendToolUserMessages(toolUserMessages, onReply)
-					}
-					const finalText = toolUserMessages ? "" : result.text
+									}
+									const [text, toolResults] = await Promise.all([stream.text, stream.toolResults])
+									return { text, toolResults }
+								}
+								return await agent.generate({
+									messages: [...history, ...requestMessages],
+								})
+							},
+							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
+						})
+						const toolUserMessages = onReply
+							? extractToolUserMessages(result.toolResults)
+							: undefined
+						if (toolUserMessages && onReply) {
+							yield* sendToolUserMessages(toolUserMessages, onReply)
+						}
+						const finalText = toolUserMessages ? "" : result.text
 
-					const toolResultsPersist = result.toolResults?.length
-						? [...result.toolResults]
-						: undefined
+						const threadMeta = {
+							threadId: threadCtx.threadId,
+							router: {
+								action: threadCtx.decision.action,
+								confidence: threadCtx.decision.confidence,
+							},
+						}
+						const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
 
-					const threadMeta = {
-						threadId: threadCtx.threadId,
-						router: {
-							action: threadCtx.decision.action,
-							confidence: threadCtx.decision.confidence,
-						},
-					}
-					const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
-
-					for (const message of requestMessages) {
-						yield* saveMessage(conversationId, "user", message.content, {
-							metadata: userMetadata,
+						for (const message of requestMessages) {
+							yield* saveMessage(conversationId, "user", message.content, {
+								metadata: userMetadata,
+								threadId: threadCtx.threadId,
+							})
+						}
+						yield* maybeSaveAssistantMessage(conversationId, finalText, {
 							threadId: threadCtx.threadId,
 						})
-					}
-					yield* maybeSaveAssistantMessage(conversationId, finalText, {
-						threadId: threadCtx.threadId,
-						toolCalls: aggregatedToolCalls.length > 0 ? aggregatedToolCalls : undefined,
-						toolResults: toolResultsPersist,
-					})
 
-					yield* synopsisCurrentThreadIfOverflowsAfterSave(
-						conversationId,
-						threadCtx,
-						requestMessages.length + 1,
-					)
+						yield* synopsisCurrentThreadIfOverflowsAfterSave(
+							conversationId,
+							threadCtx,
+							requestMessages.length + 1,
+						)
 
-					return finalText
-				})
+						return finalText
+					}),
+				)
 
 			return {
 				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>
 					runGenerateRequest({
 						conversationId,
 						mode: "message",
-						operationName: "agent.handle-message",
-						input: { content },
 						requestMessages: [{ role: "user", content }],
 						metadata,
 						onReply,
@@ -747,8 +627,6 @@ export const makeAgentServiceLive = (userId: string) =>
 					runGenerateRequest({
 						conversationId,
 						mode: "batched-message",
-						operationName: "agent.handle-batched-messages",
-						input: { messages },
 						requestMessages: messages.map((content) => ({ role: "user" as const, content })),
 						metadata,
 						onReply,
@@ -762,93 +640,93 @@ export const makeAgentServiceLive = (userId: string) =>
 					),
 
 				streamMessage: (conversationId, content, onPart) =>
-					Effect.gen(function* () {
-						const threadCtx = yield* resolveThread(query, conversationId, content, baseModel)
+					withTelemetryFlush(
+						Effect.gen(function* () {
+							const threadCtx = yield* resolveThread(query, conversationId, content, baseModel)
 
-						yield* synopsisPreviousThreadIfDormantSwitch(conversationId, threadCtx)
+							yield* synopsisPreviousThreadIfDormantSwitch(conversationId, threadCtx)
 
-						const { tools, systemPrompt, history, userTimezone } = yield* prepareContext(
-							conversationId,
-							threadCtx,
-						)
-						const traceMetadata = buildTraceMetadata({
-							conversationId,
-							mode: "stream-message",
-							historyLength: history.length,
-							toolCount: Object.keys(tools).length,
-							userTimezone,
-							replyToolEnabled: false,
-							messageCount: 1,
-							threadCtx,
-						})
-						const aggregatedToolCalls: unknown[] = []
-						const lifecycle = createLifecycleCallbacks(traceMetadata, aggregatedToolCalls)
-						const agent = createOrchestrator(systemPrompt, tools as ToolSet)
+							const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
+								yield* prepareContext(conversationId, threadCtx)
+							const requestTraceMetadata = buildRequestTraceMetadata({
+								conversationId,
+								requestMode: "stream-message",
+							})
+							const delegationTools = createSubagentTools(
+								models.getModel,
+								toolGroups,
+								sharedPromptContext,
+								agentConfig,
+								requestTraceMetadata,
+							)
+							const orchestratorMetadata: AgentTraceMetadata = {
+								...requestTraceMetadata,
+								user_id: agentConfig.userId,
+								model_id: agentConfig.modelId,
+								cua_enabled: agentConfig.cuaEnabled,
+								agent_role: "orchestrator",
+								agent_name: "orchestrator",
+							}
+							const agent = createOrchestrator(
+								systemPrompt,
+								{ ...delegationTools, ...tools } as ToolSet,
+								"amby.orchestrator.stream",
+								orchestratorMetadata,
+							)
 
-						const { text: result, toolResults } = yield* Effect.tryPromise({
-							try: () =>
-								traceBraintrustOperation(
-									"agent.stream-message",
-									{ content },
-									traceMetadata,
-									async () => {
-										const stream = await agent.stream({
-											messages: [...history, { role: "user" as const, content }],
-											onStepFinish: lifecycle.onStepFinish,
-											onFinish: lifecycle.onFinish,
-										})
+							const result = yield* Effect.tryPromise({
+								try: async () => {
+									const stream = await agent.stream({
+										messages: [...history, { role: "user" as const, content }],
+									})
 
-										for await (const part of stream.fullStream) {
-											switch (part.type) {
-												case "text-delta":
-													onPart({ type: "text-delta", text: part.text })
-													break
-												case "tool-call":
-													onPart({
-														type: "tool-call",
-														toolName: part.toolName,
-														args: part.input as Record<string, unknown>,
-													})
-													break
-												case "tool-result":
-													onPart({
-														type: "tool-result",
-														toolName: part.toolName,
-														result: part.output,
-													})
-													break
-											}
+									for await (const part of stream.fullStream) {
+										switch (part.type) {
+											case "text-delta":
+												onPart({ type: "text-delta", text: part.text })
+												break
+											case "tool-call":
+												onPart({
+													type: "tool-call",
+													toolName: part.toolName,
+													args: part.input as Record<string, unknown>,
+												})
+												break
+											case "tool-result":
+												onPart({
+													type: "tool-result",
+													toolName: part.toolName,
+													result: part.output,
+												})
+												break
 										}
+									}
 
-										const [text, tr] = await Promise.all([stream.text, stream.toolResults])
-										return { text, toolResults: tr }
-									},
-									({ text }) => ({ text }),
-								),
-							catch: (cause) => new AgentError({ message: "Failed to stream response", cause }),
-						})
+									return await stream.text
+								},
+								catch: (cause) => new AgentError({ message: "Failed to stream response", cause }),
+							})
 
-						const threadMeta = {
-							threadId: threadCtx.threadId,
-							router: {
-								action: threadCtx.decision.action,
-								confidence: threadCtx.decision.confidence,
-							},
-						}
-						yield* saveMessage(conversationId, "user", content, {
-							metadata: threadMeta,
-							threadId: threadCtx.threadId,
-						})
-						yield* saveMessage(conversationId, "assistant", result, {
-							threadId: threadCtx.threadId,
-							toolCalls: aggregatedToolCalls.length > 0 ? aggregatedToolCalls : undefined,
-							toolResults: toolResults ? [...toolResults] : undefined,
-						})
+							const threadMeta = {
+								threadId: threadCtx.threadId,
+								router: {
+									action: threadCtx.decision.action,
+									confidence: threadCtx.decision.confidence,
+								},
+							}
+							yield* saveMessage(conversationId, "user", content, {
+								metadata: threadMeta,
+								threadId: threadCtx.threadId,
+							})
+							yield* saveMessage(conversationId, "assistant", result, {
+								threadId: threadCtx.threadId,
+							})
 
-						yield* synopsisCurrentThreadIfOverflowsAfterSave(conversationId, threadCtx, 2)
+							yield* synopsisCurrentThreadIfOverflowsAfterSave(conversationId, threadCtx, 2)
 
-						return result
-					}).pipe(
+							return result
+						}),
+					).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
 								? e
@@ -891,8 +769,8 @@ export const makeAgentServiceLive = (userId: string) =>
 					Effect.gen(function* () {
 						yield* taskSupervisor.shutdown()
 						yield* Effect.tryPromise({
-							try: () => flushBraintrust(),
-							catch: (cause) => new AgentError({ message: "Failed to flush Braintrust", cause }),
+							try: () => shutdownTelemetry(),
+							catch: (cause) => new AgentError({ message: "Failed to shut down telemetry", cause }),
 						})
 						const instance = computer.getSandbox()
 						if (instance) {
