@@ -5,9 +5,11 @@ import { VercelProvider } from "@composio/vercel"
 import type { ToolSet } from "ai"
 import { Context, Effect, Layer } from "effect"
 import {
+	buildConnectLinkUrl,
 	COMPOSIO_DESTRUCTIVE_TAG,
 	getIntegrationLabel,
 	getIntegrationSuccessMessage,
+	normalizeAppUrl,
 } from "./constants"
 import { ConnectorsError } from "./errors"
 import {
@@ -89,6 +91,7 @@ type ConnectorPreferenceRow = {
 }
 
 type ConnectorAuthRequestRow = {
+	id: string
 	userId: string
 	toolkit: string
 	redirectUrl: string
@@ -118,8 +121,6 @@ type ConnectedAccountRecord = {
 
 const toIsoString = (value: unknown): string =>
 	value instanceof Date ? value.toISOString() : String(value ?? "")
-
-const normalizeAppUrl = (value: string): string => value.replace(/\/+$/, "")
 
 const buildOptionalRecord = <T extends string>(
 	entries: ReadonlyArray<readonly [T, string]>,
@@ -226,6 +227,7 @@ export class ConnectorsService extends Context.Tag("ConnectorsService")<
 		readonly getConnectedAccountById: (
 			connectedAccountId: string,
 		) => Effect.Effect<ConnectedAccountSummary | undefined, ConnectorsError>
+		readonly resolveConnectLink: (id: string) => Effect.Effect<string | undefined, ConnectorsError>
 		readonly verifyWebhook: (
 			payload: string,
 			headers: {
@@ -291,6 +293,7 @@ export const ConnectorsServiceLive = Layer.effect(
 			query((database) =>
 				database
 					.select({
+						id: schema.connectorAuthRequests.id,
 						userId: schema.connectorAuthRequests.userId,
 						toolkit: schema.connectorAuthRequests.toolkit,
 						redirectUrl: schema.connectorAuthRequests.redirectUrl,
@@ -336,9 +339,20 @@ export const ConnectorsServiceLive = Layer.effect(
 								expiresAt,
 								updatedAt: new Date(),
 							},
-						}),
+						})
+						.returning({ id: schema.connectorAuthRequests.id }),
 				catch: mapDatabaseError("failed_to_write_pending_connector_auth_request"),
-			})
+			}).pipe(
+				Effect.flatMap((rows) =>
+					rows[0]
+						? Effect.succeed(rows[0].id)
+						: Effect.fail(
+								new ConnectorsError({
+									message: "failed_to_write_pending_connector_auth_request",
+								}),
+							),
+				),
+			)
 
 		const clearPendingAuthRequest = (userId: string, toolkit: SupportedIntegrationToolkit) =>
 			query((database) =>
@@ -511,12 +525,13 @@ export const ConnectorsServiceLive = Layer.effect(
 					const existingRequest = yield* getPendingAuthRequest(userId, toolkit)
 
 					if (existingRequest && isConnectorAuthRequestReusable(existingRequest)) {
+						const connectUrl = buildConnectLinkUrl(env.API_URL, existingRequest.id)
 						return {
 							toolkit,
 							label,
-							redirectUrl: existingRequest.redirectUrl,
+							redirectUrl: connectUrl,
 							callbackUrl: existingRequest.callbackUrl,
-							userMessages: buildConnectIntegrationUserMessages(label, existingRequest.redirectUrl),
+							userMessages: buildConnectIntegrationUserMessages(label, connectUrl),
 						}
 					}
 
@@ -552,20 +567,21 @@ export const ConnectorsServiceLive = Layer.effect(
 						)
 					}
 
-					yield* upsertPendingAuthRequest(
+					const rowId = yield* upsertPendingAuthRequest(
 						userId,
 						toolkit,
 						redirectUrl,
 						callbackUrl,
 						new Date(Date.now() + CONNECT_INTEGRATION_LINK_TTL_MS),
 					)
+					const connectUrl = buildConnectLinkUrl(env.API_URL, rowId)
 
 					return {
 						toolkit,
 						label,
-						redirectUrl,
+						redirectUrl: connectUrl,
 						callbackUrl,
-						userMessages: buildConnectIntegrationUserMessages(label, redirectUrl),
+						userMessages: buildConnectIntegrationUserMessages(label, connectUrl),
 					}
 				}),
 
@@ -735,6 +751,25 @@ export const ConnectorsServiceLive = Layer.effect(
 						isDisabled: pickConnectedAccountDisabled(account),
 					}
 				}),
+
+			resolveConnectLink: (id) =>
+				query((database) =>
+					database
+						.select({
+							redirectUrl: schema.connectorAuthRequests.redirectUrl,
+							expiresAt: schema.connectorAuthRequests.expiresAt,
+						})
+						.from(schema.connectorAuthRequests)
+						.where(eq(schema.connectorAuthRequests.id, id))
+						.limit(1),
+				).pipe(
+					Effect.map((rows) => {
+						const row = rows[0]
+						if (!row) return undefined
+						return isConnectorAuthRequestReusable(row) ? row.redirectUrl : undefined
+					}),
+					Effect.mapError(mapDatabaseError("failed_to_resolve_connect_link")),
+				),
 
 			verifyWebhook: (payload, headers) =>
 				Effect.gen(function* () {

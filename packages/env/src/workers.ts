@@ -3,6 +3,7 @@ import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService } from "./shared"
 
 export interface WorkerBindings {
 	NODE_ENV?: string
+	API_URL?: string
 	APP_URL?: string
 	OPENROUTER_API_KEY: string
 	OPENAI_API_KEY?: string
@@ -58,6 +59,7 @@ export interface WorkerBindings {
 export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 	Layer.succeed(EnvService, {
 		NODE_ENV: bindings.NODE_ENV ?? "production",
+		API_URL: bindings.API_URL ?? "https://api.hiamby.com",
 		APP_URL: bindings.APP_URL ?? "https://hiamby.com",
 		OPENROUTER_API_KEY: bindings.OPENROUTER_API_KEY,
 		OPENAI_API_KEY: bindings.OPENAI_API_KEY ?? "",

@@ -46,6 +46,12 @@ export function parseIntegrationStartPayload(
 	return isSupportedIntegrationToolkit(match[1]) ? match[1] : undefined
 }
 
+export const normalizeAppUrl = (value: string): string => value.replace(/\/+$/, "")
+
+export function buildConnectLinkUrl(apiUrl: string, id: string): string {
+	return `${normalizeAppUrl(apiUrl)}/link/${encodeURIComponent(id)}`
+}
+
 const COMPOSIO_REDIRECT_TARGET = "https://backend.composio.dev/api/v3/toolkits/auth/callback"
 const ALLOWED_REDIRECT_PARAMS = new Set(["code", "state", "error", "error_description", "scope"])
 

@@ -3,6 +3,7 @@ import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService } from "./shared"
 
 const EnvConfig = Config.all({
 	NODE_ENV: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
+	API_URL: Config.string("API_URL").pipe(Config.withDefault("http://localhost:3001")),
 	APP_URL: Config.string("APP_URL").pipe(Config.withDefault("http://localhost:3000")),
 	OPENROUTER_API_KEY: Config.redacted("OPENROUTER_API_KEY"),
 	OPENAI_API_KEY: Config.redacted("OPENAI_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
@@ -58,6 +59,7 @@ export const EnvServiceLive = Layer.effect(
 		const raw = yield* EnvConfig
 		return {
 			NODE_ENV: raw.NODE_ENV,
+			API_URL: raw.API_URL,
 			APP_URL: raw.APP_URL,
 			OPENROUTER_API_KEY: Redacted.value(raw.OPENROUTER_API_KEY),
 			OPENAI_API_KEY: Redacted.value(raw.OPENAI_API_KEY),

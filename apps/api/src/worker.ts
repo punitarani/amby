@@ -97,6 +97,23 @@ app.onError(async (err, c) => {
 app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
 
+// White-label connect link — resolves UUID to the underlying Composio auth URL
+app.get("/link/:id", async (c) => {
+	const rt = makeRuntimeForConsumer(c.env)
+	try {
+		const result = await rt.runPromise(
+			Effect.gen(function* () {
+				const connectors = yield* ConnectorsService
+				return yield* connectors.resolveConnectLink(c.req.param("id"))
+			}).pipe(Effect.either),
+		)
+		const url = Either.isRight(result) ? result.right : undefined
+		return url ? c.redirect(url, 302) : c.notFound()
+	} finally {
+		await rt.dispose()
+	}
+})
+
 // OAuth callback proxy — OAuth providers redirect here; we 302 to Composio so the browser shows your API domain (not backend.composio.dev)
 app.get("/composio/redirect", (c) => {
 	return c.redirect(buildSafeComposioRedirectUrl(c.req.url), 302)

@@ -6,6 +6,7 @@ export class EnvError extends Data.TaggedError("EnvError")<{
 
 export interface Env {
 	readonly NODE_ENV: string
+	readonly API_URL: string
 	readonly APP_URL: string
 	readonly OPENROUTER_API_KEY: string
 	readonly OPENAI_API_KEY: string
