@@ -1,14 +1,6 @@
+import { INTEGRATION_LABELS } from "@amby/connectors"
 import Link from "next/link"
 import { buildTelegramStartUrl, normalizeTelegramBotUsername } from "@/lib/telegram"
-
-// Derived from @amby/connectors TOOLKIT_REGISTRY — update when adding a new toolkit
-const INTEGRATION_LABELS: Record<string, string> = {
-	gmail: "Gmail",
-	googlecalendar: "Google Calendar",
-	notion: "Notion",
-	slack: "Slack",
-	googledrive: "Google Drive",
-}
 
 type SearchParams = Record<string, string | string[] | undefined>
 
@@ -24,7 +16,8 @@ export default async function IntegrationCallbackPage({
 }: IntegrationCallbackPageProps) {
 	const params = await Promise.resolve(searchParams ?? {})
 	const toolkit = getFirstParam(params.toolkit)
-	const label = (toolkit && INTEGRATION_LABELS[toolkit]) || "your app"
+	const label =
+		(toolkit && INTEGRATION_LABELS[toolkit as keyof typeof INTEGRATION_LABELS]) || "your app"
 	const telegramUsername = normalizeTelegramBotUsername(
 		process.env.TELEGRAM_BOT_USERNAME ?? process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME,
 	)

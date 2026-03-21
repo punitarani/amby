@@ -1,8 +1,8 @@
 // Canonical source: @amby/env (DEFAULT_TELEGRAM_BOT_USERNAME)
 const DEFAULT_TELEGRAM_BOT_USERNAME = "my_amby_bot"
 
-export const normalizeTelegramBotUsername = (value?: string) => {
-	const normalized = value?.trim().replace(/^@+/, "") ?? ""
+export const normalizeTelegramBotUsername = (value?: string | null) => {
+	const normalized = value?.trim().replace(/^@+/, "").toLowerCase() ?? ""
 	return normalized || DEFAULT_TELEGRAM_BOT_USERNAME
 }
 

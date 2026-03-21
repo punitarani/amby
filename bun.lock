@@ -61,6 +61,7 @@
       "name": "@amby/web",
       "version": "0.1.0",
       "dependencies": {
+        "@amby/connectors": "workspace:*",
         "@posthog/react": "^1.8.2",
         "clsx": "^2.1.1",
         "framer-motion": "^12.37.0",

@@ -407,7 +407,7 @@ export const ConnectorsServiceLive = Layer.effect(
 			authConfigId: account.authConfig?.id ?? "",
 			status: account.status,
 			statusReason: account.statusReason ?? null,
-			isDisabled: account.isDisabled,
+			isDisabled: pickConnectedAccountDisabled(account),
 			createdAt: toIsoString(account.createdAt),
 			updatedAt: toIsoString(account.updatedAt),
 			isPreferred: preferredConnectedAccountId === account.id,

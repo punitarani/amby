@@ -11,9 +11,6 @@ import {
 	TOOLKIT_REGISTRY,
 } from "./registry"
 
-/** @deprecated Use TOOLKIT_REGISTRY directly */
-export const INTEGRATION_TOOLKITS = TOOLKIT_REGISTRY
-
 export const COMPOSIO_DESTRUCTIVE_TAG = "destructiveHint" as const
 
 export { DEFAULT_TELEGRAM_BOT_USERNAME } from "@amby/env"
