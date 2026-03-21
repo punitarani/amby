@@ -1,5 +1,5 @@
 import { Config, Effect, Layer, Redacted } from "effect"
-import { EnvService } from "./shared"
+import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService } from "./shared"
 
 const EnvConfig = Config.all({
 	NODE_ENV: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
@@ -16,7 +16,7 @@ const EnvConfig = Config.all({
 		Config.withDefault(Redacted.make("")),
 	),
 	TELEGRAM_BOT_USERNAME: Config.string("TELEGRAM_BOT_USERNAME").pipe(
-		Config.withDefault("my_amby_bot"),
+		Config.withDefault(DEFAULT_TELEGRAM_BOT_USERNAME),
 	),
 	TELEGRAM_WEBHOOK_SECRET: Config.redacted("TELEGRAM_WEBHOOK_SECRET").pipe(
 		Config.withDefault(Redacted.make("")),

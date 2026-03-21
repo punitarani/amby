@@ -1,4 +1,4 @@
-import { and, DbService, eq, schema } from "@amby/db"
+import { and, DbService, eq, lte, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { Composio } from "@composio/core"
 import { VercelProvider } from "@composio/vercel"
@@ -94,6 +94,12 @@ type ConnectorAuthRequestRow = {
 	expiresAt: string | Date
 }
 
+/**
+ * Composio API returns inconsistent casing across SDK versions and endpoints
+ * (e.g. userId vs user_id, isDisabled vs is_disabled). Both forms are listed
+ * so pickConnectedAccountUserId/pickConnectedAccountDisabled can extract the
+ * value regardless of which casing the SDK provides at runtime.
+ */
 type ConnectedAccountRecord = {
 	id: string
 	userId?: string
@@ -348,6 +354,17 @@ export const ConnectorsServiceLive = Layer.effect(
 				Effect.mapError(mapDatabaseError("failed_to_clear_pending_connector_auth_request")),
 			)
 
+		/** Best-effort cleanup of expired auth requests to keep the table lean. */
+		const purgeExpiredAuthRequests = () =>
+			query((database) =>
+				database
+					.delete(schema.connectorAuthRequests)
+					.where(lte(schema.connectorAuthRequests.expiresAt, new Date())),
+			).pipe(
+				Effect.asVoid,
+				Effect.catchAll(() => Effect.void),
+			)
+
 		const listAccountsForUser = (userId: string, toolkit?: SupportedIntegrationToolkit) =>
 			Effect.gen(function* () {
 				const composio = yield* ensureClient()
@@ -471,6 +488,7 @@ export const ConnectorsServiceLive = Layer.effect(
 			connectIntegration: (userId, toolkit) =>
 				Effect.gen(function* () {
 					const composio = yield* ensureClient()
+					yield* purgeExpiredAuthRequests()
 					const label = getIntegrationLabel(toolkit)
 					const callbackUrl = buildComposioCallbackUrl(env.APP_URL, toolkit)
 					const accounts = yield* listAccountsForUser(userId, toolkit)
@@ -694,11 +712,20 @@ export const ConnectorsServiceLive = Layer.effect(
 			getConnectedAccountById: (connectedAccountId) =>
 				Effect.gen(function* () {
 					const composio = yield* ensureClient()
-					const connectedAccounts = composio.connectedAccounts as {
-						get: (id: string) => Promise<unknown>
+					// Guard against SDK shape changes
+					if (
+						typeof (composio.connectedAccounts as unknown as Record<string, unknown>)?.get !==
+						"function"
+					) {
+						return yield* Effect.fail(
+							new ConnectorsError({ message: "composio_connected_accounts_api_unavailable" }),
+						)
 					}
+					const getAccount = (
+						composio.connectedAccounts as { get: (id: string) => Promise<unknown> }
+					).get.bind(composio.connectedAccounts)
 					const account = (yield* Effect.tryPromise({
-						try: () => connectedAccounts.get(connectedAccountId),
+						try: () => getAccount(connectedAccountId),
 						catch: (cause) =>
 							new ConnectorsError({
 								message: "failed_to_get_connected_account",

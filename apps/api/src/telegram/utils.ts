@@ -5,7 +5,7 @@ import {
 	parseIntegrationStartPayload,
 } from "@amby/connectors"
 import { and, DbService, desc, eq, schema } from "@amby/db"
-import { EnvService } from "@amby/env"
+import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import { Effect } from "effect"
 import { getPostHogClient } from "../posthog"
@@ -56,8 +56,6 @@ export type ParsedTelegramCommand = {
 	payload?: string
 	rawText: string
 }
-
-const DEFAULT_TELEGRAM_BOT_USERNAME = "my_amby_bot"
 
 const normalizeTelegramBotUsername = (value?: string | null) =>
 	(value?.trim().replace(/^@+/, "").toLowerCase() ?? "") || DEFAULT_TELEGRAM_BOT_USERNAME

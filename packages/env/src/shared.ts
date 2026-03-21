@@ -33,4 +33,6 @@ export interface Env {
 	readonly POSTHOG_HOST: string
 }
 
+export const DEFAULT_TELEGRAM_BOT_USERNAME = "my_amby_bot"
+
 export class EnvService extends Context.Tag("EnvService")<EnvService, Env>() {}

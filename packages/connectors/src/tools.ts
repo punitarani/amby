@@ -9,6 +9,11 @@ type ConnectorService = Context.Tag.Service<typeof ConnectorsService>
 
 const toolkitEnum = z.enum(SUPPORTED_INTEGRATION_TOOLKITS)
 
+/**
+ * Each tool uses Effect.runPromise directly — the standard pattern across all
+ * tool packages (delegation, codex-auth, memory, sandbox). The service methods
+ * are closures over pre-resolved dependencies and need no further layer resolution.
+ */
 export function createConnectorManagementTools(connectors: ConnectorService, userId: string) {
 	return {
 		list_integrations: tool({

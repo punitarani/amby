@@ -1,3 +1,4 @@
+// Canonical source: @amby/env (DEFAULT_TELEGRAM_BOT_USERNAME)
 const DEFAULT_TELEGRAM_BOT_USERNAME = "my_amby_bot"
 
 export const normalizeTelegramBotUsername = (value?: string) => {

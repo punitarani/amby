@@ -117,7 +117,7 @@ export const INTEGRATION_TOOLKITS: Record<SupportedIntegrationToolkit, Integrati
 
 export const COMPOSIO_DESTRUCTIVE_TAG = "destructiveHint" as const
 
-export const DEFAULT_TELEGRAM_BOT_USERNAME = "my_amby_bot"
+export { DEFAULT_TELEGRAM_BOT_USERNAME } from "@amby/env"
 
 export function isSupportedIntegrationToolkit(value: string): value is SupportedIntegrationToolkit {
 	return SUPPORTED_INTEGRATION_TOOLKITS.includes(value as SupportedIntegrationToolkit)

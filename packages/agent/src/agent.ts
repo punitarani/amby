@@ -157,6 +157,13 @@ export const makeAgentServiceLive = (userId: string) =>
 			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
 				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
 
+			/**
+			 * Collect user-facing messages from all tool results in a step, deduplicated.
+			 *
+			 * Iterates all results (not just the last) because connector tools may appear
+			 * at any position. Only codex-auth and connector tools emit userMessages, and
+			 * Set-based dedup prevents repeats.
+			 */
 			const extractToolUserMessages = (result: {
 				toolResults: ReadonlyArray<{ output?: unknown } | undefined>
 			}): string[] | undefined => {
@@ -300,6 +307,8 @@ export const makeAgentServiceLive = (userId: string) =>
 					model: baseModel,
 					instructions: systemPrompt,
 					tools,
+					// Connector tools need extra roundtrips (list integrations, initiate OAuth,
+					// verify status) on top of the base agent steps.
 					stopWhen: stepCountIs(14),
 				})
 

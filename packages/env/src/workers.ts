@@ -1,5 +1,5 @@
 import { Layer } from "effect"
-import { EnvService } from "./shared"
+import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService } from "./shared"
 
 export interface WorkerBindings {
 	NODE_ENV?: string
@@ -66,7 +66,7 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		DAYTONA_API_URL: bindings.DAYTONA_API_URL ?? "https://app.daytona.io/api",
 		DAYTONA_TARGET: bindings.DAYTONA_TARGET ?? "us",
 		TELEGRAM_BOT_TOKEN: bindings.TELEGRAM_BOT_TOKEN ?? "",
-		TELEGRAM_BOT_USERNAME: bindings.TELEGRAM_BOT_USERNAME ?? "my_amby_bot",
+		TELEGRAM_BOT_USERNAME: bindings.TELEGRAM_BOT_USERNAME ?? DEFAULT_TELEGRAM_BOT_USERNAME,
 		TELEGRAM_WEBHOOK_SECRET: bindings.TELEGRAM_WEBHOOK_SECRET ?? "",
 		COMPOSIO_API_KEY: bindings.COMPOSIO_API_KEY ?? "",
 		COMPOSIO_WEBHOOK_SECRET: bindings.COMPOSIO_WEBHOOK_SECRET ?? "",
