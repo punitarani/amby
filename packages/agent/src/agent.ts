@@ -56,7 +56,7 @@ type TraceData = {
 	toolResults?: Array<{ toolCallId: string; toolName: string; output: unknown }>
 }
 
-function extractTraceData(
+export function extractTraceData(
 	steps: ReadonlyArray<{
 		toolCalls: ReadonlyArray<{ toolCallId: string; toolName: string; input: unknown }>
 		toolResults: ReadonlyArray<{
@@ -86,12 +86,15 @@ function extractTraceData(
 	}
 }
 
-function summarizeToolOutput(output: unknown): unknown {
+export function summarizeToolOutput(output: unknown): unknown {
 	if (typeof output === "object" && output !== null && "summary" in output) {
 		return output
 	}
 	if (typeof output === "string") {
-		return output.length > 500 ? `${output.slice(0, 500)}…` : output
+		if (output.length <= 500) return output
+		const cutPoint = output.lastIndexOf(" ", 500)
+		const safePoint = cutPoint > 400 ? cutPoint : 500
+		return `${output.slice(0, safePoint)}…`
 	}
 	return output
 }
@@ -106,7 +109,7 @@ function buildThreadMeta(threadCtx: ResolveThreadResult) {
 	}
 }
 
-function formatToolAnnotation(toolResults: unknown[]): string {
+export function formatToolAnnotation(toolResults: unknown[]): string {
 	if (toolResults.length === 0) return ""
 	const parts = toolResults.map((tr: unknown) => {
 		const item = tr as { toolName?: string; output?: unknown }
@@ -120,7 +123,7 @@ function formatToolAnnotation(toolResults: unknown[]): string {
 	return `[Tools used: ${parts.join("; ")}]`
 }
 
-function buildReplayMessages(
+export function buildReplayMessages(
 	rows: Array<{
 		role: string
 		content: string
@@ -151,7 +154,7 @@ function buildReplayMessages(
 	})
 }
 
-function formatArtifactRecap(
+export function formatArtifactRecap(
 	rows: ReadonlyArray<{ toolResults: unknown; content: string }>,
 	threadLabel: string | null,
 ): string {
@@ -453,6 +456,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							? `${systemPromptWithMemory}\n\n${extraBlocks}`
 							: systemPromptWithMemory
 
+					// extraBlocks is a pre-joined string of thread context sections (empty string filtered by .filter(Boolean))
 					const sharedPromptContext = [
 						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
 						extraBlocks,

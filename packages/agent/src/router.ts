@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, lte, or, schema, sql } from "@amby/db"
+import { and, asc, desc, eq, inArray, isNull, lte, or, schema, sql } from "@amby/db"
 import type { LanguageModel } from "ai"
 import { generateObject, generateText } from "ai"
 import { Effect } from "effect"
@@ -11,11 +11,22 @@ const STALE_ARCHIVE_MS = 24 * 60 * 60 * 1000
 const OPEN_THREADS_CAP = 10
 const TAIL_BUDGET = 20
 const ARCHIVE_THROTTLE_MS = 5 * 60 * 1000
+const ARCHIVE_MAP_CAP = 100
 
 const _archiveLastCheck = new Map<string, number>()
 
 export type RouteAction = "continue" | "switch" | "new"
 
+/**
+ * Confidence values are trace-only metadata for observability — they are NOT
+ * used for downstream logic (e.g. fallback routing, threshold gating).
+ *
+ * - 0.85 — heuristic continue (short time gap)
+ * - 0.80 — heuristic switch (label substring match)
+ * - 0.72 — model-routed switch
+ * - 0.70 — model-routed new thread
+ * - 0.65 — model-routed continue (default fallback)
+ */
 export type RouteDecision = {
 	action: RouteAction
 	threadId: string
@@ -100,6 +111,7 @@ export async function routeWithModel(
 	})
 
 	if (object.action === "new") {
+		// Pre-generate UUID so caller can reference immediately; insert uses this as explicit PK
 		return {
 			action: "new",
 			threadId: crypto.randomUUID(),
@@ -164,16 +176,47 @@ export function archiveStaleThreads(
 				),
 		)
 
+		const needsSynopsis = stale.filter((r) => !r.synopsis?.trim())
+		const SYNOPSIS_BATCH_CAP = 3
+
+		// Batch-fetch messages for all threads needing synopsis in one query
+		const threadIds = needsSynopsis.map((r) => r.id)
+		const allMsgs =
+			threadIds.length > 0
+				? yield* query((d) =>
+						d
+							.select({
+								threadId: schema.messages.threadId,
+								role: schema.messages.role,
+								content: schema.messages.content,
+								createdAt: schema.messages.createdAt,
+							})
+							.from(schema.messages)
+							.where(
+								and(
+									eq(schema.messages.conversationId, conversationId),
+									inArray(schema.messages.threadId, threadIds),
+								),
+							)
+							.orderBy(desc(schema.messages.createdAt)),
+					)
+				: []
+
+		// Group by threadId, take last TAIL_BUDGET per thread
+		const msgsByThread = new Map<string, typeof allMsgs>()
+		for (const msg of allMsgs) {
+			if (!msg.threadId) continue
+			const existing = msgsByThread.get(msg.threadId) ?? []
+			if (existing.length < TAIL_BUDGET) {
+				existing.push(msg)
+				msgsByThread.set(msg.threadId, existing)
+			}
+		}
+
+		let synopsisCount = 0
 		for (const row of stale) {
-			if (!row.synopsis?.trim()) {
-				const msgs = yield* query((d) =>
-					d
-						.select({ role: schema.messages.role, content: schema.messages.content })
-						.from(schema.messages)
-						.where(messageThreadFilter(conversationId, row.id, defaultThreadId))
-						.orderBy(desc(schema.messages.createdAt))
-						.limit(TAIL_BUDGET),
-				)
+			if (!row.synopsis?.trim() && synopsisCount < SYNOPSIS_BATCH_CAP) {
+				const msgs = msgsByThread.get(row.id) ?? []
 				const lines = msgs
 					.reverse()
 					.map((m) => `${m.role}: ${m.content}`)
@@ -190,6 +233,7 @@ export function archiveStaleThreads(
 							.set({ synopsis, status: "archived" })
 							.where(eq(schema.conversationThreads.id, row.id)),
 					)
+					synopsisCount++
 					continue
 				}
 			}
@@ -201,6 +245,10 @@ export function archiveStaleThreads(
 			)
 		}
 
+		if (_archiveLastCheck.size >= ARCHIVE_MAP_CAP) {
+			const oldestKey = _archiveLastCheck.keys().next().value
+			if (oldestKey !== undefined) _archiveLastCheck.delete(oldestKey)
+		}
 		_archiveLastCheck.set(conversationId, Date.now())
 	}).pipe(
 		Effect.mapError((e) =>
@@ -282,24 +330,40 @@ export function resolveThread(
 
 		yield* archiveStaleThreads(query, conversationId, defaultThreadId, model)
 
-		const openThreadRows = yield* query((d) =>
-			d
-				.select({
-					id: schema.conversationThreads.id,
-					label: schema.conversationThreads.label,
-					synopsis: schema.conversationThreads.synopsis,
-					status: schema.conversationThreads.status,
-					lastActiveAt: schema.conversationThreads.lastActiveAt,
-				})
-				.from(schema.conversationThreads)
-				.where(
-					and(
-						eq(schema.conversationThreads.conversationId, conversationId),
-						eq(schema.conversationThreads.status, "open"),
-					),
-				)
-				.orderBy(desc(schema.conversationThreads.lastActiveAt))
-				.limit(OPEN_THREADS_CAP),
+		const [openThreadRows, lastMsg] = yield* Effect.all(
+			[
+				query((d) =>
+					d
+						.select({
+							id: schema.conversationThreads.id,
+							label: schema.conversationThreads.label,
+							synopsis: schema.conversationThreads.synopsis,
+							status: schema.conversationThreads.status,
+							lastActiveAt: schema.conversationThreads.lastActiveAt,
+						})
+						.from(schema.conversationThreads)
+						.where(
+							and(
+								eq(schema.conversationThreads.conversationId, conversationId),
+								eq(schema.conversationThreads.status, "open"),
+							),
+						)
+						.orderBy(desc(schema.conversationThreads.lastActiveAt))
+						.limit(OPEN_THREADS_CAP),
+				),
+				query((d) =>
+					d
+						.select({
+							threadId: schema.messages.threadId,
+							createdAt: schema.messages.createdAt,
+						})
+						.from(schema.messages)
+						.where(eq(schema.messages.conversationId, conversationId))
+						.orderBy(desc(schema.messages.createdAt))
+						.limit(1),
+				),
+			],
+			{ concurrency: 2 },
 		)
 
 		const openThreads: OpenThreadRow[] = openThreadRows.map((r) => ({
@@ -309,18 +373,6 @@ export function resolveThread(
 			status: r.status,
 			lastActiveAt: r.lastActiveAt,
 		}))
-
-		const lastMsg = yield* query((d) =>
-			d
-				.select({
-					threadId: schema.messages.threadId,
-					createdAt: schema.messages.createdAt,
-				})
-				.from(schema.messages)
-				.where(eq(schema.messages.conversationId, conversationId))
-				.orderBy(desc(schema.messages.createdAt))
-				.limit(1),
-		)
 
 		const lastRow = lastMsg[0]
 		const lastMessageAt = lastRow?.createdAt ?? new Date()
@@ -337,17 +389,6 @@ export function resolveThread(
 
 		let resolvedThreadId = decision.threadId
 		const now = new Date()
-
-		const metaBefore = yield* query((d) =>
-			d
-				.select({ lastActiveAt: schema.conversationThreads.lastActiveAt })
-				.from(schema.conversationThreads)
-				.where(eq(schema.conversationThreads.id, resolvedThreadId))
-				.limit(1),
-		)
-		const threadWasDormant = metaBefore[0]
-			? now.getTime() - metaBefore[0].lastActiveAt.getTime() > DORMANT_MS
-			: false
 
 		if (decision.action === "new") {
 			const rows = yield* query((d) =>
@@ -367,26 +408,34 @@ export function resolveThread(
 				return yield* Effect.fail(new AgentError({ message: "Failed to insert new thread" }))
 			}
 			resolvedThreadId = row.id
-		} else {
-			const existing = yield* query((d) =>
-				d
-					.select({
-						id: schema.conversationThreads.id,
-						status: schema.conversationThreads.status,
-					})
-					.from(schema.conversationThreads)
-					.where(eq(schema.conversationThreads.id, resolvedThreadId))
-					.limit(1),
-			)
-			const row = existing[0]
-			if (row?.status === "archived") {
+		}
+
+		// Single query to get thread metadata (status + lastActiveAt) for dormancy check and update
+		const threadMeta = yield* query((d) =>
+			d
+				.select({
+					id: schema.conversationThreads.id,
+					status: schema.conversationThreads.status,
+					lastActiveAt: schema.conversationThreads.lastActiveAt,
+				})
+				.from(schema.conversationThreads)
+				.where(eq(schema.conversationThreads.id, resolvedThreadId))
+				.limit(1),
+		)
+		const metaRow = threadMeta[0]
+		const threadWasDormant = metaRow
+			? now.getTime() - metaRow.lastActiveAt.getTime() > DORMANT_MS
+			: false
+
+		if (decision.action !== "new" && metaRow) {
+			if (metaRow.status === "archived") {
 				yield* query((d) =>
 					d
 						.update(schema.conversationThreads)
 						.set({ status: "open", lastActiveAt: now })
 						.where(eq(schema.conversationThreads.id, resolvedThreadId)),
 				)
-			} else if (row) {
+			} else {
 				yield* query((d) =>
 					d
 						.update(schema.conversationThreads)
