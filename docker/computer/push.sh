@@ -1,31 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE_NAME="amby-computer"
-VERSION="${1:-0.1.0}"
-TAG="${IMAGE_NAME}:${VERSION}"
+DOCKER_REPO="punitarani/amby"
+IMAGE_TAG="computer"
+VERSION="${1:?Usage: $0 <version> (e.g. 0.1.0)}"
+
+TAGS=("${DOCKER_REPO}:${IMAGE_TAG}" "${DOCKER_REPO}:${IMAGE_TAG}-${VERSION}")
 
 # Verify image exists locally
-if ! docker image inspect "${TAG}" >/dev/null 2>&1; then
-	echo "Error: Image ${TAG} not found locally."
-	echo "Run ./docker/computer/build.sh ${VERSION} first."
+if ! docker image inspect "${TAGS[0]}" >/dev/null 2>&1; then
+	echo "Error: Image ${TAGS[0]} not found locally."
+	echo "Run 'bun run computer:docker:build' first."
 	exit 1
 fi
 
-# Verify daytona CLI is available and logged in
-if ! command -v daytona >/dev/null 2>&1; then
-	echo "Error: daytona CLI not found. Install it from https://app.daytona.io"
-	exit 1
-fi
-
-echo "Pushing ${TAG} to Daytona..."
-daytona snapshot push "${TAG}" \
-	--name "${TAG}" \
-	--cpu 2 \
-	--memory 4 \
-	--disk 5 \
-	--entrypoint "sleep infinity"
+echo "Pushing to Docker Hub..."
+for tag in "${TAGS[@]}"; do
+	echo "  Pushing ${tag}..."
+	docker push "${tag}"
+done
 
 echo ""
-echo "Snapshot pushed: ${TAG}"
-echo "Use snapshot: '${TAG}' in sandbox creation."
+echo "Pushed: ${TAGS[*]}"

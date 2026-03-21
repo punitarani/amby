@@ -8,7 +8,7 @@
 NODE_ENV
 
 # API URLs
-API_URL=
+API_URL
 APP_URL
 
 # Database

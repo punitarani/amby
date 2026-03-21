@@ -145,7 +145,7 @@ export const makeAgentServiceLive = (userId: string) =>
 
 					const memoryTools = createMemoryTools(memory, userId)
 					const sandboxTools = sandbox.enabled
-						? createSandboxDelegationTools(taskSupervisor, userId)
+						? createSandboxDelegationTools(taskSupervisor, userId, conversationId)
 						: undefined
 					const codexAuthTools = sandbox.enabled
 						? createCodexAuthTools(taskSupervisor, userId)

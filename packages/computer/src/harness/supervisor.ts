@@ -1,5 +1,7 @@
+import { getTelegramChatId } from "@amby/connectors"
 import type { TaskStatus } from "@amby/db"
-import { and, DbService, eq, inArray, schema } from "@amby/db"
+import { and, DbService, eq, inArray, lte, notInArray, schema } from "@amby/db"
+import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
 import {
@@ -11,6 +13,7 @@ import {
 	MAX_HEARTBEAT_FAILURES,
 	MAX_WAIT_SECONDS,
 	POLL_INTERVAL_MS,
+	PREPARING_TIMEOUT_MS,
 	taskSessionId,
 } from "../config"
 import { SandboxError, sandboxErrorFromDefect } from "../errors"
@@ -26,12 +29,13 @@ import {
 	setCodexPendingDeviceAuth,
 	summarizeCodexAuth,
 } from "./auth-state"
+import { mintCallbackSecret } from "./callback"
 import { CodexInstaller } from "./codex-installer"
 import { CodexProvider } from "./codex-provider"
+import { probeSingleTask } from "./reconciliation"
+import { isTerminal, TERMINAL_STATUSES } from "./task-state"
 
 type TaskRecord = typeof schema.tasks.$inferSelect
-
-const TERMINAL_STATUSES: TaskStatus[] = ["succeeded", "failed", "cancelled", "timed_out", "lost"]
 const CODEX_AUTH_FILE = `${CODEX_HOME}/auth.json`
 const CODEX_AUTH_LOG = `${CODEX_HOME}/login.out`
 const CODEX_CONFIG_FILE = `${CODEX_HOME}/config.toml`
@@ -49,6 +53,8 @@ interface ActiveTask {
 	startedAt: number
 	timeoutSeconds: number
 	consecutiveFailures: number
+	/** When set, lifecycle events arrive via callbacks; skip Daytona polling in heartbeat. */
+	hasCallbacks: boolean
 }
 
 const stripAnsi = (value: string) => value.replace(ANSI_RE, "")
@@ -159,7 +165,19 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 			userId: string
 			prompt: string
 			needsBrowser: boolean
+			conversationId?: string
 		}) => Effect.Effect<{ taskId: string; status: string }, SandboxError>
+		readonly probeTask: (
+			taskId: string,
+			userId: string,
+		) => Effect.Effect<TaskRecord | null, SandboxError>
+		readonly getTaskArtifacts: (
+			taskId: string,
+			userId: string,
+		) => Effect.Effect<
+			{ files: { name: string; size: number }[]; resultPreview?: string } | null,
+			SandboxError
+		>
 		readonly getTask: (
 			taskId: string,
 			userId: string,
@@ -173,6 +191,7 @@ export const TaskSupervisorLive = Layer.scoped(
 	TaskSupervisor,
 	Effect.gen(function* () {
 		const sandboxService = yield* SandboxService
+		const env = yield* EnvService
 		const { db, query } = yield* DbService
 
 		const installer = new CodexInstaller()
@@ -314,11 +333,21 @@ export const TaskSupervisorLive = Layer.scoped(
 			for (const task of [...activeTasks.values()]) {
 				try {
 					await task.sandbox.refreshActivity()
+
+					if (task.hasCallbacks) {
+						const elapsed = (Date.now() - task.startedAt) / 1000
+						if (elapsed > task.timeoutSeconds) {
+							await timeoutTask(task)
+						}
+						continue
+					}
+
 					const cmd = await task.sandbox.process.getSessionCommand(task.sessionId, task.commandId)
 
+					const hbNow = new Date()
 					await db
 						.update(schema.tasks)
-						.set({ heartbeatAt: new Date(), updatedAt: new Date() })
+						.set({ heartbeatAt: hbNow, updatedAt: hbNow })
 						.where(eq(schema.tasks.id, task.taskId))
 
 					task.consecutiveFailures = 0
@@ -343,7 +372,12 @@ export const TaskSupervisorLive = Layer.scoped(
 						await db
 							.update(schema.tasks)
 							.set({ status: "lost", updatedAt: new Date() })
-							.where(eq(schema.tasks.id, task.taskId))
+							.where(
+								and(
+									eq(schema.tasks.id, task.taskId),
+									notInArray(schema.tasks.status, TERMINAL_STATUSES),
+								),
+							)
 						activeTasks.delete(task.taskId)
 					}
 				}
@@ -352,6 +386,18 @@ export const TaskSupervisorLive = Layer.scoped(
 
 		async function finalizeTask(task: ActiveTask, exitCode: number) {
 			if (!activeTasks.has(task.taskId)) return
+
+			const rows = await db
+				.select({ status: schema.tasks.status })
+				.from(schema.tasks)
+				.where(eq(schema.tasks.id, task.taskId))
+				.limit(1)
+			const current = rows[0]?.status as TaskStatus | undefined
+			if (current && isTerminal(current)) {
+				await deletePendingSession(task.sandbox, task.sessionId)
+				activeTasks.delete(task.taskId)
+				return
+			}
 
 			let result = { output: "", summary: "Task completed" }
 			try {
@@ -368,8 +414,11 @@ export const TaskSupervisorLive = Layer.scoped(
 					exitCode,
 					completedAt: new Date(),
 					updatedAt: new Date(),
+					callbackSecretHash: null,
 				})
-				.where(eq(schema.tasks.id, task.taskId))
+				.where(
+					and(eq(schema.tasks.id, task.taskId), notInArray(schema.tasks.status, TERMINAL_STATUSES)),
+				)
 
 			await deletePendingSession(task.sandbox, task.sessionId)
 			activeTasks.delete(task.taskId)
@@ -378,14 +427,17 @@ export const TaskSupervisorLive = Layer.scoped(
 		async function timeoutTask(task: ActiveTask) {
 			await deletePendingSession(task.sandbox, task.sessionId)
 
+			const toNow = new Date()
 			await db
 				.update(schema.tasks)
 				.set({
 					status: "timed_out",
-					completedAt: new Date(),
-					updatedAt: new Date(),
+					completedAt: toNow,
+					updatedAt: toNow,
 				})
-				.where(eq(schema.tasks.id, task.taskId))
+				.where(
+					and(eq(schema.tasks.id, task.taskId), notInArray(schema.tasks.status, TERMINAL_STATUSES)),
+				)
 
 			activeTasks.delete(task.taskId)
 		}
@@ -397,6 +449,44 @@ export const TaskSupervisorLive = Layer.scoped(
 			} catch (err) {
 				console.error("[TaskSupervisor] recovery: failed to query running tasks:", err)
 				return
+			}
+
+			const preparingStaleBefore = new Date(Date.now() - PREPARING_TIMEOUT_MS)
+			try {
+				const lpNow = new Date()
+				const lostPreparing = await db
+					.update(schema.tasks)
+					.set({
+						status: "lost",
+						error: "Task did not start in time.",
+						completedAt: lpNow,
+						updatedAt: lpNow,
+					})
+					.where(
+						and(
+							eq(schema.tasks.status, "preparing"),
+							lte(schema.tasks.createdAt, preparingStaleBefore),
+						),
+					)
+					.returning({ id: schema.tasks.id })
+				for (const row of lostPreparing) {
+					const eventId = crypto.randomUUID()
+					try {
+						await db.insert(schema.taskEvents).values({
+							taskId: row.id,
+							eventId,
+							source: "server",
+							eventType: "task.lost",
+							seq: null,
+							payload: { reason: "preparing_timeout" },
+							occurredAt: new Date(),
+						})
+					} catch (e) {
+						console.error(`[TaskSupervisor] recovery: failed to insert task.lost for ${row.id}:`, e)
+					}
+				}
+			} catch (e) {
+				console.error("[TaskSupervisor] recovery: failed to mark stale preparing tasks:", e)
 			}
 
 			for (const task of running) {
@@ -420,6 +510,7 @@ export const TaskSupervisorLive = Layer.scoped(
 						startedAt: task.startedAt?.getTime() ?? Date.now(),
 						timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
 						consecutiveFailures: 0,
+						hasCallbacks: Boolean(task.callbackSecretHash),
 					})
 				} catch {
 					await db
@@ -604,7 +695,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					})
 				}),
 
-			startTask: ({ userId, prompt, needsBrowser }) =>
+			startTask: ({ userId, prompt, needsBrowser, conversationId }) =>
 				Effect.gen(function* () {
 					const sandbox = yield* sandboxService.ensure(userId)
 
@@ -657,6 +748,65 @@ export const TaskSupervisorLive = Layer.scoped(
 						)
 					}
 
+					const creds = yield* Effect.tryPromise({
+						try: () => mintCallbackSecret(),
+						catch: (cause) =>
+							new SandboxError({
+								message: `Failed to mint callback credentials: ${cause instanceof Error ? cause.message : String(cause)}`,
+								cause,
+							}),
+					})
+
+					const callbackId = crypto.randomUUID()
+					const apiBase = env.API_URL.replace(/\/$/, "")
+					const callbackUrl = `${apiBase}/internal/task-events`
+
+					let channelType: string | undefined
+					let replyTarget: Record<string, unknown> | undefined
+
+					if (conversationId) {
+						const convRows = yield* query((d) =>
+							d
+								.select({ channelType: schema.conversations.channelType })
+								.from(schema.conversations)
+								.where(eq(schema.conversations.id, conversationId))
+								.limit(1),
+						).pipe(
+							Effect.mapError(
+								(error) =>
+									new SandboxError({
+										message: `Failed to load conversation: ${error instanceof Error ? error.message : String(error)}`,
+										cause: error,
+									}),
+							),
+						)
+						channelType = convRows[0]?.channelType
+						if (channelType === "telegram") {
+							const accRows = yield* query((d) =>
+								d
+									.select({ metadata: schema.accounts.metadata })
+									.from(schema.accounts)
+									.where(
+										and(
+											eq(schema.accounts.userId, userId),
+											eq(schema.accounts.providerId, "telegram"),
+										),
+									)
+									.limit(1),
+							).pipe(
+								Effect.mapError(
+									(error) =>
+										new SandboxError({
+											message: `Failed to load Telegram account: ${error instanceof Error ? error.message : String(error)}`,
+											cause: error,
+										}),
+								),
+							)
+							const chatId = getTelegramChatId(accRows[0]?.metadata)
+							if (chatId !== undefined) replyTarget = { channel: "telegram" as const, chatId }
+						}
+					}
+
 					const rows = yield* query((d) =>
 						d
 							.insert(schema.tasks)
@@ -668,6 +818,12 @@ export const TaskSupervisorLive = Layer.scoped(
 								prompt,
 								needsBrowser: needsBrowser ? "true" : "false",
 								sandboxId: sandbox.id,
+								conversationId,
+								channelType,
+								replyTarget,
+								callbackId,
+								callbackSecretHash: creds.hash,
+								lastEventSeq: 0,
 							})
 							.returning({ id: schema.tasks.id }),
 					).pipe(
@@ -685,6 +841,27 @@ export const TaskSupervisorLive = Layer.scoped(
 						return yield* Effect.fail(new SandboxError({ message: "Failed to insert task record" }))
 					}
 
+					const createdEventId = crypto.randomUUID()
+					yield* query((d) =>
+						d.insert(schema.taskEvents).values({
+							taskId,
+							eventId: createdEventId,
+							source: "server",
+							eventType: "task.created",
+							seq: 0,
+							payload: { conversationId: conversationId ?? null },
+							occurredAt: new Date(),
+						}),
+					).pipe(
+						Effect.mapError(
+							(error) =>
+								new SandboxError({
+									message: `Failed to record task.created: ${error instanceof Error ? error.message : String(error)}`,
+									cause: error,
+								}),
+						),
+					)
+
 					// Wrap post-insert steps so failures mark the task as failed and clean up
 					let sessionId: string | undefined
 					const launchResult = yield* Effect.tryPromise({
@@ -696,6 +873,10 @@ export const TaskSupervisorLive = Layer.scoped(
 									authMode,
 									needsBrowser,
 									timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
+									conversationId: conversationId,
+									callbackUrl,
+									callbackId,
+									callbackSecret: creds.raw,
 								})
 
 								sessionId = taskSessionId(taskId)
@@ -728,18 +909,20 @@ export const TaskSupervisorLive = Layer.scoped(
 									startedAt: now.getTime(),
 									timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
 									consecutiveFailures: 0,
+									hasCallbacks: true,
 								})
 
 								return { taskId, status: "running" as const }
 							} catch (cause) {
 								// Roll back: mark as failed and clean up the session
+								const failNow = new Date()
 								await db
 									.update(schema.tasks)
 									.set({
 										status: "failed",
 										error: cause instanceof Error ? cause.message : String(cause),
-										completedAt: new Date(),
-										updatedAt: new Date(),
+										completedAt: failNow,
+										updatedAt: failNow,
 									})
 									.where(eq(schema.tasks.id, taskId))
 								await deletePendingSession(sandbox, sessionId)
@@ -774,7 +957,7 @@ export const TaskSupervisorLive = Layer.scoped(
 								while (Date.now() < deadline) {
 									const t = await fetchTask()
 									if (!t) return null
-									if (TERMINAL_STATUSES.includes(t.status as TaskStatus)) return t
+									if (isTerminal(t.status as TaskStatus)) return t
 									await wait(POLL_INTERVAL_MS)
 								}
 								return await fetchTask()
@@ -833,6 +1016,7 @@ export const TaskSupervisorLive = Layer.scoped(
 												startedAt,
 												timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
 												consecutiveFailures: 0,
+												hasCallbacks: Boolean(taskRef.callbackSecretHash),
 											},
 											cmd.exitCode,
 										)
@@ -847,6 +1031,7 @@ export const TaskSupervisorLive = Layer.scoped(
 										startedAt,
 										timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
 										consecutiveFailures: 0,
+										hasCallbacks: Boolean(taskRef.callbackSecretHash),
 									})
 									return taskRef
 								},
@@ -856,6 +1041,95 @@ export const TaskSupervisorLive = Layer.scoped(
 					}
 
 					return task
+				}),
+
+			probeTask: (taskId, userId) =>
+				Effect.gen(function* () {
+					const taskRows = yield* query((d) =>
+						d
+							.select()
+							.from(schema.tasks)
+							.where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
+							.limit(1),
+					).pipe(
+						Effect.mapError(
+							(error) =>
+								new SandboxError({
+									message: `probe_task: ${error instanceof Error ? error.message : String(error)}`,
+									cause: error,
+								}),
+						),
+					)
+					const task = taskRows[0]
+					if (!task) return null
+					const sandbox = yield* sandboxService.ensure(userId)
+					yield* Effect.tryPromise({
+						try: () =>
+							probeSingleTask(
+								{
+									db,
+									ensureSandbox: async (uid) => {
+										if (uid !== userId) throw new Error("User mismatch")
+										return sandbox
+									},
+									isDev: env.NODE_ENV !== "production",
+								},
+								task,
+							),
+						catch: sandboxErrorFromDefect,
+					})
+					const updated = yield* query((d) =>
+						d.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1),
+					).pipe(
+						Effect.mapError(
+							(error) =>
+								new SandboxError({
+									message: `probe_task reload: ${error instanceof Error ? error.message : String(error)}`,
+									cause: error,
+								}),
+						),
+					)
+					return updated[0] ?? null
+				}),
+
+			getTaskArtifacts: (taskId, userId) =>
+				Effect.gen(function* () {
+					const taskRows = yield* query((d) =>
+						d
+							.select()
+							.from(schema.tasks)
+							.where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
+							.limit(1),
+					).pipe(
+						Effect.mapError(
+							(error) =>
+								new SandboxError({
+									message: `get_task_artifacts: ${error instanceof Error ? error.message : String(error)}`,
+									cause: error,
+								}),
+						),
+					)
+					const task = taskRows[0]
+					if (!task) return null
+					const root = task.artifactRoot ?? provider.getArtifactRoot(taskId)
+					const sandbox = yield* sandboxService.ensure(userId)
+					const listed = yield* sandboxService.exec(
+						sandbox,
+						`find "${root}" -maxdepth 1 -type f -printf "%f\\t%s\\n" 2>/dev/null || true`,
+					)
+					const files: { name: string; size: number }[] = []
+					for (const line of listed.stdout.split("\n")) {
+						if (!line.includes("\t")) continue
+						const [name, sizeStr] = line.split("\t")
+						if (!name) continue
+						const size = Number(sizeStr)
+						if (Number.isFinite(size)) files.push({ name, size })
+					}
+					const resultPreview = yield* sandboxService.readFile(sandbox, `${root}/result.md`).pipe(
+						Effect.map((c) => c.slice(0, 2000)),
+						Effect.catchAll(() => Effect.succeed(undefined as string | undefined)),
+					)
+					return { files, resultPreview }
 				}),
 
 			shutdown: () =>

@@ -4,8 +4,9 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(dirname "$0")"
-OUTFILE="$SCRIPT_DIR/../apps/api/.dev.vars"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+OUTFILE="$REPO_ROOT/apps/api/.dev.vars"
 KEYS_FILE="$SCRIPT_DIR/worker-env-keys.txt"
 
 # Read keys from shared list, skipping comments and blank lines
