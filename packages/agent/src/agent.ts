@@ -13,8 +13,9 @@ import { stepCountIs, ToolLoopAgent, type ToolSet } from "ai"
 import { Context, Effect, Layer } from "effect"
 import { AgentError } from "./errors"
 import {
-	buildSharedTraceMetadata,
-	createOrchestratorTraceMetadata,
+	type AgentConfig,
+	type AgentTraceMetadata,
+	buildRequestTraceMetadata,
 	createTelemetrySettings,
 	initializeTelemetry,
 	shutdownTelemetry,
@@ -28,15 +29,11 @@ export type StreamPart =
 	| { type: "tool-result"; toolName: string; result: unknown }
 
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
-import { SUBAGENT_DEFS } from "./subagents/definitions"
 import { createSubagentTools } from "./subagents/spawner"
-import { buildToolGroups, type ToolGroups } from "./subagents/tool-groups"
+import { buildToolGroups } from "./subagents/tool-groups"
 import { createCodexAuthTools } from "./tools/codex-auth"
 import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
-
-const getDelegationToolCount = (toolGroups: ToolGroups) =>
-	SUBAGENT_DEFS.filter((def) => def.name !== "computer" || toolGroups.cua).length
 
 export class AgentService extends Context.Tag("AgentService")<
 	AgentService,
@@ -75,12 +72,16 @@ export const makeAgentServiceLive = (userId: string) =>
 			const sandbox = yield* SandboxService
 			const taskSupervisor = yield* TaskSupervisor
 			const env = yield* EnvService
-			const enableCua = env.ENABLE_CUA
 			initializeTelemetry({
 				apiKey: env.BRAINTRUST_API_KEY,
 				projectId: env.BRAINTRUST_PROJECT_ID,
 			})
 			const baseModel = models.getModel()
+			const agentConfig: AgentConfig = {
+				userId,
+				modelId: models.defaultModelId,
+				cuaEnabled: env.ENABLE_CUA,
+			}
 
 			const computer = createComputerTools(sandbox, userId)
 
@@ -161,12 +162,12 @@ export const makeAgentServiceLive = (userId: string) =>
 					const codexAuthTools = sandbox.enabled
 						? createCodexAuthTools(taskSupervisor, userId)
 						: undefined
-					const cuaTools = enableCua
+					const cuaTools = agentConfig.cuaEnabled
 						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 						: undefined
 					const toolGroups = buildToolGroups(memoryTools, computer.tools, cuaTools)
 
-					const basePrompt = enableCua
+					const basePrompt = agentConfig.cuaEnabled
 						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
 						: buildSystemPrompt(formatted, userTimezone)
 					const systemPrompt = memoryContext
@@ -196,7 +197,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				systemPrompt: string,
 				tools: ToolSet,
 				functionId: "amby.orchestrator.generate" | "amby.orchestrator.stream",
-				conversationTraceMetadata: ReturnType<typeof createOrchestratorTraceMetadata>,
+				conversationTraceMetadata: AgentTraceMetadata,
 			) =>
 				new ToolLoopAgent({
 					id: "orchestrator",
@@ -236,30 +237,31 @@ export const makeAgentServiceLive = (userId: string) =>
 					Effect.gen(function* () {
 						const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
 							yield* prepareContext(conversationId, onReply)
-						const delegationToolCount = getDelegationToolCount(toolGroups)
-						const sharedTraceMetadata = buildSharedTraceMetadata({
+						const requestTraceMetadata = buildRequestTraceMetadata({
 							conversationId,
 							requestMode: mode,
-							historyLength: history.length,
-							toolCount: Object.keys(tools).length + delegationToolCount,
-							replyToolEnabled: Boolean(onReply),
-							messageCount: requestMessages.length,
 							requestMetadata: metadata,
-							userId,
-							modelId: models.defaultModelId,
-							cuaEnabled: enableCua,
 						})
 						const delegationTools = createSubagentTools(
 							baseModel,
 							toolGroups,
 							sharedPromptContext,
-							sharedTraceMetadata,
+							agentConfig,
+							requestTraceMetadata,
 						)
+						const orchestratorMetadata: AgentTraceMetadata = {
+							...requestTraceMetadata,
+							user_id: agentConfig.userId,
+							model_id: agentConfig.modelId,
+							cua_enabled: agentConfig.cuaEnabled,
+							agent_role: "orchestrator",
+							agent_name: "orchestrator",
+						}
 						const agent = createOrchestrator(
 							systemPrompt,
 							{ ...delegationTools, ...tools } as ToolSet,
 							"amby.orchestrator.generate",
-							createOrchestratorTraceMetadata(sharedTraceMetadata),
+							orchestratorMetadata,
 						)
 
 						const result = yield* Effect.tryPromise({
@@ -336,29 +338,30 @@ export const makeAgentServiceLive = (userId: string) =>
 						Effect.gen(function* () {
 							const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
 								yield* prepareContext(conversationId)
-							const delegationToolCount = getDelegationToolCount(toolGroups)
-							const sharedTraceMetadata = buildSharedTraceMetadata({
+							const requestTraceMetadata = buildRequestTraceMetadata({
 								conversationId,
 								requestMode: "stream-message",
-								historyLength: history.length,
-								toolCount: Object.keys(tools).length + delegationToolCount,
-								replyToolEnabled: false,
-								messageCount: 1,
-								userId,
-								modelId: models.defaultModelId,
-								cuaEnabled: enableCua,
 							})
 							const delegationTools = createSubagentTools(
 								baseModel,
 								toolGroups,
 								sharedPromptContext,
-								sharedTraceMetadata,
+								agentConfig,
+								requestTraceMetadata,
 							)
+							const orchestratorMetadata: AgentTraceMetadata = {
+								...requestTraceMetadata,
+								user_id: agentConfig.userId,
+								model_id: agentConfig.modelId,
+								cua_enabled: agentConfig.cuaEnabled,
+								agent_role: "orchestrator",
+								agent_name: "orchestrator",
+							}
 							const agent = createOrchestrator(
 								systemPrompt,
 								{ ...delegationTools, ...tools } as ToolSet,
 								"amby.orchestrator.stream",
-								createOrchestratorTraceMetadata(sharedTraceMetadata),
+								orchestratorMetadata,
 							)
 
 							const result = yield* Effect.tryPromise({
