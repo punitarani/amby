@@ -8,6 +8,7 @@ export function buildToolGroups(
 	memoryTools: ReturnType<typeof createMemoryTools>,
 	computerTools: ReturnType<typeof createComputerTools>["tools"],
 	cuaTools?: ReturnType<typeof createCuaTools>["tools"],
+	integrationTools?: ToolSet,
 ): ToolGroups {
 	const { execute_command, read_file, write_file } = computerTools
 
@@ -22,6 +23,10 @@ export function buildToolGroups(
 
 	if (cuaTools) {
 		groups.cua = cuaTools as ToolSet
+	}
+
+	if (integrationTools && Object.keys(integrationTools).length > 0) {
+		groups.integration = integrationTools
 	}
 
 	return groups

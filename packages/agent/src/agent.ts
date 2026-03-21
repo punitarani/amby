@@ -223,7 +223,32 @@ export const makeAgentServiceLive = (userId: string) =>
 					const cuaTools = enableCua
 						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 						: undefined
-					const toolGroups = buildToolGroups(memoryTools, computer.tools, cuaTools)
+					const connectorManagementTools = connectors.isEnabled()
+						? createConnectorManagementTools(connectors, userId)
+						: undefined
+					const connectorSessionTools = connectors.isEnabled()
+						? yield* connectors.getAgentTools(userId).pipe(
+								Effect.catchAll((error) =>
+									Effect.sync(() => {
+										console.error("[Agent] Failed to load Composio tools:", error)
+										return undefined
+									}),
+								),
+							)
+						: undefined
+					const integrationTools =
+						connectorManagementTools || connectorSessionTools
+							? ({
+									...(connectorManagementTools ?? {}),
+									...(connectorSessionTools ?? {}),
+								} as ToolSet)
+							: undefined
+					const toolGroups = buildToolGroups(
+						memoryTools,
+						computer.tools,
+						cuaTools,
+						integrationTools,
+					)
 
 					const basePrompt = enableCua
 						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
@@ -239,27 +264,12 @@ export const makeAgentServiceLive = (userId: string) =>
 						.filter(Boolean)
 						.join("\n\n")
 
-					const delegationTools = createSubagentTools(baseModel, toolGroups, sharedContext)
-					const connectorManagementTools = connectors.isEnabled()
-						? createConnectorManagementTools(connectors, userId)
-						: undefined
-					const connectorSessionTools = connectors.isEnabled()
-						? yield* connectors.getAgentTools(userId).pipe(
-								Effect.catchAll((error) =>
-									Effect.sync(() => {
-										console.error("[Agent] Failed to load Composio tools:", error)
-										return undefined
-									}),
-								),
-							)
-						: undefined
+					const delegationTools = createSubagentTools(models.getModel, toolGroups, sharedContext)
 
 					const { search_memories } = memoryTools
 					const tools = {
 						...delegationTools,
 						search_memories,
-						...(connectorManagementTools ?? {}),
-						...(connectorSessionTools ?? {}),
 						...(sandboxTools ?? {}),
 						...(codexAuthTools ?? {}),
 						...createJobTools(db, userId, userTimezone),
@@ -307,8 +317,8 @@ export const makeAgentServiceLive = (userId: string) =>
 					model: baseModel,
 					instructions: systemPrompt,
 					tools,
-					// Connector tools need extra roundtrips (list integrations, initiate OAuth,
-					// verify status) on top of the base agent steps.
+					// Delegation-heavy turns, especially connected-app work, need extra
+					// roundtrips on top of the base agent steps.
 					stopWhen: stepCountIs(14),
 				})
 

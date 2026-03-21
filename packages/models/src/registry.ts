@@ -4,6 +4,7 @@ import type { LanguageModel } from "ai"
 import { Context, Effect, Layer } from "effect"
 
 export const DEFAULT_MODEL_ID = "google/gemini-3.1-flash-lite-preview" as const
+export const HIGH_INTELLIGENCE_MODEL_ID = "z-ai/glm-4.7" as const
 
 export class ModelService extends Context.Tag("ModelService")<
 	ModelService,
