@@ -1,4 +1,5 @@
 import { index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import { conversations } from "./conversations"
 import { users } from "./users"
 
 export type TaskStatus =
@@ -40,6 +41,22 @@ export const tasks = pgTable(
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 		metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+		conversationId: uuid("conversation_id").references(() => conversations.id, {
+			onDelete: "set null",
+		}),
+		channelType: text("channel_type"),
+		replyTarget: jsonb("reply_target").$type<Record<string, unknown>>(),
+		callbackId: uuid("callback_id").defaultRandom(),
+		callbackSecretHash: text("callback_secret_hash"),
+		lastEventSeq: integer("last_event_seq").notNull().default(0),
+		lastEventAt: timestamp("last_event_at", { withTimezone: true }),
+		lastProbeAt: timestamp("last_probe_at", { withTimezone: true }),
+		/** Terminal status value last successfully notified (dedup + crash safety). */
+		notifiedStatus: text("notified_status"),
+		lastNotificationAt: timestamp("last_notification_at", { withTimezone: true }),
 	},
-	(t) => [index("tasks_user_status_idx").on(t.userId, t.status)],
+	(t) => [
+		index("tasks_user_status_idx").on(t.userId, t.status),
+		index("tasks_callback_id_idx").on(t.callbackId),
+	],
 )

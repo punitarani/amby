@@ -86,6 +86,10 @@ name = "sandbox-provision"
 binding = "SANDBOX_WORKFLOW"
 class_name = "SandboxProvisionWorkflow"
 
+# Task reconciliation + Telegram completion notifications
+[triggers]
+crons = ["*/1 * * * *"]
+
 # Local dev
 [dev]
 port = 8787

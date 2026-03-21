@@ -8,6 +8,11 @@ export interface TaskConfig {
 	model?: string
 	timeoutSeconds?: number
 	instructions?: string
+	/** Callback base URL (e.g. https://api.hiamby.com/internal/task-events). Omitted in local dev. */
+	callbackUrl?: string
+	callbackId?: string
+	callbackSecret?: string
+	conversationId?: string
 }
 
 export interface TaskResult {
