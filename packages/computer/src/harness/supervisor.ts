@@ -1,5 +1,6 @@
 import type { TaskStatus } from "@amby/db"
-import { and, DbService, eq, inArray, schema } from "@amby/db"
+import { and, DbService, eq, inArray, lte, schema } from "@amby/db"
+import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
 import {
@@ -14,7 +15,7 @@ import {
 	taskSessionId,
 } from "../config"
 import { SandboxError, sandboxErrorFromDefect } from "../errors"
-import { SandboxService } from "../sandbox/service"
+import { createDaytonaClient, SandboxService } from "../sandbox/service"
 import {
 	asRecord,
 	type CodexAuthCache,
@@ -26,8 +27,10 @@ import {
 	setCodexPendingDeviceAuth,
 	summarizeCodexAuth,
 } from "./auth-state"
+import { mintCallbackSecret } from "./callback"
 import { CodexInstaller } from "./codex-installer"
 import { CodexProvider } from "./codex-provider"
+import { probeTaskForUser } from "./reconciliation"
 
 type TaskRecord = typeof schema.tasks.$inferSelect
 
@@ -165,6 +168,14 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 			userId: string,
 			waitSeconds?: number,
 		) => Effect.Effect<TaskRecord | null, SandboxError>
+		readonly probeTask: (
+			taskId: string,
+			userId: string,
+		) => Effect.Effect<TaskRecord | null, SandboxError>
+		readonly getTaskArtifacts: (
+			taskId: string,
+			userId: string,
+		) => Effect.Effect<{ listing: string; resultPreview?: string } | null, SandboxError>
 		readonly shutdown: () => Effect.Effect<void>
 	}
 >() {}
@@ -173,6 +184,7 @@ export const TaskSupervisorLive = Layer.scoped(
 	TaskSupervisor,
 	Effect.gen(function* () {
 		const sandboxService = yield* SandboxService
+		const env = yield* EnvService
 		const { db, query } = yield* DbService
 
 		const installer = new CodexInstaller()
@@ -314,6 +326,23 @@ export const TaskSupervisorLive = Layer.scoped(
 			for (const task of [...activeTasks.values()]) {
 				try {
 					await task.sandbox.refreshActivity()
+
+					const seqRows = await db
+						.select({ lastEventSeq: schema.tasks.lastEventSeq })
+						.from(schema.tasks)
+						.where(eq(schema.tasks.id, task.taskId))
+						.limit(1)
+					const lastEventSeq = seqRows[0]?.lastEventSeq ?? 0
+
+					if (lastEventSeq > 0) {
+						await db
+							.update(schema.tasks)
+							.set({ heartbeatAt: new Date(), updatedAt: new Date() })
+							.where(eq(schema.tasks.id, task.taskId))
+						task.consecutiveFailures = 0
+						continue
+					}
+
 					const cmd = await task.sandbox.process.getSessionCommand(task.sessionId, task.commandId)
 
 					await db
@@ -360,16 +389,39 @@ export const TaskSupervisorLive = Layer.scoped(
 				// Best effort only.
 			}
 
-			await db
-				.update(schema.tasks)
-				.set({
-					status: exitCode === 0 ? "succeeded" : "failed",
-					outputSummary: result.summary.slice(0, 2000),
-					exitCode,
-					completedAt: new Date(),
-					updatedAt: new Date(),
-				})
+			const existing = await db
+				.select()
+				.from(schema.tasks)
 				.where(eq(schema.tasks.id, task.taskId))
+				.limit(1)
+				.then((rows) => rows[0])
+
+			const alreadyTerminal = existing && TERMINAL_STATUSES.includes(existing.status as TaskStatus)
+
+			const now = new Date()
+			if (alreadyTerminal) {
+				if (!existing?.outputSummary?.trim()) {
+					await db
+						.update(schema.tasks)
+						.set({
+							outputSummary: result.summary.slice(0, 2000),
+							updatedAt: now,
+						})
+						.where(eq(schema.tasks.id, task.taskId))
+				}
+			} else {
+				await db
+					.update(schema.tasks)
+					.set({
+						status: exitCode === 0 ? "succeeded" : "failed",
+						outputSummary: result.summary.slice(0, 2000),
+						exitCode,
+						completedAt: now,
+						updatedAt: now,
+						callbackTokenExpiresAt: now,
+					})
+					.where(eq(schema.tasks.id, task.taskId))
+			}
 
 			await deletePendingSession(task.sandbox, task.sessionId)
 			activeTasks.delete(task.taskId)
@@ -391,42 +443,19 @@ export const TaskSupervisorLive = Layer.scoped(
 		}
 
 		const recoverRunning = async () => {
-			let running: TaskRecord[]
 			try {
-				running = await db.select().from(schema.tasks).where(eq(schema.tasks.status, "running"))
-			} catch (err) {
-				console.error("[TaskSupervisor] recovery: failed to query running tasks:", err)
-				return
-			}
-
-			for (const task of running) {
-				if (!task.sandboxId || !task.sessionId || !task.commandId) {
-					await db
-						.update(schema.tasks)
-						.set({ status: "lost", updatedAt: new Date() })
-						.where(eq(schema.tasks.id, task.id))
-					continue
-				}
-
-				try {
-					const sandbox = await Effect.runPromise(sandboxService.ensure(task.userId))
-					await sandbox.process.getSession(task.sessionId)
-
-					activeTasks.set(task.id, {
-						taskId: task.id,
-						sandbox,
-						sessionId: task.sessionId,
-						commandId: task.commandId,
-						startedAt: task.startedAt?.getTime() ?? Date.now(),
-						timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
-						consecutiveFailures: 0,
+				const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000)
+				await db
+					.update(schema.tasks)
+					.set({
+						status: "failed",
+						error: "Task preparation timed out",
+						completedAt: new Date(),
+						updatedAt: new Date(),
 					})
-				} catch {
-					await db
-						.update(schema.tasks)
-						.set({ status: "lost", updatedAt: new Date() })
-						.where(eq(schema.tasks.id, task.id))
-				}
+					.where(and(eq(schema.tasks.status, "preparing"), lte(schema.tasks.createdAt, fiveMinAgo)))
+			} catch (err) {
+				console.error("[TaskSupervisor] recovery: failed to clear stuck preparing tasks:", err)
 			}
 		}
 
@@ -657,6 +686,18 @@ export const TaskSupervisorLive = Layer.scoped(
 						)
 					}
 
+					const callbackSecret = yield* Effect.tryPromise({
+						try: () => mintCallbackSecret(),
+						catch: (cause) =>
+							new SandboxError({
+								message: `Failed to mint callback secret: ${cause instanceof Error ? cause.message : String(cause)}`,
+								cause,
+							}),
+					})
+
+					const apiBase = env.API_URL.replace(/\/$/, "")
+					const callbackUrl = `${apiBase}/internal/task-events`
+
 					const rows = yield* query((d) =>
 						d
 							.insert(schema.tasks)
@@ -668,6 +709,7 @@ export const TaskSupervisorLive = Layer.scoped(
 								prompt,
 								needsBrowser: needsBrowser ? "true" : "false",
 								sandboxId: sandbox.id,
+								callbackTokenHash: callbackSecret.hash,
 							})
 							.returning({ id: schema.tasks.id }),
 					).pipe(
@@ -696,6 +738,8 @@ export const TaskSupervisorLive = Layer.scoped(
 									authMode,
 									needsBrowser,
 									timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
+									callbackUrl,
+									callbackSecret: callbackSecret.raw,
 								})
 
 								sessionId = taskSessionId(taskId)
@@ -856,6 +900,74 @@ export const TaskSupervisorLive = Layer.scoped(
 					}
 
 					return task
+				}),
+
+			probeTask: (taskId, userId) =>
+				Effect.gen(function* () {
+					if (!env.DAYTONA_API_KEY) {
+						return yield* Effect.fail(
+							new SandboxError({ message: "Sandbox (Daytona) is not configured." }),
+						)
+					}
+					const daytona = createDaytonaClient({
+						apiKey: env.DAYTONA_API_KEY,
+						apiUrl: env.DAYTONA_API_URL,
+						target: env.DAYTONA_TARGET,
+					})
+					const isDev = env.NODE_ENV !== "production"
+					return yield* Effect.tryPromise({
+						try: () => probeTaskForUser(db, daytona, userId, taskId, isDev),
+						catch: sandboxErrorFromDefect,
+					})
+				}),
+
+			getTaskArtifacts: (taskId, userId) =>
+				Effect.gen(function* () {
+					const taskFilter = and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId))
+					const rows = yield* query((d) =>
+						d.select().from(schema.tasks).where(taskFilter).limit(1),
+					).pipe(
+						Effect.mapError(
+							(e) =>
+								new SandboxError({
+									message: `Failed to load task: ${e instanceof Error ? e.message : String(e)}`,
+									cause: e,
+								}),
+						),
+					)
+					const task = rows[0]
+					if (!task?.artifactRoot) {
+						return null
+					}
+
+					const sandbox = yield* sandboxService.ensure(userId)
+					return yield* Effect.tryPromise({
+						try: async () => {
+							const res = await sandbox.process.executeCommand(
+								`ls -la "${task.artifactRoot}"`,
+								undefined,
+								undefined,
+								30,
+							)
+							const listing = res.result ?? ""
+							let resultPreview: string | undefined
+							if (
+								task.status === "succeeded" ||
+								task.status === "failed" ||
+								task.status === "timed_out"
+							) {
+								try {
+									const buf = await sandbox.fs.downloadFile(`${task.artifactRoot}/result.md`)
+									const text = buf.toString("utf-8")
+									resultPreview = text.length > 2000 ? `${text.slice(0, 2000)}…` : text
+								} catch {
+									/* no result */
+								}
+							}
+							return { listing, resultPreview }
+						},
+						catch: sandboxErrorFromDefect,
+					})
 				}),
 
 			shutdown: () =>

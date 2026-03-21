@@ -8,6 +8,10 @@ export interface TaskConfig {
 	model?: string
 	timeoutSeconds?: number
 	instructions?: string
+	/** Server URL for POST /internal/task-events (optional — omit for local dev / no callbacks) */
+	callbackUrl?: string
+	/** Raw callback secret (same value hashed in DB as callbackTokenHash) */
+	callbackSecret?: string
 }
 
 export interface TaskResult {

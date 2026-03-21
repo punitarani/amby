@@ -35,6 +35,12 @@ export const MAX_WAIT_SECONDS = 15
 export const MAX_ACTIVE_TASKS_PER_USER = 5
 export const MAX_HEARTBEAT_FAILURES = 3
 
+/** Task considered stale for reconciliation if no heartbeat for this long */
+export const STALE_HEARTBEAT_MS = 3 * 60 * 1000
+
+/** Wrapper script sends heartbeat events every N seconds */
+export const CALLBACK_HEARTBEAT_INTERVAL_S = 30
+
 // ── Codex auth URLs ───────────────────────────────────────────────────
 
 export const CODEX_DEVICE_AUTH_SETTINGS_URL = "https://chatgpt.com/#settings/Security"

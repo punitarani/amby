@@ -334,12 +334,20 @@ AgentService, JobRunnerService
 
 ---
 
+## Task runtime control plane (callbacks + reconciliation)
+
+- **Callbacks**: Each task gets a per-task secret (hash in DB). The sandbox `run.sh` wrapper POSTs to `POST /internal/task-events` with `Authorization: Bearer` + `X-Amby-Signature` (HMAC-SHA256 over the body). Events append to `task_events` and update `tasks.last_event_seq` / `heartbeat_at`.
+- **Local state**: `artifacts/status.json` is written during execution for forensic / reconciliation.
+- **Reconciliation**: A Cloudflare cron (1-minute) runs `reconcileTasks`: refreshes Daytona activity for active tasks and probes stale rows via `getSessionCommand` + `status.json`.
+- **Agent tools**: `get_task` (DB read), `probe_task` (force probe), `get_task_artifacts` (`ls` + optional `result.md` preview).
+
+---
+
 ## Future
 
 ### v1.5
 - `cancel_task` tool
 - Streaming progress via `getSessionCommandLogs`
-- `list_task_artifacts` tool
 - ChatGPT account auth flow (`awaiting_auth` + device code handoff)
 
 ### v2

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm"
 import { index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
 import { users } from "./users"
 
@@ -40,6 +41,24 @@ export const tasks = pgTable(
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 		metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+		callbackTokenHash: text("callback_token_hash"),
+		callbackTokenExpiresAt: timestamp("callback_token_expires_at", { withTimezone: true }),
+		lastEventSeq: integer("last_event_seq").notNull().default(0),
+		lastProbeAt: timestamp("last_probe_at", { withTimezone: true }),
 	},
-	(t) => [index("tasks_user_status_idx").on(t.userId, t.status)],
+	(t) => [
+		/** Per-user task lists + cap checks (e.g. active tasks for a user) */
+		index("tasks_user_status_idx").on(t.userId, t.status),
+		/**
+		 * Reconciliation cron: `WHERE status IN ('preparing','running')`.
+		 * Partial index keeps the working set small vs scanning all terminal tasks.
+		 */
+		index("tasks_active_runtime_idx")
+			.on(t.userId)
+			.where(sql`${t.status} IN ('preparing', 'running')`),
+		/**
+		 * Supervisor recovery: `status = 'preparing' AND created_at <= cutoff`.
+		 */
+		index("tasks_preparing_timeout_idx").on(t.createdAt).where(sql`${t.status} = 'preparing'`),
+	],
 )

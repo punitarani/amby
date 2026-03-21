@@ -60,6 +60,52 @@ export function createSandboxDelegationTools(
 					exitCode: task.exitCode,
 					startedAt: task.startedAt?.toISOString(),
 					completedAt: task.completedAt?.toISOString(),
+					lastHeartbeat: task.heartbeatAt?.toISOString(),
+					lastEventSeq: task.lastEventSeq,
+					lastProbeAt: task.lastProbeAt?.toISOString(),
+				}
+			},
+		}),
+
+		probe_task: tool({
+			description:
+				"Force a fresh status check for a delegated task by probing the sandbox and Daytona. " +
+				"Use when get_task suggests the task is stuck, or the user asks what is happening with a background task. " +
+				"More expensive than get_task.",
+			inputSchema: z.object({
+				taskId: z.string().describe("Task ID from delegate_task"),
+			}),
+			execute: async ({ taskId }) => {
+				const task = await Effect.runPromise(supervisor.probeTask(taskId, userId))
+				if (!task) return { error: "Task not found" }
+				return {
+					taskId: task.id,
+					status: task.status,
+					outputSummary: task.outputSummary,
+					error: task.error,
+					exitCode: task.exitCode,
+					startedAt: task.startedAt?.toISOString(),
+					completedAt: task.completedAt?.toISOString(),
+					lastHeartbeat: task.heartbeatAt?.toISOString(),
+					lastEventSeq: task.lastEventSeq,
+					lastProbeAt: task.lastProbeAt?.toISOString(),
+				}
+			},
+		}),
+
+		get_task_artifacts: tool({
+			description:
+				"List files in a delegated task's artifact directory and optionally preview result.md for finished tasks.",
+			inputSchema: z.object({
+				taskId: z.string().describe("Task ID from delegate_task"),
+			}),
+			execute: async ({ taskId }) => {
+				const result = await Effect.runPromise(supervisor.getTaskArtifacts(taskId, userId))
+				if (!result) return { error: "Task not found or no artifacts yet" }
+				return {
+					taskId,
+					listing: result.listing,
+					resultPreview: result.resultPreview,
 				}
 			},
 		}),

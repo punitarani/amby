@@ -1,6 +1,7 @@
 import type { Sandbox } from "@daytonaio/sdk"
 import { CODEX_HOME, TASK_BASE } from "../config"
 import type { TaskConfig, TaskProvider, TaskResult } from "./provider"
+import { buildWrapperScript } from "./wrapper-script"
 
 const AGENTS_MD = `# Task Instructions
 
@@ -48,21 +49,19 @@ export class CodexProvider implements TaskProvider {
 		await sandbox.fs.uploadFile(Buffer.from(config.prompt), `${workspaceDir}/prompt.txt`)
 
 		// Codex auth lives in CODEX_HOME/auth.json inside the sandbox.
-		const envContent = `CODEX_HOME=${CODEX_HOME}`
-		await sandbox.fs.uploadFile(Buffer.from(envContent), `${taskDir}/.env`)
+		const envLines = [
+			`CODEX_HOME=${CODEX_HOME}`,
+			`AMBY_TASK_ID=${config.taskId}`,
+			`AMBY_EVENT_SEQ_START=1`,
+		]
+		if (config.callbackUrl?.trim() && config.callbackSecret?.trim()) {
+			envLines.push(`AMBY_CALLBACK_URL=${config.callbackUrl.trim()}`)
+			envLines.push(`AMBY_CALLBACK_SECRET=${config.callbackSecret.trim()}`)
+		}
+		await sandbox.fs.uploadFile(Buffer.from(`${envLines.join("\n")}\n`), `${taskDir}/.env`)
 
-		// Use a wrapper script to avoid shell injection from prompt content.
-		// Source .env with `set -a` (auto-export) instead of `env $(cat | xargs)`
-		// to handle values with spaces or special characters safely.
-		const runScript = [
-			"#!/bin/sh",
-			"set -a",
-			". ../.env",
-			"set +a",
-			"cd workspace",
-			"prompt=$(cat prompt.txt)",
-			'exec codex exec --full-auto --output-last-message -o ../artifacts/result.md "$prompt" 2>../artifacts/stderr.log',
-		].join("\n")
+		// Wrapper: optional callbacks + status.json + heartbeats; falls back to no-op sends when URL unset.
+		const runScript = buildWrapperScript()
 		await sandbox.fs.uploadFile(Buffer.from(runScript), `${taskDir}/run.sh`)
 
 		return `cd ${taskDir} && sh run.sh`

@@ -13,6 +13,8 @@ import { Hono } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { handleExpiredConnectedAccount } from "./composio/expired-account"
 import { ConversationSession as ConversationSessionBase } from "./durable-objects/conversation-session"
+import { handleReconciliation } from "./handlers/reconciliation"
+import { handleTaskEventsRequest } from "./handlers/task-events"
 import { getHomeResponse } from "./home"
 import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
@@ -127,6 +129,18 @@ app.post("/telegram/webhook", async (c) => {
 	})
 })
 
+app.post("/internal/task-events", async (c) => {
+	const rawBody = await c.req.text()
+	const result = await handleTaskEventsRequest(c.env, rawBody, {
+		taskId: c.req.header("X-Amby-Task-Id") ?? undefined,
+		timestamp: c.req.header("X-Amby-Timestamp") ?? undefined,
+		seq: c.req.header("X-Amby-Seq") ?? undefined,
+		signature: c.req.header("X-Amby-Signature") ?? undefined,
+		authorization: c.req.header("Authorization") ?? undefined,
+	})
+	return c.json(result.body, result.status as 200 | 400 | 401 | 404 | 409)
+})
+
 app.post("/composio/webhook", async (c) => {
 	if (!c.env.COMPOSIO_API_KEY || !c.env.COMPOSIO_WEBHOOK_SECRET) {
 		return c.json({ error: "Composio webhook not configured" }, 503)
@@ -192,6 +206,10 @@ const worker: ExportedHandler<WorkerBindings, TelegramQueueMessage> = {
 
 	async queue(batch: MessageBatch<TelegramQueueMessage>, env: WorkerBindings) {
 		await handleQueueBatch(batch, env)
+	},
+
+	async scheduled(_controller: unknown, env: WorkerBindings, ctx: ExecutionContext) {
+		ctx.waitUntil(handleReconciliation(env))
 	},
 }
 
