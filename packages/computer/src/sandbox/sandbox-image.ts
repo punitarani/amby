@@ -2,7 +2,7 @@ import { Image } from "@daytonaio/sdk"
 import { AGENT_WORKDIR, DESKTOP_DIR, DOCUMENTS_DIR, DOWNLOADS_DIR } from "../config"
 
 // TODO: Once Daytona plan supports snapshot push, switch to:
-//   snapshot: "amby-computer:0.1.0"
+//   snapshot: `amby-computer:${version}` where version = docker/computer/VERSION
 // The Dockerfile at docker/computer/Dockerfile is the source of truth.
 // Build & push with: bun run computer:build && bun run computer:push
 export const sandboxImage = Image.base("ubuntu:24.04")

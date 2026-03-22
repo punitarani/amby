@@ -3,7 +3,13 @@ set -euo pipefail
 
 DOCKER_REPO="punitarani/amby"
 IMAGE_TAG="computer"
-VERSION="${1:?Usage: $0 <version> (e.g. 0.1.0)}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VERSION="${1:-$(cat "${SCRIPT_DIR}/VERSION")}"
+
+if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+	echo "Error: version must be x.y (e.g. 0.2)" >&2
+	exit 1
+fi
 
 TAGS=("${DOCKER_REPO}:${IMAGE_TAG}" "${DOCKER_REPO}:${IMAGE_TAG}-${VERSION}")
 
