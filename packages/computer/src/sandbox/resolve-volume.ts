@@ -39,7 +39,14 @@ export async function ensureVolume(
 		.limit(1)
 		.then((rows) => rows[0])
 
-	if (existing?.status === "ready") return existing
+	if (existing?.status === "ready") {
+		try {
+			await daytona.volume.get(existing.daytonaVolumeId)
+			return existing
+		} catch {
+			// Volume gone from Daytona — fall through to re-create
+		}
+	}
 
 	const name = volumeName(userId, isDev)
 
@@ -336,7 +343,13 @@ export async function replaceSandbox(
 		volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
 	}
 
-	const sandbox = await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
+	let sandbox: Sandbox
+	try {
+		sandbox = await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
+	} catch (cause) {
+		await upsertMainSandboxRow(db, userId, "pending", "error", volumeRow.id)
+		throw cause
+	}
 	cache.set(userId, sandbox)
 	await persistMainSandboxFromInstance(db, userId, sandbox, "running", volumeRow.id)
 	return sandbox

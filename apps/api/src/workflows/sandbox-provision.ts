@@ -9,7 +9,7 @@ import {
 	tryGetSandboxByName,
 	VOLUME_MOUNT_PATH,
 } from "@amby/computer/sandbox-config"
-import { DbService, and, eq, schema } from "@amby/db"
+import { and, DbService, eq, schema } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
