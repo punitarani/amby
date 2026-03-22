@@ -47,7 +47,7 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 
 			const response = yield* Effect.gen(function* () {
 				const agent = yield* AgentService
-				const conversationId = yield* agent.ensureConversation("telegram")
+				const conversationId = yield* agent.ensureConversation("telegram", String(chatId))
 				return yield* agent.handleMessage(conversationId, text, { telegram: raw }, sendReply)
 			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
 

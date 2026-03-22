@@ -10,14 +10,26 @@ import { extractToolUserMessages } from "../utils/extract-tool-user-messages"
 import { SUBAGENT_DEFS } from "./definitions"
 import { resolveTools, type ToolGroups } from "./tool-groups"
 
+export type SubagentTrace = {
+	agentName: string
+	steps: Array<{
+		toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown }>
+		toolResults: Array<{ toolCallId: string; toolName: string; output: unknown }>
+	}>
+	durationMs: number
+}
+
+export type SubagentTraceStore = Map<string, SubagentTrace>
+
 export function createSubagentTools(
 	getModel: (id?: string) => LanguageModel,
 	toolGroups: ToolGroups,
 	sharedPromptContext: string,
 	config: AgentConfig,
 	requestTraceMetadata: RequestTraceMetadata,
-): ToolSet {
+): { tools: ToolSet; traceStore: SubagentTraceStore } {
 	const tools: ToolSet = {}
+	const traceStore: SubagentTraceStore = new Map()
 	let invocationIndex = 0
 
 	for (const def of SUBAGENT_DEFS) {
@@ -37,8 +49,9 @@ export function createSubagentTools(
 				task: z.string().describe("The task for this agent to execute"),
 				context: z.string().optional().describe("Additional context relevant to the task"),
 			}),
-			execute: async ({ task, context }, { abortSignal }) => {
+			execute: async ({ task, context }, { abortSignal, toolCallId }) => {
 				try {
+					const startTime = Date.now()
 					const metadata: AgentTraceMetadata = {
 						...requestTraceMetadata,
 						user_id: config.userId,
@@ -67,7 +80,31 @@ export function createSubagentTools(
 					const result = await subagent.generate({ prompt: userMessage, abortSignal })
 					const userMessages = extractToolUserMessages(result.toolResults)
 
-					return userMessages ? { summary: result.text, userMessages } : { summary: result.text }
+					const toolsUsed = (result.steps ?? []).flatMap((step) =>
+						step.toolCalls.map((tc) => tc.toolName),
+					)
+
+					const base: Record<string, unknown> = { summary: result.text }
+					if (toolsUsed.length > 0) base.toolsUsed = toolsUsed
+
+					traceStore.set(toolCallId, {
+						agentName: def.name,
+						steps: (result.steps ?? []).map((step) => ({
+							toolCalls: step.toolCalls.map((tc) => ({
+								toolCallId: tc.toolCallId,
+								toolName: tc.toolName,
+								input: tc.input,
+							})),
+							toolResults: step.toolResults.map((tr) => ({
+								toolCallId: tr.toolCallId,
+								toolName: tr.toolName,
+								output: tr.output,
+							})),
+						})),
+						durationMs: Date.now() - startTime,
+					})
+
+					return userMessages ? { ...base, userMessages } : base
 				} catch (error) {
 					return {
 						error: true,
@@ -78,5 +115,5 @@ export function createSubagentTools(
 		})
 	}
 
-	return tools
+	return { tools: tools, traceStore }
 }

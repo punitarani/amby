@@ -4,7 +4,7 @@ import {
 	getIntegrationSuccessMessage,
 	parseIntegrationStartPayload,
 } from "@amby/connectors"
-import { and, DbService, desc, eq, schema } from "@amby/db"
+import { and, DbService, eq, schema } from "@amby/db"
 import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import { Effect } from "effect"
@@ -166,36 +166,34 @@ export const findOrCreateUser = (from: TelegramFrom, chatId: number) =>
 		})
 	})
 
-const ensureTelegramConversation = (userId: string) =>
+const ensureTelegramConversation = (userId: string, chatId: number) =>
 	Effect.gen(function* () {
 		const { db } = yield* DbService
 
 		yield* Effect.tryPromise(async () =>
-			db.transaction(async (tx) => {
-				const existing = await tx
-					.select({ id: schema.conversations.id })
-					.from(schema.conversations)
-					.where(eq(schema.conversations.userId, userId))
-					.orderBy(desc(schema.conversations.updatedAt))
-					.limit(1)
-
-				if (existing[0]) return
-
-				await tx.insert(schema.conversations).values({ userId, channelType: "telegram" })
-			}),
+			db
+				.insert(schema.conversations)
+				.values({
+					userId,
+					platform: "telegram",
+					externalConversationKey: String(chatId),
+					workspaceKey: "",
+				})
+				.onConflictDoNothing(),
 		)
 	})
 
 const startTelegramSession = (
 	userId: string,
 	from: TelegramFrom,
+	chatId: number,
 	options?: { sandboxWorkflow?: WorkerBindings["SANDBOX_WORKFLOW"] },
 ) =>
 	Effect.gen(function* () {
 		const env = yield* EnvService
 		const posthog = getPostHogClient(env.POSTHOG_KEY, env.POSTHOG_HOST)
 
-		yield* ensureTelegramConversation(userId)
+		yield* ensureTelegramConversation(userId, chatId)
 
 		if (options?.sandboxWorkflow) {
 			options.sandboxWorkflow
@@ -317,7 +315,7 @@ export const handleCommand = (
 
 		switch (command.command) {
 			case "/start": {
-				yield* startTelegramSession(userId, from, options)
+				yield* startTelegramSession(userId, from, chatId, options)
 
 				if (command.payload) {
 					yield* sendIntegrationStartResult(userId, chatId, command.payload)

@@ -1,7 +1,7 @@
-import type { ChannelType } from "@amby/channels"
+import type { Platform } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
 import { ConnectorsService, createConnectorManagementTools } from "@amby/connectors"
-import { DbService, desc, eq, schema } from "@amby/db"
+import { DbService, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import {
 	buildMemoriesText,
@@ -31,13 +31,35 @@ export type StreamPart =
 
 const ORCHESTRATOR_MAX_STEPS = 14
 
+import {
+	formatArtifactRecap,
+	loadOtherThreadSummaries,
+	loadThreadArtifacts,
+	loadThreadTail,
+} from "./context"
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
+import { type ResolveThreadResult, resolveThread } from "./router"
 import { createSubagentTools } from "./subagents/spawner"
 import { buildToolGroups } from "./subagents/tool-groups"
+import {
+	synopsisCurrentThreadIfOverflowsAfterSave,
+	synopsisPreviousThreadIfDormantSwitch,
+} from "./synopsis"
 import { createCodexAuthTools } from "./tools/codex-auth"
 import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
+import { persistExecutionTrace } from "./traces"
 import { extractToolUserMessages } from "./utils/extract-tool-user-messages"
+
+function buildThreadMeta(threadCtx: ResolveThreadResult) {
+	return {
+		threadId: threadCtx.threadId,
+		router: {
+			action: threadCtx.decision.action,
+			source: threadCtx.decision.source,
+		},
+	}
+}
 
 export class AgentService extends Context.Tag("AgentService")<
 	AgentService,
@@ -61,7 +83,11 @@ export class AgentService extends Context.Tag("AgentService")<
 			content: string,
 			onPart: (part: StreamPart) => void,
 		) => Effect.Effect<string, AgentError>
-		readonly ensureConversation: (channelType?: ChannelType) => Effect.Effect<string, AgentError>
+		readonly ensureConversation: (
+			platform: Platform,
+			externalConversationKey: string,
+			workspaceKey?: string,
+		) => Effect.Effect<string, AgentError>
 		readonly shutdown: () => Effect.Effect<void, AgentError>
 	}
 >() {}
@@ -90,44 +116,57 @@ export const makeAgentServiceLive = (userId: string) =>
 
 			const computer = createComputerTools(sandbox, userId)
 
-			const loadHistory = (conversationId: string) =>
-				query((d) =>
-					d
-						.select({ role: schema.messages.role, content: schema.messages.content })
-						.from(schema.messages)
-						.where(eq(schema.messages.conversationId, conversationId))
-						.orderBy(desc(schema.messages.createdAt))
-						.limit(20),
-				).pipe(
-					Effect.map((rows) =>
-						rows
-							.reverse()
-							.filter(
-								(r): r is { role: "user" | "assistant"; content: string } =>
-									r.role === "user" || r.role === "assistant",
-							),
-					),
-				)
-
 			const saveMessage = (
 				conversationId: string,
-				role: "user" | "assistant" | "system" | "tool",
+				role: "user" | "assistant",
 				content: string,
-				metadata?: Record<string, unknown>,
+				opts?: {
+					metadata?: Record<string, unknown>
+					threadId?: string
+				},
 			) =>
-				query((d) => d.insert(schema.messages).values({ conversationId, role, content, metadata }))
+				query((d) =>
+					d
+						.insert(schema.messages)
+						.values({
+							conversationId,
+							role,
+							content,
+							threadId: opts?.threadId,
+							metadata: opts?.metadata,
+						})
+						.returning({ id: schema.messages.id }),
+				)
 
-			const maybeSaveAssistantMessage = (conversationId: string, content: string) =>
-				content.trim() ? saveMessage(conversationId, "assistant", content) : Effect.void
+			const maybeSaveAssistantMessage = (
+				conversationId: string,
+				content: string,
+				opts?: {
+					threadId?: string
+				},
+			) =>
+				content.trim()
+					? saveMessage(conversationId, "assistant", content, opts)
+					: Effect.succeed([])
 
-			const prepareContext = (conversationId: string, onReply?: ReplyFn) =>
+			const prepareContext = (
+				conversationId: string,
+				threadCtx: ResolveThreadResult,
+				onReply?: ReplyFn,
+			) =>
 				Effect.gen(function* () {
-					const userRow = yield* query((d) =>
-						d
-							.select({ timezone: schema.users.timezone })
-							.from(schema.users)
-							.where(eq(schema.users.id, userId))
-							.limit(1),
+					const [userRow, profile] = yield* Effect.all(
+						[
+							query((d) =>
+								d
+									.select({ timezone: schema.users.timezone })
+									.from(schema.users)
+									.where(eq(schema.users.id, userId))
+									.limit(1),
+							),
+							memory.getProfile(userId),
+						],
+						{ concurrency: 2 },
 					)
 					const userTimezone = userRow[0]?.timezone ?? "UTC"
 
@@ -137,11 +176,47 @@ export const makeAgentServiceLive = (userId: string) =>
 						timeStyle: "long",
 					}).format(new Date())
 
-					const profile = yield* memory.getProfile(userId)
 					const deduped = deduplicateMemories(profile.static, profile.dynamic)
 					const memoryContext = buildMemoriesText(deduped)
 
-					const history = yield* loadHistory(conversationId)
+					const [threadRow, history, otherThreads, artifactRows] = yield* Effect.all(
+						[
+							query((d) =>
+								d
+									.select({
+										label: schema.conversationThreads.label,
+										synopsis: schema.conversationThreads.synopsis,
+									})
+									.from(schema.conversationThreads)
+									.where(eq(schema.conversationThreads.id, threadCtx.threadId))
+									.limit(1),
+							),
+							loadThreadTail(
+								query,
+								conversationId,
+								threadCtx.threadId,
+								undefined,
+								threadCtx.threadId === threadCtx.defaultThreadId,
+							),
+							loadOtherThreadSummaries(query, conversationId, threadCtx.threadId),
+							loadThreadArtifacts(
+								query,
+								conversationId,
+								threadCtx.threadId,
+								threadCtx.threadId === threadCtx.defaultThreadId,
+							),
+						],
+						{ concurrency: 4 },
+					)
+
+					const threadLabel = threadRow[0]?.label ?? null
+					const threadSynopsis = threadRow[0]?.synopsis?.trim() ?? ""
+					const artifactRecap = formatArtifactRecap(artifactRows, threadLabel)
+
+					const threadSynopsisBlock =
+						threadCtx.threadWasDormant && threadSynopsis
+							? `## Resumed thread synopsis\n${threadSynopsis}`
+							: ""
 
 					const memoryTools = createMemoryTools(memory, userId)
 					const sandboxTools = sandbox.enabled
@@ -183,12 +258,21 @@ export const makeAgentServiceLive = (userId: string) =>
 					const basePrompt = agentConfig.cuaEnabled
 						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
 						: buildSystemPrompt(formatted, userTimezone)
-					const systemPrompt = memoryContext
-						? `${basePrompt}\n\n# User Memory Context\n${memoryContext}`
-						: basePrompt
+
+					const contextSections = [otherThreads, threadSynopsisBlock, artifactRecap].filter(Boolean)
+					const extraContext = contextSections.join("\n\n")
+
+					const systemPrompt = [
+						basePrompt,
+						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
+						extraContext,
+					]
+						.filter(Boolean)
+						.join("\n\n")
 
 					const sharedPromptContext = [
 						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
+						extraContext,
 						`# Current Date/Time\n${formatted} (${userTimezone})`,
 					]
 						.filter(Boolean)
@@ -217,8 +301,6 @@ export const makeAgentServiceLive = (userId: string) =>
 					model: baseModel,
 					instructions: systemPrompt,
 					tools,
-					// Delegation-heavy turns, especially connected-app work, need extra
-					// roundtrips on top of the base agent steps.
 					stopWhen: stepCountIs(ORCHESTRATOR_MAX_STEPS),
 					experimental_telemetry: createTelemetrySettings({
 						functionId,
@@ -240,24 +322,36 @@ export const makeAgentServiceLive = (userId: string) =>
 				metadata,
 				onReply,
 				onTextDelta,
+				onPart,
 			}: {
 				conversationId: string
-				mode: Extract<TraceRequestMode, "message" | "batched-message">
+				mode: TraceRequestMode
 				requestMessages: ReadonlyArray<{ role: "user"; content: string }>
 				metadata?: Record<string, unknown>
 				onReply?: ReplyFn
 				onTextDelta?: (text: string) => void
+				onPart?: (part: StreamPart) => void
 			}) =>
 				withTelemetryFlush(
 					Effect.gen(function* () {
+						const inboundText = requestMessages.map((m) => m.content).join("\n\n")
+						const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
+
+						yield* synopsisPreviousThreadIfDormantSwitch(
+							query,
+							baseModel,
+							conversationId,
+							threadCtx,
+						)
+
 						const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
-							yield* prepareContext(conversationId, onReply)
+							yield* prepareContext(conversationId, threadCtx, onReply)
 						const requestTraceMetadata = buildRequestTraceMetadata({
 							conversationId,
 							requestMode: mode,
 							requestMetadata: metadata,
 						})
-						const delegationTools = createSubagentTools(
+						const { tools: delegationTools, traceStore: subagentTraces } = createSubagentTools(
 							models.getModel,
 							toolGroups,
 							sharedPromptContext,
@@ -272,33 +366,67 @@ export const makeAgentServiceLive = (userId: string) =>
 							agent_role: "orchestrator",
 							agent_name: "orchestrator",
 						}
+						const functionId = onPart ? "amby.orchestrator.stream" : "amby.orchestrator.generate"
 						const agent = createOrchestrator(
 							systemPrompt,
 							{ ...delegationTools, ...tools } as ToolSet,
-							"amby.orchestrator.generate",
+							functionId as "amby.orchestrator.generate" | "amby.orchestrator.stream",
 							orchestratorMetadata,
 						)
 
+						const messages = [
+							...history,
+							...requestMessages.map((m) => ({ role: "user" as const, content: m.content })),
+						]
+
 						const result = yield* Effect.tryPromise({
 							try: async () => {
-								if (onTextDelta) {
-									const stream = await agent.stream({
-										messages: [...history, ...requestMessages],
-									})
+								if (onPart || onTextDelta) {
+									const stream = await agent.stream({ messages })
+
 									for await (const part of stream.fullStream) {
-										if (part.type === "text-delta") {
-											onTextDelta(part.text)
+										switch (part.type) {
+											case "text-delta":
+												if (onTextDelta) onTextDelta(part.text)
+												if (onPart) onPart({ type: "text-delta", text: part.text })
+												break
+											case "tool-call":
+												if (onPart) {
+													onPart({
+														type: "tool-call",
+														toolName: part.toolName,
+														args: part.input as Record<string, unknown>,
+													})
+												}
+												break
+											case "tool-result":
+												if (onPart) {
+													onPart({
+														type: "tool-result",
+														toolName: part.toolName,
+														result: part.output,
+													})
+												}
+												break
 										}
 									}
-									const [text, toolResults] = await Promise.all([stream.text, stream.toolResults])
-									return { text, toolResults }
+
+									const [text, toolResults, steps] = await Promise.all([
+										stream.text,
+										stream.toolResults,
+										stream.steps,
+									])
+									return { text, toolResults, steps }
 								}
-								return await agent.generate({
-									messages: [...history, ...requestMessages],
-								})
+								return await agent.generate({ messages })
 							},
-							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
+							catch: (cause) =>
+								new AgentError({
+									message: onPart ? "Failed to stream response" : "Failed to generate response",
+									cause,
+								}),
 						})
+
 						const toolUserMessages = onReply
 							? extractToolUserMessages(result.toolResults)
 							: undefined
@@ -307,10 +435,42 @@ export const makeAgentServiceLive = (userId: string) =>
 						}
 						const finalText = toolUserMessages ? "" : result.text
 
+						const threadMeta = buildThreadMeta(threadCtx)
+						const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
+
+						// Persist inbound messages
 						for (const message of requestMessages) {
-							yield* saveMessage(conversationId, "user", message.content, metadata)
+							yield* saveMessage(conversationId, "user", message.content, {
+								metadata: userMetadata,
+								threadId: threadCtx.threadId,
+							})
 						}
-						yield* maybeSaveAssistantMessage(conversationId, finalText)
+
+						// Save assistant message
+						const savedRows = yield* maybeSaveAssistantMessage(conversationId, finalText, {
+							threadId: threadCtx.threadId,
+						})
+
+						// Persist execution traces
+						const savedMessageId = savedRows[0]?.id
+						if (result.steps?.length) {
+							yield* persistExecutionTrace(query, {
+								conversationId,
+								threadId: threadCtx.threadId,
+								messageId: savedMessageId,
+								agentName: "orchestrator",
+								steps: result.steps,
+								subagentTraces,
+							})
+						}
+
+						yield* synopsisCurrentThreadIfOverflowsAfterSave(
+							query,
+							baseModel,
+							conversationId,
+							threadCtx,
+							requestMessages.length + 1,
+						)
 
 						return finalText
 					}),
@@ -345,80 +505,20 @@ export const makeAgentServiceLive = (userId: string) =>
 						Effect.mapError((e) =>
 							e instanceof AgentError
 								? e
-								: new AgentError({ message: "Agent batched message handling failed", cause: e }),
+								: new AgentError({
+										message: "Agent batched message handling failed",
+										cause: e,
+									}),
 						),
 					),
 
 				streamMessage: (conversationId, content, onPart) =>
-					withTelemetryFlush(
-						Effect.gen(function* () {
-							const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
-								yield* prepareContext(conversationId)
-							const requestTraceMetadata = buildRequestTraceMetadata({
-								conversationId,
-								requestMode: "stream-message",
-							})
-							const delegationTools = createSubagentTools(
-								models.getModel,
-								toolGroups,
-								sharedPromptContext,
-								agentConfig,
-								requestTraceMetadata,
-							)
-							const orchestratorMetadata: AgentTraceMetadata = {
-								...requestTraceMetadata,
-								user_id: agentConfig.userId,
-								model_id: agentConfig.modelId,
-								cua_enabled: agentConfig.cuaEnabled,
-								agent_role: "orchestrator",
-								agent_name: "orchestrator",
-							}
-							const agent = createOrchestrator(
-								systemPrompt,
-								{ ...delegationTools, ...tools } as ToolSet,
-								"amby.orchestrator.stream",
-								orchestratorMetadata,
-							)
-
-							const result = yield* Effect.tryPromise({
-								try: async () => {
-									const stream = await agent.stream({
-										messages: [...history, { role: "user" as const, content }],
-									})
-
-									for await (const part of stream.fullStream) {
-										switch (part.type) {
-											case "text-delta":
-												onPart({ type: "text-delta", text: part.text })
-												break
-											case "tool-call":
-												onPart({
-													type: "tool-call",
-													toolName: part.toolName,
-													args: part.input as Record<string, unknown>,
-												})
-												break
-											case "tool-result":
-												onPart({
-													type: "tool-result",
-													toolName: part.toolName,
-													result: part.output,
-												})
-												break
-										}
-									}
-
-									return await stream.text
-								},
-								catch: (cause) => new AgentError({ message: "Failed to stream response", cause }),
-							})
-
-							yield* saveMessage(conversationId, "user", content)
-							yield* saveMessage(conversationId, "assistant", result)
-
-							return result
-						}),
-					).pipe(
+					runGenerateRequest({
+						conversationId,
+						mode: "stream-message",
+						requestMessages: [{ role: "user", content }],
+						onPart,
+					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
 								? e
@@ -426,28 +526,32 @@ export const makeAgentServiceLive = (userId: string) =>
 						),
 					),
 
-				ensureConversation: (channelType = "cli") =>
+				ensureConversation: (platform, externalConversationKey, workspaceKey) =>
 					query((d) =>
-						d.transaction(async (tx) => {
-							const existing = await tx
-								.select({ id: schema.conversations.id })
-								.from(schema.conversations)
-								.where(eq(schema.conversations.userId, userId))
-								.orderBy(desc(schema.conversations.updatedAt))
-								.limit(1)
-
-							if (existing[0]) return existing[0].id
-
-							const rows = await tx
-								.insert(schema.conversations)
-								.values({ userId, channelType })
-								.returning({ id: schema.conversations.id })
-
+						d
+							.insert(schema.conversations)
+							.values({
+								userId,
+								platform,
+								externalConversationKey,
+								workspaceKey: workspaceKey ?? "",
+							})
+							.onConflictDoUpdate({
+								target: [
+									schema.conversations.userId,
+									schema.conversations.platform,
+									schema.conversations.workspaceKey,
+									schema.conversations.externalConversationKey,
+								],
+								set: { updatedAt: new Date() },
+							})
+							.returning({ id: schema.conversations.id }),
+					).pipe(
+						Effect.map((rows) => {
 							const row = rows[0]
-							if (!row) throw new Error("Failed to create conversation")
+							if (!row) throw new Error("Failed to ensure conversation")
 							return row.id
 						}),
-					).pipe(
 						Effect.mapError(
 							(e) =>
 								new AgentError({
