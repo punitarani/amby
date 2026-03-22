@@ -2,7 +2,7 @@ import type { Database } from "@amby/db"
 import { eq, schema } from "@amby/db"
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
 import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
-import { Effect, Either } from "effect"
+import { Effect } from "effect"
 import {
 	AGENT_USER,
 	AUTO_ARCHIVE_MINUTES,
@@ -13,7 +13,7 @@ import {
 	sandboxLabels,
 	sandboxName,
 } from "../config"
-import { SandboxError } from "../errors"
+import { SandboxError, sandboxError } from "../errors"
 import { sandboxImage as defaultSandboxImage } from "./sandbox-image"
 
 export type SandboxDbStatus = "creating" | "running" | "stopped" | "archived" | "error"
@@ -39,6 +39,30 @@ export function buildSandboxCreateParams(
 export function isDuplicateSandboxNameError(cause: unknown): boolean {
 	const msg = cause instanceof Error ? cause.message : String(cause)
 	return /already exists/i.test(msg)
+}
+
+export function isStateTransitionError(cause: unknown): boolean {
+	if (cause instanceof DaytonaError) {
+		if (cause.statusCode === 409) return true
+		if (/state change in progress/i.test(cause.message)) return true
+	}
+	if (cause instanceof Error && /state change in progress/i.test(cause.message)) return true
+	return false
+}
+
+async function withStateTransitionRetry<T>(
+	fn: () => Promise<T>,
+	{ maxAttempts = 5, baseDelayMs = 2000 } = {},
+): Promise<T> {
+	for (let attempt = 1; ; attempt++) {
+		try {
+			return await fn()
+		} catch (cause) {
+			if (attempt >= maxAttempts || !isStateTransitionError(cause)) throw cause
+			const delay = baseDelayMs * 2 ** (attempt - 1)
+			await new Promise((r) => setTimeout(r, delay))
+		}
+	}
 }
 
 function primaryVolumeId(sandbox: Sandbox): string | null {
@@ -100,7 +124,7 @@ export async function persistSandboxFromInstance(
  */
 export async function tryGetSandboxByName(daytona: Daytona, name: string): Promise<Sandbox | null> {
 	try {
-		return await daytona.get(name)
+		return await withStateTransitionRetry(() => daytona.get(name))
 	} catch (cause) {
 		if (cause instanceof DaytonaNotFoundError) return null
 		if (cause instanceof DaytonaError && cause.statusCode === 404) return null
@@ -109,9 +133,11 @@ export async function tryGetSandboxByName(daytona: Daytona, name: string): Promi
 }
 
 async function startSandboxIfNeeded(sandbox: Sandbox): Promise<void> {
-	await sandbox.refreshData()
-	if (sandbox.state === "started") return
-	await sandbox.start(SANDBOX_START_TIMEOUT)
+	await withStateTransitionRetry(async () => {
+		await sandbox.refreshData()
+		if (sandbox.state === "started") return
+		await sandbox.start(SANDBOX_START_TIMEOUT)
+	})
 }
 
 /**
@@ -132,22 +158,6 @@ export async function resolveExistingSandboxByName(
 	return existing
 }
 
-const mapToSandboxError =
-	(context: string) =>
-	(cause: unknown): SandboxError =>
-		new SandboxError({
-			message: `${context}: ${cause instanceof Error ? cause.message : String(cause)}`,
-			cause,
-		})
-
-const passThroughSandboxError = (cause: unknown): SandboxError =>
-	cause instanceof SandboxError
-		? cause
-		: new SandboxError({
-				message: `Failed to ensure sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
-				cause,
-			})
-
 export interface EnsureSandboxParams {
 	daytona: Daytona
 	db: Database
@@ -165,34 +175,29 @@ export const tryCacheSandbox = (
 	cache: Map<string, Sandbox>,
 	userId: string,
 	db: Database,
-): Effect.Effect<Sandbox | undefined, never> =>
-	Effect.gen(function* () {
-		const cached = cache.get(userId)
-		if (!cached) return undefined
+): Effect.Effect<Sandbox | undefined, never> => {
+	const cached = cache.get(userId)
+	if (!cached) return Effect.succeed(undefined)
 
-		const outcome = yield* Effect.either(
-			Effect.tryPromise({
-				try: async () => {
-					await cached.refreshData()
-					if (cached.state === "started") return cached
-					if (cached.state === "stopped" || cached.state === "error") {
-						await cached.start(SANDBOX_START_TIMEOUT)
-						await persistSandboxFromInstance(db, userId, cached, "running")
-						return cached
-					}
-					return undefined
-				},
-				catch: (cause) => cause,
-			}),
-		)
-
-		if (Either.isLeft(outcome)) {
-			cache.delete(userId)
+	return Effect.tryPromise({
+		try: async () => {
+			await cached.refreshData()
+			if (cached.state === "started") return cached
+			if (cached.state === "stopped" || cached.state === "error") {
+				await cached.start(SANDBOX_START_TIMEOUT)
+				await persistSandboxFromInstance(db, userId, cached, "running")
+				return cached
+			}
 			return undefined
-		}
-
-		return outcome.right
-	})
+		},
+		catch: () => undefined as never,
+	}).pipe(
+		Effect.catchAll(() => {
+			cache.delete(userId)
+			return Effect.succeed(undefined as Sandbox | undefined)
+		}),
+	)
+}
 
 /**
  * Core get-or-create for {@link SandboxService.ensure}: get-by-name first, then create with duplicate recovery.
@@ -206,7 +211,7 @@ export const ensureSandboxStarted = (
 
 		const resolved = yield* Effect.tryPromise({
 			try: () => resolveExistingSandboxByName(daytona, db, userId, name, cache),
-			catch: mapToSandboxError("Failed to resolve sandbox by name"),
+			catch: sandboxError("Failed to resolve sandbox by name"),
 		})
 		if (resolved) return resolved
 
@@ -218,7 +223,7 @@ export const ensureSandboxStarted = (
 					.where(eq(schema.sandboxes.userId, userId))
 					.limit(1)
 					.then((rows) => rows[0]),
-			catch: mapToSandboxError("Failed to load sandbox record"),
+			catch: sandboxError("Failed to load sandbox record"),
 		})
 
 		if (record?.status === "creating") {
@@ -233,13 +238,13 @@ export const ensureSandboxStarted = (
 		if (record) {
 			yield* Effect.tryPromise({
 				try: () => db.delete(schema.sandboxes).where(eq(schema.sandboxes.userId, userId)),
-				catch: mapToSandboxError("Failed to clear stale sandbox record"),
+				catch: sandboxError("Failed to clear stale sandbox record"),
 			})
 		}
 
 		yield* Effect.tryPromise({
 			try: () => upsertSandboxRow(db, userId, "pending", "creating"),
-			catch: mapToSandboxError("Failed to mark sandbox as creating"),
+			catch: sandboxError("Failed to mark sandbox as creating"),
 		})
 
 		const sandbox = yield* Effect.tryPromise({
@@ -258,7 +263,7 @@ export const ensureSandboxStarted = (
 					throw cause
 				}
 			},
-			catch: passThroughSandboxError,
+			catch: sandboxError("Failed to ensure sandbox"),
 		})
 
 		return sandbox

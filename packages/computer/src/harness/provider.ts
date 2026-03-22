@@ -18,6 +18,7 @@ export interface TaskConfig {
 export interface TaskResult {
 	output: string
 	summary: string
+	stderr: string
 }
 
 export interface TaskProvider {
