@@ -15,6 +15,13 @@ export {
 	sql,
 } from "drizzle-orm"
 export * from "./errors"
-export type { JobStatus, TaskEventSource, TaskStatus } from "./schema"
+export type {
+	JobStatus,
+	Platform,
+	TaskEventSource,
+	TaskStatus,
+	ThreadSource,
+	TraceEventKind,
+} from "./schema"
 export * as schema from "./schema"
 export * from "./service"

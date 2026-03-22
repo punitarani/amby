@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, inArray, isNull, lte, or, schema, sql } from "@amby/db"
+import type { ThreadSource } from "@amby/db"
+import { and, asc, desc, eq, inArray, lte, schema, sql } from "@amby/db"
 import type { LanguageModel } from "ai"
 import { generateObject } from "ai"
 import { Effect } from "effect"
@@ -11,26 +12,17 @@ const STALE_ARCHIVE_MS = 24 * 60 * 60 * 1000
 const OPEN_THREADS_CAP = 10
 const TAIL_BUDGET = 20
 const SYNOPSIS_BATCH_CAP = 3
+const ARCHIVAL_THROTTLE_MS = 5 * 60 * 1000
 
+export type RouteSource = "native" | "reply_chain" | "derived" | "manual"
 export type RouteAction = "continue" | "switch" | "new"
 
-/**
- * Confidence values are trace-only metadata for observability — they are NOT
- * used for downstream logic (e.g. fallback routing, threshold gating).
- *
- * - 0.85 — heuristic continue (short time gap)
- * - 0.80 — heuristic switch (label substring match)
- * - 0.78 — heuristic switch (keyword match, ≥2 hits)
- * - 0.72 — model-routed switch
- * - 0.70 — model-routed new thread
- * - 0.65 — model-routed continue (default fallback)
- */
 export type RouteDecision = {
 	action: RouteAction
 	threadId: string
+	source: RouteSource
 	label?: string
 	keywords?: string[]
-	confidence: number
 }
 
 export type OpenThreadRow = {
@@ -41,13 +33,15 @@ export type OpenThreadRow = {
 	lastActiveAt: Date
 }
 
+export type PlatformContext = {
+	threadKey?: string
+	replyToMessageId?: string
+}
+
 const routeObjectSchema = z.object({
 	action: z.enum(["continue", "switch", "new"]),
-	/** 0-based index into the candidate open-threads list (newest-first). Only for switch. */
 	threadIndex: z.number().int().min(0).optional().nullable(),
-	/** Short label when action is "new" (e.g. topic name). */
 	label: z.string().max(120).optional(),
-	/** 3-5 topic keywords for semantic matching. */
 	keywords: z.array(z.string().max(40)).max(5).optional(),
 })
 
@@ -64,22 +58,20 @@ export function routeMessage(
 ): RouteDecision | null {
 	const gapMs = Date.now() - lastMessageAt.getTime()
 	if (gapMs < GAP_CONTINUE_MS) {
-		return { action: "continue", threadId: lastThreadId, confidence: 0.85 }
+		return { action: "continue", threadId: lastThreadId, source: "derived" }
 	}
 
-	// Label match with word boundaries
 	for (const thread of openThreads) {
 		if (thread.label && matchesLabel(message, thread.label)) {
-			return { action: "switch", threadId: thread.id, confidence: 0.8 }
+			return { action: "switch", threadId: thread.id, source: "derived" }
 		}
 	}
 
-	// Keyword match: 2+ keyword hits → switch
 	for (const thread of openThreads) {
 		if (!thread.keywords?.length) continue
 		const hits = thread.keywords.filter((kw) => matchesLabel(message, kw)).length
 		if (hits >= 2) {
-			return { action: "switch", threadId: thread.id, confidence: 0.78 }
+			return { action: "switch", threadId: thread.id, source: "derived" }
 		}
 	}
 
@@ -114,9 +106,8 @@ export async function routeWithModel(
 	openThreads: ReadonlyArray<OpenThreadRow>,
 	lastThreadId: string,
 ): Promise<RouteDecision> {
-	// No open threads → skip model call, go straight to "new"
 	if (openThreads.length === 0) {
-		return { action: "new", threadId: crypto.randomUUID(), confidence: 0.7 }
+		return { action: "new", threadId: crypto.randomUUID(), source: "derived" }
 	}
 
 	const { object } = await generateObject({
@@ -129,9 +120,9 @@ export async function routeWithModel(
 		return {
 			action: "new",
 			threadId: crypto.randomUUID(),
+			source: "derived",
 			label: object.label?.trim() || undefined,
 			keywords: object.keywords?.length ? object.keywords : undefined,
-			confidence: 0.7,
 		}
 	}
 
@@ -139,14 +130,14 @@ export async function routeWithModel(
 		const idx = object.threadIndex ?? 0
 		const picked = openThreads[idx]
 		if (picked) {
-			return { action: "switch", threadId: picked.id, confidence: 0.72 }
+			return { action: "switch", threadId: picked.id, source: "derived" }
 		}
 		console.warn(
 			`[Router] threadIndex=${idx} out of bounds (max=${openThreads.length - 1}), falling back to continue`,
 		)
 	}
 
-	return { action: "continue", threadId: lastThreadId, confidence: 0.65 }
+	return { action: "continue", threadId: lastThreadId, source: "derived" }
 }
 
 type QueryFn = <T>(
@@ -173,12 +164,23 @@ ${transcript}`,
 	return { synopsis: object.synopsis.trim(), keywords: object.keywords }
 }
 
+// --- Archival throttle ---
+
+const archivalLastRun = new Map<string, number>()
+
 export function archiveStaleThreads(
 	query: QueryFn,
 	conversationId: string,
 	model: LanguageModel,
 ): Effect.Effect<void, AgentError> {
-	const cutoff = new Date(Date.now() - STALE_ARCHIVE_MS)
+	const now = Date.now()
+	const lastRun = archivalLastRun.get(conversationId) ?? 0
+	if (now - lastRun < ARCHIVAL_THROTTLE_MS) {
+		return Effect.void
+	}
+	archivalLastRun.set(conversationId, now)
+
+	const cutoff = new Date(now - STALE_ARCHIVE_MS)
 	return Effect.gen(function* () {
 		const stale = yield* query((d) =>
 			d
@@ -197,8 +199,6 @@ export function archiveStaleThreads(
 		)
 
 		const needsSynopsis = stale.filter((r) => !r.synopsis?.trim())
-
-		// Batch-fetch messages for all threads needing synopsis in one query
 		const threadIds = needsSynopsis.map((r) => r.id)
 		const allMsgs =
 			threadIds.length > 0
@@ -221,7 +221,6 @@ export function archiveStaleThreads(
 					)
 				: []
 
-		// Group by threadId, take last TAIL_BUDGET per thread
 		const msgsByThread = new Map<string, typeof allMsgs>()
 		for (const msg of allMsgs) {
 			if (!msg.threadId) continue
@@ -272,12 +271,47 @@ export function archiveStaleThreads(
 	)
 }
 
+// --- ensureDefaultThread with unique partial index ---
+
 export function ensureDefaultThread(
 	query: QueryFn,
 	conversationId: string,
 ): Effect.Effect<string, AgentError> {
 	return Effect.gen(function* () {
+		// Try insert with onConflictDoNothing on the unique partial index
+		const rows = yield* query((d) =>
+			d
+				.insert(schema.conversationThreads)
+				.values({
+					conversationId,
+					source: "derived" as const,
+					isDefault: true,
+					status: "open",
+				})
+				.onConflictDoNothing()
+				.returning({ id: schema.conversationThreads.id }),
+		)
+
+		if (rows[0]) return rows[0].id
+
+		// Conflict — select the existing default thread
 		const existing = yield* query((d) =>
+			d
+				.select({ id: schema.conversationThreads.id })
+				.from(schema.conversationThreads)
+				.where(
+					and(
+						eq(schema.conversationThreads.conversationId, conversationId),
+						eq(schema.conversationThreads.isDefault, true),
+					),
+				)
+				.limit(1),
+		)
+
+		if (existing[0]) return existing[0].id
+
+		// Shouldn't happen, but fallback to oldest thread
+		const fallback = yield* query((d) =>
 			d
 				.select({ id: schema.conversationThreads.id })
 				.from(schema.conversationThreads)
@@ -286,21 +320,9 @@ export function ensureDefaultThread(
 				.limit(1),
 		)
 
-		if (existing[0]) return existing[0].id
+		if (fallback[0]) return fallback[0].id
 
-		const rows = yield* query((d) =>
-			d
-				.insert(schema.conversationThreads)
-				.values({ conversationId, status: "open" })
-				.returning({ id: schema.conversationThreads.id }),
-		)
-
-		const row = rows[0]
-		if (!row) {
-			return yield* Effect.fail(new AgentError({ message: "Failed to create default thread" }))
-		}
-
-		return row.id
+		return yield* Effect.fail(new AgentError({ message: "Failed to create default thread" }))
 	}).pipe(
 		Effect.mapError(
 			(e) =>
@@ -312,39 +334,103 @@ export function ensureDefaultThread(
 	)
 }
 
+// --- messageThreadFilter (simplified) ---
+
+export function messageThreadFilter(conversationId: string, threadId: string) {
+	return and(
+		eq(schema.messages.conversationId, conversationId),
+		eq(schema.messages.threadId, threadId),
+	)
+}
+
+// --- ResolveThreadResult ---
+
 export type ResolveThreadResult = {
 	threadId: string
-	defaultThreadId: string
 	decision: RouteDecision
 	threadMessageCount: number
 	previousLastThreadId: string
-	/** True if this thread had no activity for >1h before this turn (synopsis bridge). */
 	threadWasDormant: boolean
 }
 
-export function messageThreadFilter(
-	conversationId: string,
-	resolvedThreadId: string,
-	defaultThreadId: string,
-) {
-	const threadScope =
-		resolvedThreadId === defaultThreadId
-			? or(eq(schema.messages.threadId, resolvedThreadId), isNull(schema.messages.threadId))
-			: eq(schema.messages.threadId, resolvedThreadId)
-	return and(eq(schema.messages.conversationId, conversationId), threadScope)
-}
+// --- resolveThread: 4-step resolution ---
 
 export function resolveThread(
 	query: QueryFn,
 	conversationId: string,
 	inboundText: string,
 	model: LanguageModel,
+	platformContext?: PlatformContext,
 ): Effect.Effect<ResolveThreadResult, AgentError> {
 	return Effect.gen(function* () {
 		const defaultThreadId = yield* ensureDefaultThread(query, conversationId)
 
-		yield* archiveStaleThreads(query, conversationId, model)
+		// Fire-and-forget archival
+		Effect.runFork(archiveStaleThreads(query, conversationId, model))
 
+		// Step 1: Native thread (platform thread key)
+		if (platformContext?.threadKey) {
+			const existing = yield* query((d) =>
+				d
+					.select({ id: schema.conversationThreads.id })
+					.from(schema.conversationThreads)
+					.where(
+						and(
+							eq(schema.conversationThreads.conversationId, conversationId),
+							eq(schema.conversationThreads.externalThreadKey, platformContext.threadKey ?? ""),
+						),
+					)
+					.limit(1),
+			)
+
+			let threadId: string
+			if (existing[0]) {
+				threadId = existing[0].id
+				yield* query((d) =>
+					d
+						.update(schema.conversationThreads)
+						.set({ status: "open", lastActiveAt: new Date() })
+						.where(eq(schema.conversationThreads.id, threadId)),
+				)
+			} else {
+				const rows = yield* query((d) =>
+					d
+						.insert(schema.conversationThreads)
+						.values({
+							conversationId,
+							source: "native" as ThreadSource,
+							externalThreadKey: platformContext.threadKey,
+							status: "open",
+							lastActiveAt: new Date(),
+						})
+						.returning({ id: schema.conversationThreads.id }),
+				)
+				const row = rows[0]
+				if (!row) {
+					return yield* Effect.fail(new AgentError({ message: "Failed to create native thread" }))
+				}
+				threadId = row.id
+			}
+
+			const countRows = yield* query((d) =>
+				d
+					.select({ c: sql<number>`count(*)::int` })
+					.from(schema.messages)
+					.where(messageThreadFilter(conversationId, threadId)),
+			)
+
+			return {
+				threadId,
+				decision: { action: "continue" as RouteAction, threadId, source: "native" as RouteSource },
+				threadMessageCount: Number(countRows[0]?.c ?? 0),
+				previousLastThreadId: defaultThreadId,
+				threadWasDormant: false,
+			}
+		}
+
+		// Step 2: Reply chain — future, skip for now (would follow replyToMessageId)
+
+		// Step 3: Derived (heuristic + model fallback)
 		const [openThreadRows, lastMsg] = yield* Effect.all(
 			[
 				query((d) =>
@@ -412,6 +498,7 @@ export function resolveThread(
 					.values({
 						id: resolvedThreadId,
 						conversationId,
+						source: "derived" as ThreadSource,
 						label: decision.label ?? null,
 						keywords: decision.keywords ?? null,
 						status: "open",
@@ -426,7 +513,6 @@ export function resolveThread(
 			resolvedThreadId = row.id
 		}
 
-		// Parallelize thread metadata fetch and message count
 		const [threadMeta, countRows] = yield* Effect.all(
 			[
 				query((d) =>
@@ -444,7 +530,7 @@ export function resolveThread(
 					d
 						.select({ c: sql<number>`count(*)::int` })
 						.from(schema.messages)
-						.where(messageThreadFilter(conversationId, resolvedThreadId, defaultThreadId)),
+						.where(messageThreadFilter(conversationId, resolvedThreadId)),
 				),
 			],
 			{ concurrency: 2 },
@@ -455,7 +541,6 @@ export function resolveThread(
 			? now.getTime() - metaRow.lastActiveAt.getTime() > DORMANT_MS
 			: false
 
-		// Idempotent update: re-open if archived, always update lastActiveAt
 		if (decision.action !== "new" && metaRow) {
 			yield* query((d) =>
 				d
@@ -469,7 +554,6 @@ export function resolveThread(
 
 		return {
 			threadId: resolvedThreadId,
-			defaultThreadId,
 			decision,
 			threadMessageCount,
 			previousLastThreadId,

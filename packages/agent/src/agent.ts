@@ -1,7 +1,7 @@
-import type { ChannelType } from "@amby/channels"
+import type { Platform } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
 import { ConnectorsService, createConnectorManagementTools } from "@amby/connectors"
-import { and, DbService, desc, eq, isNotNull, ne, schema } from "@amby/db"
+import { DbService, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import {
 	buildMemoriesText,
@@ -31,171 +31,34 @@ export type StreamPart =
 
 const ORCHESTRATOR_MAX_STEPS = 14
 
-import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
 import {
-	DORMANT_MS,
-	generateSynopsis,
-	messageThreadFilter,
-	type ResolveThreadResult,
-	resolveThread,
-} from "./router"
+	formatArtifactRecap,
+	loadOtherThreadSummaries,
+	loadThreadArtifacts,
+	loadThreadTail,
+} from "./context"
+import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
+import { type ResolveThreadResult, resolveThread } from "./router"
 import { createSubagentTools } from "./subagents/spawner"
 import { buildToolGroups } from "./subagents/tool-groups"
+import {
+	synopsisCurrentThreadIfOverflowsAfterSave,
+	synopsisPreviousThreadIfDormantSwitch,
+} from "./synopsis"
 import { createCodexAuthTools } from "./tools/codex-auth"
 import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
+import { persistExecutionTrace } from "./traces"
 import { extractToolUserMessages } from "./utils/extract-tool-user-messages"
-
-const THREAD_TAIL_LIMIT = 20
-const ARTIFACT_MSG_LIMIT = 5
-const OTHER_THREAD_CAP = 5
-const RECENT_WITH_TOOLS = 4
-const SUMMARY_TRUNCATE = 200
-const ARTIFACT_TRUNCATE = 400
-const TOOL_OUTPUT_TRUNCATE = 500
-
-type TraceData = {
-	toolCalls?: Array<{ toolCallId: string; toolName: string; input: unknown }>
-	toolResults?: Array<{ toolCallId: string; toolName: string; output: unknown }>
-}
-
-export function extractTraceSummary(
-	steps: ReadonlyArray<{
-		toolCalls: ReadonlyArray<{ toolCallId: string; toolName: string; input: unknown }>
-		toolResults: ReadonlyArray<{
-			toolCallId: string
-			toolName: string
-			output: unknown
-		}>
-	}>,
-): TraceData {
-	const toolCalls = steps.flatMap((s) =>
-		s.toolCalls.map((tc) => ({
-			toolCallId: tc.toolCallId,
-			toolName: tc.toolName,
-			input: tc.input,
-		})),
-	)
-	const toolResults = steps.flatMap((s) =>
-		s.toolResults.map((tr) => ({
-			toolCallId: tr.toolCallId,
-			toolName: tr.toolName,
-			output: summarizeToolOutput(tr.output),
-		})),
-	)
-	return {
-		toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-		toolResults: toolResults.length > 0 ? toolResults : undefined,
-	}
-}
-
-/** @deprecated Use extractTraceSummary instead */
-export const extractTraceData = extractTraceSummary
-
-export function summarizeToolOutput(output: unknown): unknown {
-	if (typeof output === "object" && output !== null && "summary" in output) {
-		return output
-	}
-	if (typeof output === "string") {
-		if (output.length <= TOOL_OUTPUT_TRUNCATE) return output
-		const cutPoint = output.lastIndexOf(" ", TOOL_OUTPUT_TRUNCATE)
-		const safePoint = cutPoint > TOOL_OUTPUT_TRUNCATE - 100 ? cutPoint : TOOL_OUTPUT_TRUNCATE
-		return `${output.slice(0, safePoint)}…`
-	}
-	return output
-}
 
 function buildThreadMeta(threadCtx: ResolveThreadResult) {
 	return {
 		threadId: threadCtx.threadId,
 		router: {
 			action: threadCtx.decision.action,
-			confidence: threadCtx.decision.confidence,
+			source: threadCtx.decision.source,
 		},
 	}
-}
-
-export function formatToolAnnotation(toolResults: unknown[]): string {
-	if (toolResults.length === 0) return ""
-	const parts = toolResults.map((tr: unknown) => {
-		if (typeof tr !== "object" || tr === null) return "unknown"
-		const name = "toolName" in tr && typeof tr.toolName === "string" ? tr.toolName : "unknown"
-		const output = "output" in tr ? tr.output : undefined
-		const summary =
-			typeof output === "object" &&
-			output !== null &&
-			"summary" in output &&
-			typeof output.summary === "string"
-				? output.summary.slice(0, SUMMARY_TRUNCATE)
-				: ""
-		return summary ? `${name}: ${summary}` : name
-	})
-	return `[Tools used: ${parts.join("; ")}]`
-}
-
-export function buildReplayMessages(
-	rows: Array<{
-		role: string
-		content: string
-		toolCalls: unknown
-		toolResults: unknown
-	}>,
-): Array<{ role: "user" | "assistant"; content: string }> {
-	const filtered = rows.filter(
-		(
-			r,
-		): r is {
-			role: "user" | "assistant"
-			content: string
-			toolCalls: unknown
-			toolResults: unknown
-		} => r.role === "user" || r.role === "assistant",
-	)
-	const recentStart = Math.max(0, filtered.length - RECENT_WITH_TOOLS)
-	return filtered.map((row, i) => {
-		if (i < recentStart || row.role !== "assistant" || !Array.isArray(row.toolResults)) {
-			return { role: row.role, content: row.content }
-		}
-		const annotation = formatToolAnnotation(row.toolResults)
-		return {
-			role: row.role,
-			content: annotation ? `${row.content}\n\n${annotation}` : row.content,
-		}
-	})
-}
-
-export function formatArtifactRecap(
-	rows: ReadonlyArray<{ toolResults: unknown; content: string }>,
-	threadLabel: string | null,
-): string {
-	const bullets: string[] = []
-	for (const row of rows) {
-		const tr = row.toolResults
-		if (Array.isArray(tr)) {
-			for (const item of tr) {
-				if (typeof item !== "object" || item === null || !("output" in item)) continue
-				const output = item.output
-				if (
-					typeof output === "object" &&
-					output !== null &&
-					"summary" in output &&
-					typeof output.summary === "string" &&
-					output.summary.trim()
-				) {
-					bullets.push(output.summary.trim())
-					continue
-				}
-				if (typeof output === "string" && output.trim()) {
-					const s =
-						output.length > ARTIFACT_TRUNCATE ? `${output.slice(0, ARTIFACT_TRUNCATE)}…` : output
-					bullets.push(s.trim())
-				}
-			}
-		}
-	}
-	if (bullets.length === 0) return ""
-	const title = threadLabel?.trim() || "this topic"
-	return `## Thread context (${title})\n${bullets.map((b) => `- ${b}`).join("\n")}`
 }
 
 export class AgentService extends Context.Tag("AgentService")<
@@ -220,7 +83,11 @@ export class AgentService extends Context.Tag("AgentService")<
 			content: string,
 			onPart: (part: StreamPart) => void,
 		) => Effect.Effect<string, AgentError>
-		readonly ensureConversation: (channelType?: ChannelType) => Effect.Effect<string, AgentError>
+		readonly ensureConversation: (
+			platform: Platform,
+			externalConversationKey: string,
+			workspaceKey?: string,
+		) => Effect.Effect<string, AgentError>
 		readonly shutdown: () => Effect.Effect<void, AgentError>
 	}
 >() {}
@@ -249,88 +116,13 @@ export const makeAgentServiceLive = (userId: string) =>
 
 			const computer = createComputerTools(sandbox, userId)
 
-			const loadThreadTail = (
-				conversationId: string,
-				threadId: string,
-				defaultThreadId: string,
-				limit = THREAD_TAIL_LIMIT,
-			) =>
-				query((d) =>
-					d
-						.select({
-							role: schema.messages.role,
-							content: schema.messages.content,
-							toolCalls: schema.messages.toolCalls,
-							toolResults: schema.messages.toolResults,
-						})
-						.from(schema.messages)
-						.where(messageThreadFilter(conversationId, threadId, defaultThreadId))
-						.orderBy(desc(schema.messages.createdAt))
-						.limit(limit),
-				).pipe(Effect.map((rows) => buildReplayMessages(rows.reverse())))
-
-			const loadOtherThreadSummaries = (conversationId: string, excludeThreadId: string) =>
-				query((d) =>
-					d
-						.select({
-							label: schema.conversationThreads.label,
-							synopsis: schema.conversationThreads.synopsis,
-						})
-						.from(schema.conversationThreads)
-						.where(
-							and(
-								eq(schema.conversationThreads.conversationId, conversationId),
-								eq(schema.conversationThreads.status, "open"),
-								ne(schema.conversationThreads.id, excludeThreadId),
-							),
-						)
-						.orderBy(desc(schema.conversationThreads.lastActiveAt))
-						.limit(OTHER_THREAD_CAP),
-				).pipe(
-					Effect.map((rows) => {
-						const lines = rows
-							.map((r) => {
-								const label = r.label?.trim() || "Untitled"
-								const syn = r.synopsis?.trim() || "(no summary yet)"
-								return `- **${label}**: ${syn}`
-							})
-							.join("\n")
-						return lines.length ? `## Other active threads\n${lines}` : ""
-					}),
-				)
-
-			const loadRawArtifacts = (
-				conversationId: string,
-				threadId: string,
-				defaultThreadId: string,
-			) =>
-				query((d) =>
-					d
-						.select({
-							toolResults: schema.messages.toolResults,
-							content: schema.messages.content,
-						})
-						.from(schema.messages)
-						.where(
-							and(
-								messageThreadFilter(conversationId, threadId, defaultThreadId),
-								eq(schema.messages.role, "assistant"),
-								isNotNull(schema.messages.toolResults),
-							),
-						)
-						.orderBy(desc(schema.messages.createdAt))
-						.limit(ARTIFACT_MSG_LIMIT),
-				)
-
 			const saveMessage = (
 				conversationId: string,
-				role: "user" | "assistant" | "system" | "tool",
+				role: "user" | "assistant",
 				content: string,
 				opts?: {
 					metadata?: Record<string, unknown>
 					threadId?: string
-					toolCalls?: unknown[]
-					toolResults?: unknown[]
 				},
 			) =>
 				query((d) =>
@@ -342,8 +134,6 @@ export const makeAgentServiceLive = (userId: string) =>
 							content,
 							threadId: opts?.threadId,
 							metadata: opts?.metadata,
-							toolCalls: opts?.toolCalls,
-							toolResults: opts?.toolResults,
 						})
 						.returning({ id: schema.messages.id }),
 				)
@@ -353,110 +143,11 @@ export const makeAgentServiceLive = (userId: string) =>
 				content: string,
 				opts?: {
 					threadId?: string
-					toolCalls?: unknown[]
-					toolResults?: unknown[]
 				},
 			) =>
 				content.trim()
 					? saveMessage(conversationId, "assistant", content, opts)
 					: Effect.succeed([])
-
-			const persistTraces = (
-				messageId: string,
-				steps: ReadonlyArray<{
-					toolCalls: ReadonlyArray<{
-						toolCallId: string
-						toolName: string
-						input: unknown
-					}>
-					toolResults: ReadonlyArray<{
-						toolCallId: string
-						toolName: string
-						output: unknown
-					}>
-				}>,
-			) =>
-				Effect.gen(function* () {
-					const orchCalls = steps.flatMap((s) =>
-						s.toolCalls.map((tc) => ({
-							toolCallId: tc.toolCallId,
-							toolName: tc.toolName,
-							input: tc.input,
-						})),
-					)
-					const orchResults = steps.flatMap((s) =>
-						s.toolResults.map((tr) => ({
-							toolCallId: tr.toolCallId,
-							toolName: tr.toolName,
-							output: tr.output,
-						})),
-					)
-
-					// Insert orchestrator trace
-					const orchRows = yield* query((d) =>
-						d
-							.insert(schema.traces)
-							.values({
-								messageId,
-								agentName: "orchestrator",
-								toolCalls: orchCalls.length ? orchCalls : null,
-								toolResults: orchResults.length ? orchResults : null,
-							})
-							.returning({ id: schema.traces.id }),
-					)
-					const orchRow = orchRows[0]
-					if (!orchRow) return
-
-					// Extract subagent traces from delegate_* results
-					const subTraces = orchResults
-						.filter(
-							(tr) =>
-								tr.toolName.startsWith("delegate_") &&
-								typeof tr.output === "object" &&
-								tr.output !== null &&
-								"_trace" in tr.output,
-						)
-						.map(
-							(tr) =>
-								(
-									tr.output as {
-										_trace: {
-											agentName: string
-											steps: Array<{
-												toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown }>
-												toolResults: Array<{
-													toolCallId: string
-													toolName: string
-													output: unknown
-												}>
-											}>
-											durationMs: number
-										}
-									}
-								)._trace,
-						)
-
-					if (subTraces.length > 0) {
-						yield* query((d) =>
-							d.insert(schema.traces).values(
-								subTraces.map((t) => ({
-									messageId,
-									parentTraceId: orchRow.id,
-									agentName: t.agentName,
-									toolCalls: t.steps.flatMap((s) => s.toolCalls),
-									toolResults: t.steps.flatMap((s) => s.toolResults),
-									durationMs: t.durationMs,
-								})),
-							),
-						)
-					}
-				}).pipe(
-					Effect.catchAll((e) =>
-						Effect.sync(() => {
-							console.warn("[Traces] Persistence failed:", e)
-						}),
-					),
-				)
 
 			const prepareContext = (
 				conversationId: string,
@@ -464,7 +155,6 @@ export const makeAgentServiceLive = (userId: string) =>
 				onReply?: ReplyFn,
 			) =>
 				Effect.gen(function* () {
-					// Parallel: user row + profile
 					const [userRow, profile] = yield* Effect.all(
 						[
 							query((d) =>
@@ -489,7 +179,6 @@ export const makeAgentServiceLive = (userId: string) =>
 					const deduped = deduplicateMemories(profile.static, profile.dynamic)
 					const memoryContext = buildMemoriesText(deduped)
 
-					// Parallel: thread metadata, history, other threads, artifacts
 					const [threadRow, history, otherThreads, artifactRows] = yield* Effect.all(
 						[
 							query((d) =>
@@ -502,9 +191,9 @@ export const makeAgentServiceLive = (userId: string) =>
 									.where(eq(schema.conversationThreads.id, threadCtx.threadId))
 									.limit(1),
 							),
-							loadThreadTail(conversationId, threadCtx.threadId, threadCtx.defaultThreadId),
-							loadOtherThreadSummaries(conversationId, threadCtx.threadId),
-							loadRawArtifacts(conversationId, threadCtx.threadId, threadCtx.defaultThreadId),
+							loadThreadTail(query, conversationId, threadCtx.threadId),
+							loadOtherThreadSummaries(query, conversationId, threadCtx.threadId),
+							loadThreadArtifacts(query, conversationId, threadCtx.threadId),
 						],
 						{ concurrency: 4 },
 					)
@@ -608,109 +297,6 @@ export const makeAgentServiceLive = (userId: string) =>
 					}),
 				})
 
-			const fetchTranscriptForSynopsis = (
-				conversationId: string,
-				threadId: string,
-				defaultThreadId: string,
-			) =>
-				query((d) =>
-					d
-						.select({ role: schema.messages.role, content: schema.messages.content })
-						.from(schema.messages)
-						.where(messageThreadFilter(conversationId, threadId, defaultThreadId))
-						.orderBy(desc(schema.messages.createdAt))
-						.limit(THREAD_TAIL_LIMIT),
-				).pipe(
-					Effect.map((rows) =>
-						rows
-							.reverse()
-							.map((m) => `${m.role}: ${m.content}`)
-							.join("\n"),
-					),
-				)
-
-			const maybeGenerateSynopsis = (
-				threadId: string,
-				conversationId: string,
-				defaultThreadId: string,
-			) =>
-				Effect.gen(function* () {
-					const transcript = yield* fetchTranscriptForSynopsis(
-						conversationId,
-						threadId,
-						defaultThreadId,
-					)
-					if (!transcript.trim()) return
-
-					const { synopsis, keywords } = yield* Effect.tryPromise({
-						try: () => generateSynopsis(baseModel, transcript),
-						catch: (cause) => new AgentError({ message: "Synopsis generation failed", cause }),
-					})
-					yield* query((d) =>
-						d
-							.update(schema.conversationThreads)
-							.set({ synopsis, keywords })
-							.where(eq(schema.conversationThreads.id, threadId)),
-					)
-				}).pipe(
-					Effect.catchAll((e) =>
-						Effect.sync(() => {
-							console.warn("[Synopsis] Failed:", e)
-						}),
-					),
-				)
-
-			const synopsisPreviousThreadIfDormantSwitch = (
-				conversationId: string,
-				threadCtx: ResolveThreadResult,
-			) =>
-				Effect.gen(function* () {
-					const switchedAway =
-						threadCtx.previousLastThreadId !== threadCtx.threadId &&
-						(threadCtx.decision.action === "switch" || threadCtx.decision.action === "new")
-
-					if (!switchedAway) return
-
-					const lastRows = yield* query((d) =>
-						d
-							.select({ createdAt: schema.messages.createdAt })
-							.from(schema.messages)
-							.where(
-								messageThreadFilter(
-									conversationId,
-									threadCtx.previousLastThreadId,
-									threadCtx.defaultThreadId,
-								),
-							)
-							.orderBy(desc(schema.messages.createdAt))
-							.limit(1),
-					)
-					const lastAt = lastRows[0]?.createdAt
-					if (!lastAt || Date.now() - lastAt.getTime() <= DORMANT_MS) return
-
-					yield* maybeGenerateSynopsis(
-						threadCtx.previousLastThreadId,
-						conversationId,
-						threadCtx.defaultThreadId,
-					)
-				}).pipe(Effect.catchAll(() => Effect.void))
-
-			const synopsisCurrentThreadIfOverflowsAfterSave = (
-				conversationId: string,
-				threadCtx: ResolveThreadResult,
-				inboundMessageCount: number,
-			) =>
-				Effect.gen(function* () {
-					const projectedCount = threadCtx.threadMessageCount + inboundMessageCount
-					if (projectedCount <= THREAD_TAIL_LIMIT) return
-
-					yield* maybeGenerateSynopsis(
-						threadCtx.threadId,
-						conversationId,
-						threadCtx.defaultThreadId,
-					)
-				}).pipe(Effect.catchAll(() => Effect.void))
-
 			const sendToolUserMessages = (toolUserMessages: string[], onReply: ReplyFn) =>
 				Effect.tryPromise(async () => {
 					for (const message of toolUserMessages) {
@@ -740,7 +326,12 @@ export const makeAgentServiceLive = (userId: string) =>
 						const inboundText = requestMessages.map((m) => m.content).join("\n\n")
 						const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
 
-						yield* synopsisPreviousThreadIfDormantSwitch(conversationId, threadCtx)
+						yield* synopsisPreviousThreadIfDormantSwitch(
+							query,
+							baseModel,
+							conversationId,
+							threadCtx,
+						)
 
 						const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
 							yield* prepareContext(conversationId, threadCtx, onReply)
@@ -772,12 +363,10 @@ export const makeAgentServiceLive = (userId: string) =>
 							orchestratorMetadata,
 						)
 
-						const messages = onPart
-							? [
-									...history,
-									...requestMessages.map((m) => ({ role: "user" as const, content: m.content })),
-								]
-							: [...history, ...requestMessages]
+						const messages = [
+							...history,
+							...requestMessages.map((m) => ({ role: "user" as const, content: m.content })),
+						]
 
 						const result = yield* Effect.tryPromise({
 							try: async () => {
@@ -837,27 +426,35 @@ export const makeAgentServiceLive = (userId: string) =>
 
 						const threadMeta = buildThreadMeta(threadCtx)
 						const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
-						const trace = extractTraceSummary(result.steps ?? [])
 
+						// Persist inbound messages
 						for (const message of requestMessages) {
 							yield* saveMessage(conversationId, "user", message.content, {
 								metadata: userMetadata,
 								threadId: threadCtx.threadId,
 							})
 						}
+
+						// Save assistant message
 						const savedRows = yield* maybeSaveAssistantMessage(conversationId, finalText, {
 							threadId: threadCtx.threadId,
-							toolCalls: trace.toolCalls,
-							toolResults: trace.toolResults,
 						})
 
-						// Persist full traces if we have a message ID
+						// Persist execution traces
 						const savedMessageId = savedRows[0]?.id
-						if (savedMessageId && result.steps?.length) {
-							yield* persistTraces(savedMessageId, result.steps)
+						if (result.steps?.length) {
+							yield* persistExecutionTrace(query, {
+								conversationId,
+								threadId: threadCtx.threadId,
+								messageId: savedMessageId,
+								agentName: "orchestrator",
+								steps: result.steps,
+							})
 						}
 
 						yield* synopsisCurrentThreadIfOverflowsAfterSave(
+							query,
+							baseModel,
 							conversationId,
 							threadCtx,
 							requestMessages.length + 1,
@@ -917,28 +514,31 @@ export const makeAgentServiceLive = (userId: string) =>
 						),
 					),
 
-				ensureConversation: (channelType = "cli") =>
+				ensureConversation: (platform, externalConversationKey, workspaceKey) =>
 					query((d) =>
-						d.transaction(async (tx) => {
-							const existing = await tx
-								.select({ id: schema.conversations.id })
-								.from(schema.conversations)
-								.where(eq(schema.conversations.userId, userId))
-								.orderBy(desc(schema.conversations.updatedAt))
-								.limit(1)
-
-							if (existing[0]) return existing[0].id
-
-							const rows = await tx
-								.insert(schema.conversations)
-								.values({ userId, channelType })
-								.returning({ id: schema.conversations.id })
-
+						d
+							.insert(schema.conversations)
+							.values({
+								userId,
+								platform,
+								externalConversationKey,
+								workspaceKey: workspaceKey ?? null,
+							})
+							.onConflictDoUpdate({
+								target: [
+									schema.conversations.platform,
+									schema.conversations.workspaceKey,
+									schema.conversations.externalConversationKey,
+								],
+								set: { updatedAt: new Date() },
+							})
+							.returning({ id: schema.conversations.id }),
+					).pipe(
+						Effect.map((rows) => {
 							const row = rows[0]
-							if (!row) throw new Error("Failed to create conversation")
+							if (!row) throw new Error("Failed to ensure conversation")
 							return row.id
 						}),
-					).pipe(
 						Effect.mapError(
 							(e) =>
 								new AgentError({

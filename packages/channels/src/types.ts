@@ -3,6 +3,9 @@ import type { ChannelError } from "./errors"
 
 export type ChannelType = "cli" | "telegram"
 
+/** Platform superset — includes future platforms beyond what channels currently support. */
+export type Platform = "cli" | "telegram" | "slack" | "discord"
+
 export interface IncomingMessage {
 	conversationId: string
 	content: string
