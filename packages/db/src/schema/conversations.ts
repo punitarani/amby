@@ -45,6 +45,7 @@ export const conversations = pgTable(
 	},
 	(t) => [
 		uniqueIndex("conversations_platform_key_idx").on(
+			t.userId,
 			t.platform,
 			t.workspaceKey,
 			t.externalConversationKey,

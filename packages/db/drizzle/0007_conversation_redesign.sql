@@ -56,7 +56,7 @@ CREATE INDEX "traces_parent_trace_id_idx" ON "traces" USING btree ("parent_trace
 CREATE INDEX "traces_root_trace_id_idx" ON "traces" USING btree ("root_trace_id");--> statement-breakpoint
 CREATE INDEX "traces_thread_idx" ON "traces" USING btree ("thread_id");--> statement-breakpoint
 ALTER TABLE "messages" ADD CONSTRAINT "messages_thread_id_conversation_threads_id_fk" FOREIGN KEY ("thread_id") REFERENCES "public"."conversation_threads"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "conversations_platform_key_idx" ON "conversations" USING btree ("platform","workspace_key","external_conversation_key");--> statement-breakpoint
+CREATE UNIQUE INDEX "conversations_platform_key_idx" ON "conversations" USING btree ("user_id","platform","workspace_key","external_conversation_key");--> statement-breakpoint
 CREATE INDEX "conversations_user_idx" ON "conversations" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "messages_thread_idx" ON "messages" USING btree ("thread_id","created_at");--> statement-breakpoint
 ALTER TABLE "conversations" ALTER COLUMN "platform" DROP DEFAULT;--> statement-breakpoint

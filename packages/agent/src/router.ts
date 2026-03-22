@@ -465,8 +465,23 @@ export function resolveThread(
 		}))
 
 		const lastRow = lastMsg[0]
-		const lastMessageAt = lastRow?.createdAt ?? new Date()
-		const previousLastThreadId = lastRow?.threadId ?? defaultThreadId
+
+		if (!lastRow) {
+			return {
+				threadId: defaultThreadId,
+				decision: {
+					action: "continue" as RouteAction,
+					threadId: defaultThreadId,
+					source: "derived" as RouteSource,
+				},
+				threadMessageCount: 0,
+				previousLastThreadId: defaultThreadId,
+				threadWasDormant: false,
+			}
+		}
+
+		const lastMessageAt = lastRow.createdAt
+		const previousLastThreadId = lastRow.threadId ?? defaultThreadId
 
 		const heuristic = routeMessage(inboundText, previousLastThreadId, lastMessageAt, openThreads)
 

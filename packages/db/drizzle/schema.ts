@@ -328,7 +328,7 @@ export const conversations = pgTable(
 		id: uuid().defaultRandom().primaryKey().notNull(),
 		userId: text("user_id").notNull(),
 		platform: text().notNull(),
-		workspaceKey: text("workspace_key"),
+		workspaceKey: text("workspace_key").notNull().default(""),
 		externalConversationKey: text("external_conversation_key").notNull(),
 		title: text(),
 		metadata: jsonb(),
@@ -342,6 +342,7 @@ export const conversations = pgTable(
 	(table) => [
 		uniqueIndex("conversations_platform_key_idx").using(
 			"btree",
+			table.userId.asc().nullsLast().op("text_ops"),
 			table.platform.asc().nullsLast().op("text_ops"),
 			table.workspaceKey.asc().nullsLast().op("text_ops"),
 			table.externalConversationKey.asc().nullsLast().op("text_ops"),

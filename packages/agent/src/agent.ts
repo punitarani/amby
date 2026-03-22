@@ -326,11 +326,8 @@ export const makeAgentServiceLive = (userId: string) =>
 						const inboundText = requestMessages.map((m) => m.content).join("\n\n")
 						const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
 
-						yield* synopsisPreviousThreadIfDormantSwitch(
-							query,
-							baseModel,
-							conversationId,
-							threadCtx,
+						Effect.runFork(
+							synopsisPreviousThreadIfDormantSwitch(query, baseModel, conversationId, threadCtx),
 						)
 
 						const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
@@ -452,12 +449,14 @@ export const makeAgentServiceLive = (userId: string) =>
 							})
 						}
 
-						yield* synopsisCurrentThreadIfOverflowsAfterSave(
-							query,
-							baseModel,
-							conversationId,
-							threadCtx,
-							requestMessages.length + 1,
+						Effect.runFork(
+							synopsisCurrentThreadIfOverflowsAfterSave(
+								query,
+								baseModel,
+								conversationId,
+								threadCtx,
+								requestMessages.length + 1,
+							),
 						)
 
 						return finalText
@@ -526,6 +525,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							})
 							.onConflictDoUpdate({
 								target: [
+									schema.conversations.userId,
 									schema.conversations.platform,
 									schema.conversations.workspaceKey,
 									schema.conversations.externalConversationKey,
