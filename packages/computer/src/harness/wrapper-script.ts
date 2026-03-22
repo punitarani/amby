@@ -172,7 +172,7 @@ if [ "$EXIT_CODE" -eq 0 ]; then
   write_status "succeeded" "$EXIT_CODE" "$RESULT"
   send "task.completed" "succeeded" "$RESULT" "$EXIT_CODE"
 else
-  ERR_TAIL=$(tail -c 1000 ../artifacts/stderr.log 2>/dev/null | head -c 500 || echo "Unknown error")
+  ERR_TAIL=$(tail -c 500 ../artifacts/stderr.log 2>/dev/null || echo "Unknown error")
   write_status "failed" "$EXIT_CODE" "$ERR_TAIL"
   send "task.failed" "failed" "$ERR_TAIL" "$EXIT_CODE"
 fi

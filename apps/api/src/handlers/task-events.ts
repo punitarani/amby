@@ -240,6 +240,7 @@ export const handleTaskEventPost = (request: Request) =>
 			// Inline notification for terminal events — don't wait for reconciliation cron
 			if (
 				casResult.length > 0 &&
+				statusOk &&
 				nextStatus &&
 				(body.eventType === "task.completed" || body.eventType === "task.failed")
 			) {
@@ -254,7 +255,6 @@ export const handleTaskEventPost = (request: Request) =>
 					if (telegram._tag === "Some") {
 						yield* Effect.tryPromise({
 							try: async () => {
-								await telegram.value.sendMessage(target.chatId, text)
 								const notifyNow = new Date()
 								await db
 									.update(schema.tasks)
@@ -264,6 +264,7 @@ export const handleTaskEventPost = (request: Request) =>
 										updatedAt: notifyNow,
 									})
 									.where(eq(schema.tasks.id, task.id))
+								await telegram.value.sendMessage(target.chatId, text)
 							},
 							catch: (e) => {
 								console.error(`[task-events] inline notification failed for task ${task.id}:`, e)

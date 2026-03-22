@@ -11,6 +11,7 @@ import {
 	MAX_ACTIVE_TASKS_PER_USER,
 	MAX_WAIT_SECONDS,
 	POLL_INTERVAL_MS,
+	STALE_HEARTBEAT_MS,
 	taskSessionId,
 } from "../config"
 import { SandboxError, sandboxError, sandboxErrorFromDefect } from "../errors"
@@ -698,33 +699,40 @@ export const TaskSupervisorLive = Layer.scoped(
 						)
 					}
 
-					// If task is still running in DB, probe it eagerly via reconciliation
+					// Probe eagerly only when heartbeat/probe data is stale (callbacks stopped reporting)
 					if (task && task.status === "running" && task.sessionId && task.commandId) {
-						const runningTask = task
-						const sandbox = yield* sandboxService
-							.ensure(runningTask.userId)
-							.pipe(Effect.catchAll(() => Effect.succeed(null as Sandbox | null)))
+						const lastSignal = Math.max(
+							task.heartbeatAt?.getTime() ?? 0,
+							task.lastProbeAt?.getTime() ?? 0,
+						)
+						const isStale = Date.now() - lastSignal > STALE_HEARTBEAT_MS
 
-						if (sandbox) {
-							yield* Effect.tryPromise({
-								try: () =>
-									probeSingleTask(
-										{
-											db,
-											ensureSandbox: async () => sandbox,
-											isDev: env.NODE_ENV !== "production",
-										},
-										runningTask,
-									),
-								catch: () => new SandboxError({ message: "Probe failed" }),
-							}).pipe(Effect.catchAll(() => Effect.void))
-							// Re-read task after probe
-							task = yield* query((d) =>
-								d.select().from(schema.tasks).where(taskFilter).limit(1),
-							).pipe(
-								Effect.map((rows) => rows[0] ?? null),
-								Effect.mapError(sandboxError("Failed to get task")),
-							)
+						if (isStale) {
+							const runningTask = task
+							const sandbox = yield* sandboxService
+								.ensure(runningTask.userId)
+								.pipe(Effect.catchAll(() => Effect.succeed(null as Sandbox | null)))
+
+							if (sandbox) {
+								yield* Effect.tryPromise({
+									try: () =>
+										probeSingleTask(
+											{
+												db,
+												ensureSandbox: async () => sandbox,
+												isDev: env.NODE_ENV !== "production",
+											},
+											runningTask,
+										),
+									catch: () => new SandboxError({ message: "Probe failed" }),
+								}).pipe(Effect.catchAll(() => Effect.void))
+								task = yield* query((d) =>
+									d.select().from(schema.tasks).where(taskFilter).limit(1),
+								).pipe(
+									Effect.map((rows) => rows[0] ?? null),
+									Effect.mapError(sandboxError("Failed to get task")),
+								)
+							}
 						}
 					}
 
