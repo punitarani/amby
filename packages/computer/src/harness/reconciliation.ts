@@ -2,7 +2,7 @@ import type { Database, TaskStatus } from "@amby/db"
 import { and, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, schema } from "@amby/db"
 import type { Sandbox } from "@daytonaio/sdk"
 import { DaytonaNotFoundError } from "@daytonaio/sdk"
-import { STALE_HEARTBEAT_MS, TASK_BASE } from "../config"
+import { PREPARING_TIMEOUT_MS, STALE_HEARTBEAT_MS, TASK_BASE } from "../config"
 import { CodexProvider } from "./codex-provider"
 import { parseReplyTarget } from "./reply-target"
 import { isTerminal, TERMINAL_STATUSES } from "./task-state"
@@ -86,6 +86,24 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 	}
 
 	if (!task.sessionId || !task.commandId) {
+		if (task.status === "preparing") {
+			const age = Date.now() - (task.createdAt?.getTime() ?? 0)
+			if (age < PREPARING_TIMEOUT_MS) {
+				return
+			}
+			const now = new Date()
+			await db
+				.update(schema.tasks)
+				.set({
+					status: "lost",
+					error: "Task did not start in time.",
+					completedAt: now,
+					updatedAt: now,
+				})
+				.where(nonTerminalTaskWhere(task.id))
+			await insertReconcilerEvent(db, task.id, "task.lost", { reason: "preparing_timeout" })
+			return
+		}
 		const now = new Date()
 		await db
 			.update(schema.tasks)
