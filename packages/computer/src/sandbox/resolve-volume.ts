@@ -1,5 +1,5 @@
 import type { Database } from "@amby/db"
-import { eq, schema } from "@amby/db"
+import { and, eq, schema } from "@amby/db"
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
 import { Effect } from "effect"
 import {
@@ -95,7 +95,7 @@ async function upsertMainSandboxRow(
 	const existing = await db
 		.select({ id: schema.sandboxes.id })
 		.from(schema.sandboxes)
-		.where(eq(schema.sandboxes.userId, userId))
+		.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
 		.limit(1)
 		.then((rows) => rows[0])
 
@@ -220,7 +220,7 @@ export const ensureMainSandbox = (
 				db
 					.select({ status: schema.sandboxes.status })
 					.from(schema.sandboxes)
-					.where(eq(schema.sandboxes.userId, userId))
+					.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
 					.limit(1)
 					.then((rows) => rows[0]),
 			catch: (cause) =>
@@ -239,10 +239,13 @@ export const ensureMainSandbox = (
 			)
 		}
 
-		// Clear stale DB row if present
+		// Clear stale main sandbox DB row if present
 		if (record) {
 			yield* Effect.tryPromise({
-				try: () => db.delete(schema.sandboxes).where(eq(schema.sandboxes.userId, userId)),
+				try: () =>
+					db
+						.delete(schema.sandboxes)
+						.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main"))),
 				catch: (cause) =>
 					new SandboxError({
 						message: `Failed to clear stale sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -322,8 +325,10 @@ export async function replaceSandbox(
 		// Ignore — sandbox may already be gone
 	}
 
-	// Delete sandbox DB row
-	await db.delete(schema.sandboxes).where(eq(schema.sandboxes.userId, userId))
+	// Delete main sandbox DB row (preserve secondary sandboxes)
+	await db
+		.delete(schema.sandboxes)
+		.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
 
 	// Create new sandbox with same volume mount
 	const createSpec = {

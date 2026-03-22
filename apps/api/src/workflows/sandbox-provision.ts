@@ -9,7 +9,7 @@ import {
 	tryGetSandboxByName,
 	VOLUME_MOUNT_PATH,
 } from "@amby/computer/sandbox-config"
-import { DbService, eq, schema } from "@amby/db"
+import { DbService, and, eq, schema } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
@@ -66,7 +66,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 						db
 							.select({ id: schema.sandboxes.id })
 							.from(schema.sandboxes)
-							.where(eq(schema.sandboxes.userId, userId))
+							.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
 							.limit(1),
 					)
 					const existing = rows[0]
