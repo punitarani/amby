@@ -354,8 +354,9 @@ export function resolveThread(
 	return Effect.gen(function* () {
 		const defaultThreadId = yield* ensureDefaultThread(query, conversationId)
 
-		// Fire-and-forget archival
-		Effect.runFork(archiveStaleThreads(query, conversationId, model))
+		yield* archiveStaleThreads(query, conversationId, model).pipe(
+			Effect.catchAll(() => Effect.void),
+		)
 
 		// Step 1: Native thread (platform thread key)
 		if (platformContext?.threadKey) {
