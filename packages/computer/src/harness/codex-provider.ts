@@ -8,7 +8,7 @@ const AGENTS_MD = `# Task Instructions
 You are a background agent executing a delegated task. Work autonomously to completion.
 
 ## Output Requirements
-- Write your final output to ../artifacts/result.md
+- Your final message will be captured as the task result — make it complete and well-formatted
 - Save any generated files, data, or screenshots to ../artifacts/
 - Be thorough and complete — there is no follow-up interaction
 `
