@@ -1,5 +1,5 @@
 import { Image } from "@daytonaio/sdk"
-import { AGENT_WORKDIR } from "../config"
+import { AGENT_WORKDIR, DESKTOP_DIR, DOCUMENTS_DIR, DOWNLOADS_DIR } from "../config"
 
 // TODO: Once Daytona plan supports snapshot push, switch to:
 //   snapshot: "amby-computer:0.1.0"
@@ -36,7 +36,7 @@ export const sandboxImage = Image.base("ubuntu:24.04")
 	)
 	.runCommands(
 		"useradd -m -s /bin/bash -d /home/agent agent " +
-			"&& mkdir -p /home/agent/data /home/agent/.local/bin /home/agent/workspace " +
+			`&& mkdir -p ${DESKTOP_DIR} ${DOCUMENTS_DIR} ${DOWNLOADS_DIR} /home/agent/.local/bin ` +
 			"&& chown -R agent:agent /home/agent",
 	)
 	.runCommands("chmod 755 /home/user")

@@ -50,10 +50,10 @@ RUN useradd -m -s /bin/bash -d /home/user user \
 	&& chown -R user:user /home/user
 
 # agent — tool-calling user for the AI agent
-#   Access: everything user has + workspace, data, /opt/amby
+#   Access: everything user has + Desktop/Documents/Downloads, /opt/amby
 #   Can sudo as user (for browser/GUI tasks) and install packages as root
 RUN useradd -m -s /bin/bash -d /home/agent agent \
-	&& mkdir -p /home/agent/data /home/agent/.local/bin \
+	&& mkdir -p /home/agent/Desktop /home/agent/Documents /home/agent/Downloads /home/agent/.local/bin \
 	&& chown -R agent:agent /home/agent
 
 # agent can read user's home (not write)
@@ -77,7 +77,7 @@ ENV LANG=en_US.UTF-8 \
 	HOME=/home/agent \
 	PATH="/home/agent/.local/bin:/usr/local/bin:${PATH}"
 
-WORKDIR /home/user/Desktop
+WORKDIR /home/agent/Desktop
 
 USER agent
 

@@ -2,6 +2,9 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloud
 import {
 	buildSandboxCreateParams,
 	createDaytonaClient,
+	DESKTOP_DIR,
+	DOCUMENTS_DIR,
+	DOWNLOADS_DIR,
 	ensureVolume,
 	isDuplicateSandboxNameError,
 	sandboxName,
@@ -126,7 +129,16 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			},
 		)
 
-		// Step 3: Stop and archive so it starts fast later
+		// Step 3: Initialize volume directory structure (idempotent)
+		await step.do("init-volume-dirs", { timeout: "30 seconds" }, async () => {
+			const daytona = makeDaytona()
+			const sandbox = await daytona.get(name)
+			await sandbox.process.executeCommand(
+				`mkdir -p ${DESKTOP_DIR} ${DOCUMENTS_DIR} ${DOWNLOADS_DIR}`,
+			)
+		})
+
+		// Step 4: Stop and archive so it starts fast later
 		await step.do(
 			"stop-and-archive",
 			{
