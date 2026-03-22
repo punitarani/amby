@@ -30,6 +30,9 @@ export interface WorkerBindings {
 	ENABLE_CUA?: string
 	BRAINTRUST_API_KEY?: string
 	BRAINTRUST_PROJECT_ID?: string
+	BRAINTRUST_HARNESS_API_KEY?: string
+	BRAINTRUST_HARNESS_PROJECT_ID?: string
+	BRAINTRUST_HARNESS_ORG_NAME?: string
 	HYPERDRIVE?: { connectionString: string }
 	POSTHOG_KEY?: string
 	POSTHOG_HOST?: string
@@ -83,6 +86,9 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		ENABLE_CUA: bindings.ENABLE_CUA === "true",
 		BRAINTRUST_API_KEY: bindings.BRAINTRUST_API_KEY ?? "",
 		BRAINTRUST_PROJECT_ID: bindings.BRAINTRUST_PROJECT_ID ?? "",
+		BRAINTRUST_HARNESS_API_KEY: bindings.BRAINTRUST_HARNESS_API_KEY ?? "",
+		BRAINTRUST_HARNESS_PROJECT_ID: bindings.BRAINTRUST_HARNESS_PROJECT_ID ?? "",
+		BRAINTRUST_HARNESS_ORG_NAME: bindings.BRAINTRUST_HARNESS_ORG_NAME ?? "",
 		POSTHOG_KEY: bindings.POSTHOG_KEY ?? "",
 		POSTHOG_HOST: bindings.POSTHOG_HOST ?? "https://us.i.posthog.com",
 	})

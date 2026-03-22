@@ -22,6 +22,7 @@ export async function handleScheduledReconciliation(env: WorkerBindings): Promis
 							sendTelegram: async (chatId, text) => {
 								await telegram.sendMessage(chatId, text)
 							},
+							braintrustHarnessApiKey: env.BRAINTRUST_HARNESS_API_KEY || undefined,
 						}),
 					catch: (e) => {
 						console.error("[ReconciliationCron]", e)

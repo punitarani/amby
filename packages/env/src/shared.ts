@@ -30,6 +30,9 @@ export interface Env {
 	readonly ENABLE_CUA: boolean
 	readonly BRAINTRUST_API_KEY: string
 	readonly BRAINTRUST_PROJECT_ID: string
+	readonly BRAINTRUST_HARNESS_API_KEY: string
+	readonly BRAINTRUST_HARNESS_PROJECT_ID: string
+	readonly BRAINTRUST_HARNESS_ORG_NAME: string
 	readonly POSTHOG_KEY: string
 	readonly POSTHOG_HOST: string
 }

@@ -49,6 +49,15 @@ const EnvConfig = Config.all({
 	ENABLE_CUA: Config.boolean("ENABLE_CUA").pipe(Config.withDefault(false)),
 	BRAINTRUST_API_KEY: Config.string("BRAINTRUST_API_KEY").pipe(Config.withDefault("")),
 	BRAINTRUST_PROJECT_ID: Config.string("BRAINTRUST_PROJECT_ID").pipe(Config.withDefault("")),
+	BRAINTRUST_HARNESS_API_KEY: Config.string("BRAINTRUST_HARNESS_API_KEY").pipe(
+		Config.withDefault(""),
+	),
+	BRAINTRUST_HARNESS_PROJECT_ID: Config.string("BRAINTRUST_HARNESS_PROJECT_ID").pipe(
+		Config.withDefault(""),
+	),
+	BRAINTRUST_HARNESS_ORG_NAME: Config.string("BRAINTRUST_HARNESS_ORG_NAME").pipe(
+		Config.withDefault(""),
+	),
 	POSTHOG_KEY: Config.string("POSTHOG_KEY").pipe(Config.withDefault("")),
 	POSTHOG_HOST: Config.string("POSTHOG_HOST").pipe(Config.withDefault("https://us.i.posthog.com")),
 })
@@ -83,6 +92,9 @@ export const EnvServiceLive = Layer.effect(
 			ENABLE_CUA: raw.ENABLE_CUA,
 			BRAINTRUST_API_KEY: raw.BRAINTRUST_API_KEY,
 			BRAINTRUST_PROJECT_ID: raw.BRAINTRUST_PROJECT_ID,
+			BRAINTRUST_HARNESS_API_KEY: raw.BRAINTRUST_HARNESS_API_KEY,
+			BRAINTRUST_HARNESS_PROJECT_ID: raw.BRAINTRUST_HARNESS_PROJECT_ID,
+			BRAINTRUST_HARNESS_ORG_NAME: raw.BRAINTRUST_HARNESS_ORG_NAME,
 			POSTHOG_KEY: raw.POSTHOG_KEY,
 			POSTHOG_HOST: raw.POSTHOG_HOST,
 		}

@@ -8,6 +8,7 @@ import {
 	AGENT_WORKDIR,
 	CODEX_HOME,
 	DEFAULT_TASK_TIMEOUT_SECONDS,
+	harnessOtelKeyName,
 	MAX_ACTIVE_TASKS_PER_USER,
 	MAX_WAIT_SECONDS,
 	POLL_INTERVAL_MS,
@@ -26,6 +27,7 @@ import {
 	setCodexPendingDeviceAuth,
 	summarizeCodexAuth,
 } from "./auth-state"
+import { createHarnessOtelKey, deleteHarnessOtelKey } from "./braintrust-otel"
 import { mintCallbackSecret } from "./callback"
 import { CodexInstaller } from "./codex-installer"
 import { CodexProvider } from "./codex-provider"
@@ -602,6 +604,36 @@ export const TaskSupervisorLive = Layer.scoped(
 						}),
 					).pipe(Effect.mapError(sandboxError("Failed to record task.created")))
 
+					// Create per-task Braintrust OTEL key (optional, gated by env var)
+					let otelApiKey: string | undefined
+					let otelKeyId: string | undefined
+					const harnessApiKey = env.BRAINTRUST_HARNESS_API_KEY
+					if (harnessApiKey) {
+						yield* Effect.promise(async () => {
+							try {
+								const keyName = harnessOtelKeyName(env.NODE_ENV, sandbox.id, taskId)
+								const created = await createHarnessOtelKey(
+									{
+										masterApiKey: harnessApiKey,
+										orgName: env.BRAINTRUST_HARNESS_ORG_NAME || undefined,
+									},
+									keyName,
+								)
+								otelApiKey = created.secret
+								otelKeyId = created.id
+								await db
+									.update(schema.tasks)
+									.set({ metadata: { otelKeyId: created.id } })
+									.where(eq(schema.tasks.id, taskId))
+							} catch (e) {
+								console.warn(
+									"[TaskSupervisor] OTEL key creation failed, proceeding without OTEL:",
+									e,
+								)
+							}
+						})
+					}
+
 					// Wrap post-insert steps so failures mark the task as failed and clean up
 					let sessionId: string | undefined
 					const launchResult = yield* Effect.tryPromise({
@@ -617,6 +649,8 @@ export const TaskSupervisorLive = Layer.scoped(
 									callbackUrl,
 									callbackId,
 									callbackSecret: creds.raw,
+									otelApiKey,
+									otelProjectId: harnessApiKey ? env.BRAINTRUST_HARNESS_PROJECT_ID : undefined,
 								})
 
 								sessionId = taskSessionId(taskId)
@@ -654,6 +688,16 @@ export const TaskSupervisorLive = Layer.scoped(
 										updatedAt: failNow,
 									})
 									.where(eq(schema.tasks.id, taskId))
+								if (harnessApiKey && otelKeyId) {
+									try {
+										await deleteHarnessOtelKey(harnessApiKey, otelKeyId)
+									} catch (delErr) {
+										console.warn(
+											"[TaskSupervisor] Failed to delete OTEL key on task startup failure:",
+											delErr,
+										)
+									}
+								}
 								await deletePendingSession(sandbox, sessionId)
 								throw cause
 							}

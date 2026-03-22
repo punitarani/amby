@@ -3,6 +3,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, schema } f
 import type { Sandbox } from "@daytonaio/sdk"
 import { DaytonaNotFoundError } from "@daytonaio/sdk"
 import { STALE_HEARTBEAT_MS, TASK_BASE } from "../config"
+import { deleteHarnessOtelKey } from "./braintrust-otel"
 import { CodexProvider } from "./codex-provider"
 import { parseReplyTarget } from "./reply-target"
 import { isTerminal, TERMINAL_STATUSES } from "./task-state"
@@ -15,6 +16,8 @@ export interface ReconciliationContext {
 	isDev: boolean
 	/** If set, sends templated completion messages for Telegram tasks. */
 	sendTelegram?: (chatId: number, text: string) => Promise<void>
+	/** If set, used to delete per-task Braintrust OTEL keys on task termination. */
+	braintrustHarnessApiKey?: string
 }
 
 const ACTIVE = ["preparing", "running"] as const
@@ -76,6 +79,24 @@ function nonTerminalTaskWhere(taskId: string) {
 	return and(eq(schema.tasks.id, taskId), notInArray(schema.tasks.status, TERMINAL_STATUSES))
 }
 
+async function deleteOtelKeyForTask(ctx: ReconciliationContext, taskId: string): Promise<void> {
+	const { db, braintrustHarnessApiKey } = ctx
+	if (!braintrustHarnessApiKey) return
+	try {
+		const rows = await db
+			.select({ metadata: schema.tasks.metadata })
+			.from(schema.tasks)
+			.where(eq(schema.tasks.id, taskId))
+			.limit(1)
+		const keyId = rows[0]?.metadata?.otelKeyId
+		if (typeof keyId !== "string") return
+		await deleteHarnessOtelKey(braintrustHarnessApiKey, keyId)
+		await db.update(schema.tasks).set({ metadata: null }).where(eq(schema.tasks.id, taskId))
+	} catch (e) {
+		console.warn(`[Reconciliation] Failed to delete OTEL key for task ${taskId}:`, e)
+	}
+}
+
 /** Force probe a single task (Daytona session + status.json) — used by probe_task tool. */
 export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow): Promise<void> {
 	const { db, ensureSandbox } = ctx
@@ -97,6 +118,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 			})
 			.where(nonTerminalTaskWhere(task.id))
 		await insertReconcilerEvent(db, task.id, "task.lost", { reason: "missing_session" })
+		await deleteOtelKeyForTask(ctx, task.id)
 		return
 	}
 
@@ -139,6 +161,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 					exitCode: cmd.exitCode,
 					source: "session_command",
 				})
+				await deleteOtelKeyForTask(ctx, task.id)
 			}
 			return
 		}
@@ -176,6 +199,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 					source: "status_json",
 					statusJson,
 				})
+				await deleteOtelKeyForTask(ctx, task.id)
 			}
 		} else if (
 			!trustStatusJson &&
@@ -227,6 +251,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 							source: "status_json_after_session_lost",
 							statusJson,
 						})
+						await deleteOtelKeyForTask(ctx, task.id)
 					}
 				} else {
 					// No usable status.json — mark task as lost
@@ -244,6 +269,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 						reason: "session_not_found",
 						statusJson: statusJson ?? null,
 					})
+					await deleteOtelKeyForTask(ctx, task.id)
 				}
 			} catch (fallbackErr) {
 				console.error(`[probeSingleTask] fallback also failed for task ${task.id}:`, fallbackErr)
@@ -260,6 +286,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 				await insertReconcilerEvent(db, task.id, "task.lost", {
 					reason: "session_not_found_fallback_failed",
 				})
+				await deleteOtelKeyForTask(ctx, task.id)
 			}
 		} else {
 			// Transient error — log and retry on next cycle
@@ -380,6 +407,17 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 				.where(eq(schema.tasks.id, task.id))
 		} catch (e) {
 			console.error(`[Reconciliation] Telegram notify failed for task ${task.id}:`, e)
+		}
+	}
+
+	// --- 4) Orphan sweep: clean up OTEL keys for terminal tasks that survived a crash ---
+	if (ctx.braintrustHarnessApiKey) {
+		const orphaned = await db
+			.select({ id: schema.tasks.id })
+			.from(schema.tasks)
+			.where(and(inArray(schema.tasks.status, TERMINAL_STATUSES), isNotNull(schema.tasks.metadata)))
+		for (const row of orphaned) {
+			await deleteOtelKeyForTask(ctx, row.id)
 		}
 	}
 }

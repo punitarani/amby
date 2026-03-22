@@ -154,7 +154,7 @@ write_status() {
 write_status "running" "" "preparing"
 send "task.started" "running" "Task started" ""
 prompt=$(cat prompt.txt) || { write_status "failed" "1" "Missing prompt.txt"; send "task.failed" "failed" "Missing prompt.txt" "1"; exit 1; }
-codex exec --full-auto --add-dir ../artifacts -o ../artifacts/result.md "$prompt" \\
+codex exec --dangerously-bypass-approvals-and-sandbox --add-dir ../artifacts -o ../artifacts/result.md "$prompt" \\
   >../artifacts/stdout.log 2>../artifacts/stderr.log &
 CODEX_PID=$!
 

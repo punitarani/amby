@@ -62,3 +62,6 @@ export const sandboxLabels = (userId: string, isDev: boolean) => ({
 })
 
 export const taskSessionId = (taskId: string) => `task-${taskId}`
+
+export const harnessOtelKeyName = (nodeEnv: string, sandboxId: string, taskId: string) =>
+	`amby-${nodeEnv === "production" ? "prod" : "dev"}-codex-${sandboxId.slice(0, 8)}-${taskId.slice(0, 8)}`

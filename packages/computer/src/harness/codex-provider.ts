@@ -1,5 +1,6 @@
 import type { Sandbox } from "@daytonaio/sdk"
 import { CODEX_HOME, TASK_BASE } from "../config"
+import { buildOtelConfigSection } from "./braintrust-otel"
 import type { TaskConfig, TaskProvider, TaskResult } from "./provider"
 import { buildCallbackJsScript, buildNotifyJsScript, buildRunShScript } from "./wrapper-script"
 
@@ -76,10 +77,16 @@ export class CodexProvider implements TaskProvider {
 
 		const hasCallback = Boolean(config.callbackUrl && config.callbackSecret && config.callbackId)
 
-		// Write .codex/config.toml (Playwright + optional Codex notify hook)
+		// Write workspace .codex/config.toml (Playwright + optional Codex notify hook)
 		const configToml = buildCodexConfigToml(config.needsBrowser, hasCallback)
 		if (configToml.trim().length > 0) {
 			await sandbox.fs.uploadFile(Buffer.from(configToml), `${workspaceDir}/.codex/config.toml`)
+		}
+
+		// Write OTEL config to CODEX_HOME/config.toml (global — codex only reads [otel] from there)
+		if (config.otelApiKey && config.otelProjectId) {
+			const otelConfigToml = buildOtelConfigSection(config.otelApiKey, config.otelProjectId)
+			await sandbox.fs.uploadFile(Buffer.from(otelConfigToml), `${CODEX_HOME}/config.toml`)
 		}
 
 		// Write AGENTS.md

@@ -13,6 +13,10 @@ export interface TaskConfig {
 	callbackId?: string
 	callbackSecret?: string
 	conversationId?: string
+	/** Per-task Braintrust API key secret for OTEL. Injected into sandbox env when set. */
+	otelApiKey?: string
+	/** Braintrust project ID for OTEL telemetry. Required when otelApiKey is set. */
+	otelProjectId?: string
 }
 
 export interface TaskResult {
