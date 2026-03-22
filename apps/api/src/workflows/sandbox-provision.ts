@@ -7,9 +7,10 @@ import {
 	sandboxName,
 	startSandboxIfNeeded,
 	tryGetSandboxByName,
+	upsertMainSandboxRow,
 	VOLUME_MOUNT_PATH,
 } from "@amby/computer/sandbox-config"
-import { and, DbService, eq, schema } from "@amby/db"
+import { DbService } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
@@ -53,7 +54,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			}
 		}
 
-		/** Upsert main sandbox row (find-then-update-or-insert for partial unique index) */
+		/** Upsert main sandbox row via shared transactional helper */
 		const upsertMainSandbox = async (
 			daytonaSandboxId: string,
 			status: "creating" | "running" | "stopped" | "archived" | "error",
@@ -62,38 +63,9 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			await withRuntime(
 				Effect.gen(function* () {
 					const { db } = yield* DbService
-					const rows = yield* Effect.tryPromise(() =>
-						db
-							.select({ id: schema.sandboxes.id })
-							.from(schema.sandboxes)
-							.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
-							.limit(1),
+					yield* Effect.tryPromise(() =>
+						upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volId),
 					)
-					const existing = rows[0]
-					if (existing) {
-						yield* Effect.tryPromise(() =>
-							db
-								.update(schema.sandboxes)
-								.set({
-									daytonaSandboxId,
-									status,
-									volumeId: volId,
-									lastActivityAt: new Date(),
-									updatedAt: new Date(),
-								})
-								.where(eq(schema.sandboxes.id, existing.id)),
-						)
-					} else {
-						yield* Effect.tryPromise(() =>
-							db.insert(schema.sandboxes).values({
-								userId,
-								daytonaSandboxId,
-								status,
-								role: "main",
-								volumeId: volId,
-							}),
-						)
-					}
 				}),
 			)
 		}

@@ -47,11 +47,8 @@ WHERE uv."user_id" = s."user_id";
 ALTER TABLE "sandboxes" ADD CONSTRAINT "sandboxes_volume_id_user_volumes_id_fk" FOREIGN KEY ("volume_id") REFERENCES "public"."user_volumes"("id") ON DELETE set null ON UPDATE no action;
 
 --> statement-breakpoint
--- 6. Drop old unique constraint on sandboxes.user_id
+-- 6. Swap unique constraint for partial unique index (same transaction to avoid gap)
 ALTER TABLE "sandboxes" DROP CONSTRAINT IF EXISTS "sandboxes_user_id_unique";
-
---> statement-breakpoint
--- 7. Add partial unique index: one main sandbox per user
 CREATE UNIQUE INDEX IF NOT EXISTS "sandboxes_user_main_idx" ON "sandboxes" ("user_id", "role") WHERE role = 'main';
 
 --> statement-breakpoint

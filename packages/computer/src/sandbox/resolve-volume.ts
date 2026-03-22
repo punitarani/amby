@@ -1,6 +1,7 @@
 import type { Database } from "@amby/db"
 import { and, eq, schema } from "@amby/db"
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
+import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
 import { Effect } from "effect"
 import {
 	SANDBOX_CREATE_TIMEOUT,
@@ -14,6 +15,7 @@ import {
 	buildSandboxCreateParams,
 	inferDbStatusFromSandbox,
 	isDuplicateSandboxNameError,
+	type SandboxDbStatus,
 	startSandboxIfNeeded,
 	tryGetSandboxByName,
 } from "./resolve-sandbox"
@@ -43,8 +45,15 @@ export async function ensureVolume(
 		try {
 			await daytona.volume.get(existing.daytonaVolumeId)
 			return existing
-		} catch {
-			// Volume gone from Daytona — fall through to re-create
+		} catch (cause) {
+			// Only fall through to re-create on 404; propagate transient errors
+			if (cause instanceof DaytonaNotFoundError) {
+				/* volume gone — fall through to re-create */
+			} else if (cause instanceof DaytonaError && cause.statusCode === 404) {
+				/* volume gone — fall through to re-create */
+			} else {
+				throw cause
+			}
 		}
 	}
 
@@ -91,41 +100,43 @@ export async function ensureVolume(
 
 // ── Sandbox upsert (partial-unique-index aware) ─────────────────────────
 
-/** Upsert the main sandbox row. Works with the partial unique index on (userId, role='main'). */
-async function upsertMainSandboxRow(
+/** Upsert the main sandbox row atomically. Works with the partial unique index on (userId, role='main'). */
+export async function upsertMainSandboxRow(
 	db: Database,
 	userId: string,
 	daytonaSandboxId: string,
-	status: "creating" | "running" | "stopped" | "archived" | "error",
-	volumeId?: string | null,
+	status: SandboxDbStatus,
+	volumeId: string,
 ) {
-	const existing = await db
-		.select({ id: schema.sandboxes.id })
-		.from(schema.sandboxes)
-		.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
-		.limit(1)
-		.then((rows) => rows[0])
+	await db.transaction(async (tx) => {
+		const existing = await tx
+			.select({ id: schema.sandboxes.id })
+			.from(schema.sandboxes)
+			.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
+			.limit(1)
+			.then((rows) => rows[0])
 
-	if (existing) {
-		await db
-			.update(schema.sandboxes)
-			.set({
+		if (existing) {
+			await tx
+				.update(schema.sandboxes)
+				.set({
+					daytonaSandboxId,
+					status,
+					volumeId,
+					lastActivityAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(eq(schema.sandboxes.id, existing.id))
+		} else {
+			await tx.insert(schema.sandboxes).values({
+				userId,
 				daytonaSandboxId,
 				status,
-				lastActivityAt: new Date(),
-				updatedAt: new Date(),
-				...(volumeId != null ? { volumeId } : {}),
+				role: "main",
+				volumeId,
 			})
-			.where(eq(schema.sandboxes.id, existing.id))
-	} else {
-		await db.insert(schema.sandboxes).values({
-			userId,
-			daytonaSandboxId,
-			status,
-			role: "main",
-			...(volumeId != null ? { volumeId } : {}),
-		})
-	}
+		}
+	})
 }
 
 /** Refresh metadata and persist sandbox row with volume link. */
@@ -133,8 +144,8 @@ async function persistMainSandboxFromInstance(
 	db: Database,
 	userId: string,
 	sandbox: Sandbox,
-	status?: "creating" | "running" | "stopped" | "archived" | "error",
-	volumeId?: string | null,
+	volumeId: string,
+	status?: SandboxDbStatus,
 ) {
 	await sandbox.refreshData()
 	const st = status ?? inferDbStatusFromSandbox(sandbox)
@@ -184,7 +195,7 @@ export const ensureMainSandbox = (
 						if (cached.state === "started") return cached as Sandbox | null
 						if (cached.state === "stopped" || cached.state === "error") {
 							await cached.start(SANDBOX_START_TIMEOUT)
-							await persistMainSandboxFromInstance(db, userId, cached, "running", volumeRow.id)
+							await persistMainSandboxFromInstance(db, userId, cached, volumeRow.id, "running")
 							return cached as Sandbox | null
 						}
 						return null
@@ -210,7 +221,7 @@ export const ensureMainSandbox = (
 				try: async () => {
 					await startSandboxIfNeeded(existing)
 					cache.set(userId, existing)
-					await persistMainSandboxFromInstance(db, userId, existing, "running", volumeRow.id)
+					await persistMainSandboxFromInstance(db, userId, existing, volumeRow.id, "running")
 				},
 				catch: (cause) =>
 					new SandboxError({
@@ -281,7 +292,7 @@ export const ensureMainSandbox = (
 				try {
 					const s = await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
 					cache.set(userId, s)
-					await persistMainSandboxFromInstance(db, userId, s, "running", volumeRow.id)
+					await persistMainSandboxFromInstance(db, userId, s, volumeRow.id, "running")
 					return s
 				} catch (cause) {
 					if (isDuplicateSandboxNameError(cause)) {
@@ -289,7 +300,7 @@ export const ensureMainSandbox = (
 						if (recovered) {
 							await startSandboxIfNeeded(recovered)
 							cache.set(userId, recovered)
-							await persistMainSandboxFromInstance(db, userId, recovered, "running", volumeRow.id)
+							await persistMainSandboxFromInstance(db, userId, recovered, volumeRow.id, "running")
 							return recovered
 						}
 					}
@@ -311,46 +322,83 @@ export const ensureMainSandbox = (
 
 // ── Replace sandbox ─────────────────────────────────────────────────────
 
+export interface ReplaceSandboxParams {
+	daytona: Daytona
+	db: Database
+	userId: string
+	failedName: string
+	volumeRow: VolumeRow
+	isDev: boolean
+	cache: Map<string, Sandbox>
+}
+
 /**
  * Delete a broken sandbox and create a new one on the same volume.
  * Used when a sandbox is in an unrecoverable error state.
  */
-export async function replaceSandbox(
-	daytona: Daytona,
-	db: Database,
-	userId: string,
-	failedName: string,
-	volumeRow: VolumeRow,
-	isDev: boolean,
-	cache: Map<string, Sandbox>,
-): Promise<Sandbox> {
-	// Best-effort delete failed sandbox from Daytona (ignore 404)
-	try {
-		const failed = await tryGetSandboxByName(daytona, failedName)
-		if (failed) await daytona.delete(failed)
-	} catch {
-		// Ignore — sandbox may already be gone
-	}
+export const replaceSandbox = (
+	params: ReplaceSandboxParams,
+): Effect.Effect<Sandbox, SandboxError> =>
+	Effect.gen(function* () {
+		const { daytona, db, userId, failedName, volumeRow, isDev, cache } = params
 
-	// Delete main sandbox DB row (preserve secondary sandboxes)
-	await db
-		.delete(schema.sandboxes)
-		.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
+		// Best-effort delete failed sandbox from Daytona (ignore 404)
+		yield* Effect.either(
+			Effect.tryPromise({
+				try: async () => {
+					const failed = await tryGetSandboxByName(daytona, failedName)
+					if (failed) await daytona.delete(failed)
+				},
+				catch: () => new SandboxError({ message: "Failed to delete failed sandbox" }),
+			}),
+		)
 
-	// Create new sandbox with same volume mount
-	const createSpec = {
-		...buildSandboxCreateParams(userId, isDev),
-		volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
-	}
+		// Delete main sandbox DB row (preserve secondary sandboxes)
+		yield* Effect.tryPromise({
+			try: () =>
+				db
+					.delete(schema.sandboxes)
+					.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main"))),
+			catch: (cause) =>
+				new SandboxError({
+					message: `Failed to clear sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
+					cause,
+				}),
+		})
 
-	let sandbox: Sandbox
-	try {
-		sandbox = await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
-	} catch (cause) {
-		await upsertMainSandboxRow(db, userId, "pending", "error", volumeRow.id)
-		throw cause
-	}
-	cache.set(userId, sandbox)
-	await persistMainSandboxFromInstance(db, userId, sandbox, "running", volumeRow.id)
-	return sandbox
-}
+		// Create new sandbox with same volume mount
+		const createSpec = {
+			...buildSandboxCreateParams(userId, isDev),
+			volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
+		}
+
+		const sandbox = yield* Effect.tryPromise({
+			try: async () => {
+				try {
+					return await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
+				} catch (cause) {
+					await upsertMainSandboxRow(db, userId, "pending", "error", volumeRow.id)
+					throw cause
+				}
+			},
+			catch: (cause) =>
+				cause instanceof SandboxError
+					? cause
+					: new SandboxError({
+							message: `Failed to create replacement sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
+							cause,
+						}),
+		})
+
+		cache.set(userId, sandbox)
+		yield* Effect.tryPromise({
+			try: () => persistMainSandboxFromInstance(db, userId, sandbox, volumeRow.id, "running"),
+			catch: (cause) =>
+				new SandboxError({
+					message: `Failed to persist replacement sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
+					cause,
+				}),
+		})
+
+		return sandbox
+	})
