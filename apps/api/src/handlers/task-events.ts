@@ -4,11 +4,13 @@ import {
 	isLegalTransition,
 	isTerminal,
 	isTimestampValid,
+	parseReplyTarget,
 	verifyHmacSignature,
 } from "@amby/computer"
 import type { TaskEventSource, TaskStatus } from "@amby/db"
 import { and, DbService, eq, lt, schema } from "@amby/db"
 import { Effect } from "effect"
+import { TelegramSender } from "../telegram"
 
 type TaskEventBody = {
 	eventId: string
@@ -233,6 +235,43 @@ export const handleTaskEventPost = (request: Request) =>
 				console.warn(
 					`[task-events] CAS miss for task ${task.id}: seq ${seq} <= lastEventSeq ${task.lastEventSeq} (event: ${body.eventType})`,
 				)
+			}
+
+			// Inline notification for terminal events — don't wait for reconciliation cron
+			if (
+				casResult.length > 0 &&
+				nextStatus &&
+				(body.eventType === "task.completed" || body.eventType === "task.failed")
+			) {
+				const target = parseReplyTarget(task.replyTarget)
+				if (target?.channel === "telegram") {
+					const summary = body.message?.trim() || "Task finished."
+					const text =
+						body.eventType === "task.completed"
+							? `Your background task is done.\n\n${summary}`
+							: `Your background task failed.${body.message ? `\n\n${body.message.trim()}` : ""}\n\nYou can ask me to try again.`
+					const telegram = yield* Effect.serviceOption(TelegramSender)
+					if (telegram._tag === "Some") {
+						yield* Effect.tryPromise({
+							try: async () => {
+								await telegram.value.sendMessage(target.chatId, text)
+								const notifyNow = new Date()
+								await db
+									.update(schema.tasks)
+									.set({
+										notifiedStatus: nextStatus,
+										lastNotificationAt: notifyNow,
+										updatedAt: notifyNow,
+									})
+									.where(eq(schema.tasks.id, task.id))
+							},
+							catch: (e) => {
+								console.error(`[task-events] inline notification failed for task ${task.id}:`, e)
+								return undefined
+							},
+						})
+					}
+				}
 			}
 		}
 

@@ -130,6 +130,7 @@ main();
 export function buildRunShScript(): string {
 	const heartbeatSec = Math.max(1, Math.floor(CALLBACK_HEARTBEAT_INTERVAL_MS / 1000))
 	return `#!/bin/sh
+cd workspace || { echo "Failed to enter workspace" >&2; exit 1; }
 set -a
 . ../.env
 set +a
@@ -152,10 +153,8 @@ write_status() {
 
 write_status "running" "" "preparing"
 send "task.started" "running" "Task started" ""
-
-cd workspace || { write_status "failed" "1" "Failed to enter workspace"; send "task.failed" "failed" "Failed to enter workspace" "1"; exit 1; }
 prompt=$(cat prompt.txt) || { write_status "failed" "1" "Missing prompt.txt"; send "task.failed" "failed" "Missing prompt.txt" "1"; exit 1; }
-codex exec --full-auto --output-last-message -o ../artifacts/result.md "$prompt" \\
+codex exec --full-auto -o ../artifacts/result.md "$prompt" \\
   >../artifacts/stdout.log 2>../artifacts/stderr.log &
 CODEX_PID=$!
 
@@ -169,8 +168,9 @@ wait $CODEX_PID
 EXIT_CODE=$?
 
 if [ "$EXIT_CODE" -eq 0 ]; then
-  write_status "succeeded" "$EXIT_CODE" "Task completed"
-  send "task.completed" "succeeded" "Task completed" "$EXIT_CODE"
+  RESULT=$(head -c 2000 ../artifacts/result.md 2>/dev/null || echo "Task completed")
+  write_status "succeeded" "$EXIT_CODE" "$RESULT"
+  send "task.completed" "succeeded" "$RESULT" "$EXIT_CODE"
 else
   ERR_TAIL=$(tail -c 1000 ../artifacts/stderr.log 2>/dev/null | head -c 500 || echo "Unknown error")
   write_status "failed" "$EXIT_CODE" "$ERR_TAIL"
