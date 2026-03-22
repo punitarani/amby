@@ -72,13 +72,13 @@ graph TD
     subgraph "Infrastructure"
         DB[(Supabase Postgres<br/>pgvector + pg_cron)]
         Daytona[Daytona API]
-        OpenAI[OpenAI API]
+        OpenRouter[OpenRouter API]
     end
 
     Memory --> DB
     Jobs --> DB
     Computer --> Daytona
-    Models --> OpenAI
+    Models --> OpenRouter
 
     subgraph "Foundation"
         ENV[Env]
@@ -122,7 +122,7 @@ graph BT
 | `@amby/env`      | Type-safe environment variables via T3 Env        | `@t3-oss/env-core`, `zod`              |
 | `@amby/db`       | Drizzle ORM, schemas, migrations, Supabase client | `drizzle-orm`, `postgres`, `@amby/env` |
 | `@amby/auth`     | BetterAuth configuration and user authentication  | `better-auth`, `@amby/db`, `@amby/env` |
-| `@amby/models`   | AI provider registry and OpenAI Codex OAuth       | `ai`, `@ai-sdk/openai`, `@amby/env`    |
+| `@amby/models`   | OpenRouter-backed model registry and model selection | `ai`, `@openrouter/ai-sdk-provider`, `@amby/env` |
 | `@amby/memory`   | Memory storage, retrieval, and LLM injection      | `@amby/db`, `ai`                       |
 | `@amby/computer` | Daytona sandbox lifecycle and command execution   | `@daytonaio/sdk`, `@amby/env`          |
 | `@amby/channels` | Channel interface and adapters (CLI for MVP)      | `@amby/env`                            |
@@ -142,7 +142,7 @@ Every other package imports env vars from here — no `process.env` scattered ac
 **Defines variables for:**
 
 * Database: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`
-* OpenAI: `OPENAI_API_KEY` (optional fallback when not using Codex OAuth)
+* Models: `OPENROUTER_API_KEY` (required), `OPENAI_API_KEY` (optional, used for Codex in sandboxes)
 * Daytona: `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_TARGET`
 * Auth: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`
 * Cartesia: `CARTESIA_API_KEY` (future, TTS)
@@ -164,7 +164,9 @@ Owns all database schemas (Drizzle ORM) and the database client. Single source o
 | `accounts`          | OAuth accounts and tokens (BetterAuth)    |
 | `conversations`     | Top-level conversation containers per user per channel |
 | `conversationThreads` | Topic threads within a conversation (routing, archival, synopsis) |
-| `messages`          | Individual messages within conversations (with execution traces) |
+| `messages`          | User-visible messages within conversations |
+| `traces`            | Orchestrator and subagent execution spans |
+| `traceEvents`       | Ordered tool-call and tool-result events |
 | `channels`          | Registered channel configurations         |
 | `documents`         | Raw ingested content (memory sources)     |
 | `chunks`            | Semantic chunks for vector retrieval      |
@@ -194,38 +196,28 @@ defined, but there is no HTTP server to serve auth routes yet.
 * Social providers: Google, GitHub (future — not MVP)
 * Plugins: added as needed (passkeys, 2FA, etc. — not MVP)
 
-**Note:** OpenAI Codex OAuth for model access is handled by `@amby/models`, not `@amby/auth`. BetterAuth handles *user
-identity*. Model provider auth is a separate concern.
+**Note:** BetterAuth handles *user identity*. Model-provider configuration is a separate concern.
 
 ***
 
 ### @amby/models
 
-Manages AI provider connections. Handles OpenAI Codex OAuth, builds the Vercel AI SDK provider registry, and defines
-interfaces for future TTS/STT providers.
+Manages runtime model selection. It builds the OpenRouter-backed Vercel AI SDK registry and defines interfaces for
+future TTS/STT providers.
 
-**Exports:** `registry` (Vercel AI SDK provider registry), `getModel(id)` (resolve a model from the registry),
-`codexAuth` (OpenAI Codex OAuth flow utilities), `TTSProvider` / `STTProvider` (interfaces, future).
+**Exports:** `getModel(id)`, `defaultModelId`, and `TTSProvider` / `STTProvider` (interfaces, future).
 
-#### OpenAI Codex OAuth
+#### Provider registry
 
-Implements the same PKCE-based OAuth flow used by OpenClaw:
-
-1. Generate PKCE verifier/challenge + random state
-2. Open `https://auth.openai.com/oauth/authorize` with the challenge
-3. Capture callback at `http://127.0.0.1:1455/auth/callback` (or manual paste for headless)
-4. Exchange authorization code at `https://auth.openai.com/oauth/token`
-5. Store `{ access, refresh, expires, accountId }` locally
-6. Auto-refresh expired tokens under file lock
-
-**Provider registry:**
+The runtime uses `createOpenRouter()` from `@openrouter/ai-sdk-provider`:
 
 ```
-openai-codex  →  OpenAI provider using Codex OAuth tokens (default)
-openai        →  OpenAI provider using API key (fallback)
+google/gemini-3.1-flash-lite-preview  → default model
+nvidia/nemotron-3-super-120b-a12b     → higher-intelligence override
 ```
 
-Default model: `openai-codex/gpt-5.4`. Users authenticate once; tokens refresh automatically.
+`OPENROUTER_API_KEY` powers the agent runtime. `OPENAI_API_KEY` remains useful for Codex running inside user
+sandboxes, but it is not the primary application model provider.
 
 #### TTS / STT (future — MVP is text-only)
 
@@ -520,13 +512,13 @@ worker process, but the interface stays the same.
 
 ***
 
-### Conversation & Message Persistence
+### Conversation, Thread, and Trace Persistence
 
-Every message — incoming and outgoing — is stored in the database with full execution traces. This provides:
+Amby now separates visible transcript from execution state. This provides:
 
 * Full conversation history for context windows
-* Complete tool execution audit trail (every tool call input and output)
-* Thread-scoped context with intelligent replay
+* Thread-scoped replay instead of flat conversation replay
+* Complete execution audit trails without bloating message rows
 * Continuity across sessions and channels
 
 **Schema:**
@@ -535,54 +527,69 @@ Every message — incoming and outgoing — is stored in the database with full 
 conversations {
   id:          uuid
   userId:      string
-  channelType: 'cli' | 'sms' | 'imessage' | 'web' | 'mobile'
-  title:       string (nullable, auto-generated)
+  platform:    'cli' | 'telegram' | 'slack' | 'discord'
+  workspaceKey: string
+  externalConversationKey: string
+  title:       string (nullable)
   metadata:    jsonb
   createdAt:   timestamp
   updatedAt:   timestamp
 }
 
 conversation_threads {
-  id:              uuid
-  conversationId:  string
-  label:           string (nullable, topic name)
-  synopsis:        text (nullable, auto-generated summary)
-  keywords:        text[] (nullable, 3-5 topic keywords for semantic matching)
-  status:          'open' | 'archived'
-  lastActiveAt:    timestamp
-  createdAt:       timestamp
+  id:               uuid
+  conversationId:   string
+  source:           'native' | 'reply_chain' | 'derived' | 'manual'
+  externalThreadKey: string (nullable)
+  label:            string (nullable)
+  synopsis:         text (nullable)
+  keywords:         text[] (nullable)
+  isDefault:        boolean
+  status:           'open' | 'archived'
+  lastActiveAt:     timestamp
+  createdAt:        timestamp
 }
 
 messages {
   id:             uuid
   conversationId: string
   threadId:       string (nullable, FK to conversation_threads)
-  role:           'user' | 'assistant' | 'system' | 'tool'
+  role:           'user' | 'assistant'
   content:        text
-  toolCalls:      jsonb (nullable) — Array<{ toolCallId, toolName, input }> (truncated summaries)
-  toolResults:    jsonb (nullable) — Array<{ toolCallId, toolName, output }> (truncated summaries)
   metadata:       jsonb
   createdAt:      timestamp
 }
 
 traces {
   id:            uuid
-  messageId:     uuid FK → messages.id (cascade)
-  agentName:     text ("orchestrator" | subagent name)
-  parentTraceId: uuid FK → traces.id (cascade, self-referential)
-  toolCalls:     jsonb (full, untruncated)
-  toolResults:   jsonb (full, untruncated)
+  conversationId: uuid
+  threadId:      uuid (nullable)
+  messageId:     uuid (nullable)
+  parentTraceId: uuid (nullable)
+  rootTraceId:   uuid (nullable)
+  agentName:     text
+  status:        'running' | 'completed' | 'failed'
+  startedAt:     timestamp
+  completedAt:   timestamp (nullable)
   durationMs:    integer (nullable)
   metadata:      jsonb (nullable)
-  createdAt:     timestamp
+}
+
+trace_events {
+  id:          uuid
+  traceId:     uuid
+  seq:         integer
+  kind:        'tool_call' | 'tool_result' | ...
+  payload:     jsonb
+  createdAt:   timestamp
 }
 ```
 
-**Thread routing:** Each inbound message is routed to a thread via heuristic (time gap < 2 min → continue, label word-boundary match → switch, 2+ keyword hits → switch) or model-based classification (continue / switch / new). Stale threads (>24h inactive) are auto-archived with a generated synopsis and keywords.
+**Thread routing:** `resolveThread()` always ensures a default thread, then routes by cheap derived heuristics with a model fallback. The resolver API also supports native thread keys, though current CLI and Telegram flows use the derived path.
 
-**Trace persistence:** Two-level trace storage. The `messages` table stores truncated summaries for fast context replay. The `traces` table stores full, untruncated execution traces with hierarchical structure (orchestrator → subagent via `parentTraceId`), timing data, and complete tool I/O.
+**Trace persistence:** The transcript lives on `messages`. Execution lives on `traces` and `trace_events`. Root traces represent orchestrator runs; child traces represent delegated subagents.
 
-**Context replay:** When loading history, the last 4 assistant messages get lightweight `[Tools used: ...]` annotations appended. Older messages load as plain text. This balances execution context against token budget.
+**Context replay:** The active thread tail is replayed directly. The last 4 assistant messages get lightweight `[Tools used: ...]` annotations built from recent `tool_result` events, and a separate thread recap is built from recent trace summaries.
 
 ***
 
@@ -617,13 +624,14 @@ Daytona provides sandboxed compute environments via the `@daytonaio/sdk`:
 
 Used in both local development and production. No local Docker fallback — always Daytona.
 
-### OpenAI
+### Model Provider
 
-Primary model provider via Codex OAuth:
+Primary runtime provider is OpenRouter:
 
-* **Auth:** PKCE OAuth flow (same as OpenClaw). Tokens stored locally for CLI, in DB for production.
-* **Default model:** `openai-codex/gpt-5.4`
-* **Fallback:** Standard API key auth (`openai/` prefix)
+* **Auth:** API-key based via `OPENROUTER_API_KEY`
+* **Default model:** `google/gemini-3.1-flash-lite-preview`
+* **Higher-intelligence override:** `nvidia/nemotron-3-super-120b-a12b`
+* **Separate concern:** Codex auth for sandboxed background work is handled by the computer harness
 
 ### Cloudflare Workers (Production API)
 
@@ -714,7 +722,9 @@ amby/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       └── index.ts            ← T3 Env config, exports `env`
+│   │       ├── shared.ts           ← Env interface + service tag
+│   │       ├── local.ts            ← Local Bun/Node env loader
+│   │       └── workers.ts          ← Cloudflare Workers env loader
 │   ├── db/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
@@ -748,10 +758,10 @@ amby/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       ├── registry.ts         ← Vercel AI SDK provider registry
-│   │       ├── oauth/
-│   │       │   └── openai-codex.ts ← PKCE OAuth flow + token management
+│   │       ├── registry.ts         ← OpenRouter-backed model registry
+│   │       ├── errors.ts
 │   │       ├── providers/
+│   │       │   ├── index.ts
 │   │       │   ├── tts.ts          ← TTS interface + Cartesia (future)
 │   │       │   └── stt.ts          ← STT interface + Whisper (future)
 │   │       └── index.ts
@@ -774,9 +784,9 @@ amby/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       ├── sandbox.ts          ← SandboxManager (lifecycle)
-│   │       ├── snapshot.ts         ← Docker snapshot configuration
-│   │       ├── executor.ts         ← Command and file operations
+│   │       ├── sandbox/            ← Sandbox lifecycle + tools
+│   │       ├── harness/            ← Codex task harness + supervisor
+│   │       ├── config.ts
 │   │       └── index.ts
 │   ├── channels/
 │   │   ├── package.json
@@ -799,8 +809,13 @@ amby/
 │           │   ├── spawner.ts      ← Factory that creates delegate_* tools
 │           │   └── index.ts
 │           ├── tools/
+│           │   ├── codex-auth.ts   ← Codex auth status + setup tools
+│           │   ├── delegation.ts   ← Sandbox task delegation tools
 │           │   ├── messaging.ts    ← send_message, schedule_job, set_timezone
 │           │   └── index.ts
+│           ├── context.ts          ← Thread-tail loading + artifact recap
+│           ├── synopsis.ts         ← Thread synopsis lifecycle
+│           ├── traces.ts           ← Trace persistence + replay formatting
 │           ├── jobs/
 │           │   ├── scheduler.ts    ← Job scheduling logic
 │           │   ├── runner.ts       ← Job polling and execution
@@ -835,7 +850,7 @@ The CLI app (`apps/cli`) is the thin entry point that wires all packages togethe
 ```
 1. Load environment          →  @amby/env
 2. Connect to database       →  @amby/db
-3. Run OpenAI Codex OAuth    →  @amby/models (if not already authenticated)
+3. Build model registry       →  @amby/models
 4. Create agent instance      →  @amby/agent (wires memory, models, computer, channels)
 5. Register CLI channel       →  @amby/channels
 6. Start job runner           →  setInterval polling for pending jobs
@@ -846,9 +861,6 @@ A single CLI session looks like:
 
 ```
 $ amby
-
-🔐 Authenticating with OpenAI... (opens browser for Codex OAuth)
-✓ Authenticated as user@example.com
 
 📦 Connecting to database...
 ✓ Connected to Supabase (local)
@@ -878,7 +890,7 @@ Want me to prepare anything for these?
 * CLI channel — interactive REPL for testing
 * Agent core — system prompt, tool loop, message handling
 * Memory — Phase 1 from MEMORY.md (store, retrieve, inject, dedupe)
-* Models — OpenAI Codex OAuth + Vercel AI SDK provider registry
+* Models — OpenRouter-backed Vercel AI SDK provider registry
 * Computer — Daytona sandbox create/start/stop/execute
 * DB — full schema, Drizzle migrations, Supabase local
 * Env — all env vars typed and validated

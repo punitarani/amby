@@ -1,299 +1,160 @@
-# Agent Architecture: Multi-Agent Orchestration
+# Agent Architecture
 
-The Amby agent uses a multi-agent orchestration pattern where a single **orchestrator** delegates work to specialized **subagents**. The orchestrator and each subagent are backed by AI SDK v6 `ToolLoopAgent` instances with scoped tools and focused instructions. Subagents are still exposed to the orchestrator as tools, so the overall architecture remains subagents-as-tools.
+Amby uses one orchestrator agent plus a small set of specialized subagents. The orchestrator owns the user experience. Subagents do scoped work and return concise summaries.
 
-The user never sees any of this. To them, Amby is just one person getting things done.
+The user never sees the delegation layer. They interact with one assistant.
 
----
-
-## How It Works
+## High-Level Flow
 
 ```
-User Message → Orchestrator Agent
-                 ├── delegate_research       → Research Subagent (read-only tools)
-                 ├── delegate_builder        → Builder Subagent (full sandbox tools)
-                 ├── delegate_planner        → Planner Subagent (no tools, pure reasoning)
-                 ├── delegate_integration    → Integration Subagent (Composio + connected apps)
-                 ├── delegate_computer       → Computer Subagent (CUA/GUI tools)
-                 ├── delegate_memory_manager → Memory Subagent (memory tools)
-                 ├── search_memories         → Direct read-only memory access
-                 ├── send_message            → Immediate reply to user
-                 ├── schedule_job            → Job scheduling
-                 └── set_timezone            → Timezone setting
+Inbound message
+  → resolve thread
+  → load thread-aware context
+  → run orchestrator
+  → optionally delegate to subagents
+  → save visible transcript
+  → persist execution traces
 ```
 
-The orchestrator keeps lightweight coordination tools (reply, jobs, read-only memory search). All heavy lifting goes through delegation.
+## Orchestrator and Subagents
 
----
+All agents are AI SDK v6 `ToolLoopAgent` instances. The orchestrator keeps only coordination tools. Heavy work is delegated.
 
-## Message Flow
+| Agent | Tool groups | Role |
+|---|---|---|
+| `research` | `memory-read`, `computer-read` | Read files, inspect state, gather information |
+| `builder` | `memory-read`, `computer-read`, `computer-write` | Create or change files, run code |
+| `planner` | none | Pure reasoning and decomposition |
+| `integration` | `integration` | Connected-app work via Composio tools |
+| `computer` | `cua` | GUI automation when CUA is enabled |
+| `memory_manager` | `memory-read`, `memory-write` | Save and organize memories |
 
-1. User message arrives → **thread router** resolves which thread to use (heuristic fast-path or model-based routing)
-2. Thread-scoped conversation history loaded — recent assistant messages include tool usage annotations for richer context
-3. Memory context + datetime + thread synopsis (if resuming a dormant thread) injected into orchestrator's system prompt
-4. Orchestrator decides how to handle — answer directly or delegate
-5. If delegating: calls e.g. `delegate_builder({ task: "...", context: "..." })`
-6. Subagent runs its `ToolLoopAgent` loop (up to `maxSteps`), interacting with sandbox/memory/etc.
-7. Subagent returns `{ summary, toolsUsed? }` — the orchestrator sees both the text and what tools were invoked
-8. Orchestrator synthesizes the summary into a natural, user-facing response
-9. **Trace persistence**: all tool calls and tool results from the generation steps are extracted and saved to `messages.toolCalls` / `messages.toolResults` (jsonb). Subagent results include `toolsUsed` arrays, so the stored trace captures the full execution tree.
+Subagents are exposed to the orchestrator as tools such as `delegate_research` and `delegate_builder`.
 
-Shared context (memories, datetime) is baked into subagent system prompts at spawn time — subagents don't re-query for it.
+## Request Lifecycle
 
----
-
-## Subagent Definitions
-
-All definitions live in `packages/agent/src/subagents/definitions.ts`.
-
-| Name | Tool Groups | Max Steps | Role |
-|------|-------------|-----------|------|
-| `research` | `memory-read`, `computer-read` | 8 | Gather info, read files, search memories, run read-only commands |
-| `builder` | `memory-read`, `computer-read`, `computer-write` | 10 | Create/modify files, run code, install packages |
-| `planner` | _(none)_ | 3 | Break down complex tasks, pure reasoning |
-| `integration` | `integration` | 12 | Handle Composio-backed connected-app tasks and integration management |
-| `computer` | `cua` | 15 | GUI interaction via desktop (only available when CUA is enabled) |
-| `memory_manager` | `memory-read`, `memory-write` | 5 | Save/organize/search user memories |
-
-Each definition is a plain data object (`SubagentDef`) with a focused system prompt instructing the subagent to execute its task and return a concise summary. Subagents never address the user directly — the orchestrator handles all user-facing communication.
-
----
-
-## Tool Groups
-
-Tools are organized into named groups in `packages/agent/src/subagents/tool-groups.ts`. Subagent definitions reference groups by key, and the spawner resolves them into flat tool sets.
-
-| Group | Tools | Source |
-|-------|-------|--------|
-| `memory-read` | `search_memories` | `@amby/memory` |
-| `memory-write` | `save_memory` | `@amby/memory` |
-| `computer-read` | `execute_command`, `read_file` | `@amby/computer` |
-| `computer-write` | `write_file` | `@amby/computer` |
-| `integration` | `list_integrations`, `connect_integration`, `disconnect_integration`, `set_preferred_integration_account`, plus user-scoped Composio session tools | `@amby/connectors` |
-| `cua` | `cua_start`, `cua_end`, `cua_screenshot`, `cua_click`, `cua_type`, `cua_key_press`, `cua_scroll`, `cua_cursor_position` | `@amby/computer` |
-
-Both memory and computer tools are split into read/write groups. This gives the research and builder agents read-only memory access (`search_memories`) while restricting `save_memory` to the memory_manager. Similarly, the research agent gets sandbox access without `write_file`. The research agent's `execute_command` is prompt-constrained to read-only operations (ls, cat, grep, find) — the tool itself is the same, but the subagent's system prompt instructs it not to run destructive commands.
-
-### `buildToolGroups(memoryTools, computerTools, cuaTools?, integrationTools?)`
-
-Takes the already-created tool objects from memory, computer, and CUA packages and organizes them into the group structure. CUA tools are optional — the group is omitted when CUA is disabled.
-
-### `resolveTools(keys, groups)`
-
-Merges the requested tool groups into a single flat `ToolSet` for a subagent.
-
----
-
-## Spawner
-
-`packages/agent/src/subagents/spawner.ts` contains `createSubagentTools()`, which iterates over all subagent definitions and creates one `delegate_<name>` tool per definition.
-
-```ts
-createSubagentTools(
-  getModel: (id?: string) => LanguageModel,
-  toolGroups: ToolGroups,
-  sharedPromptContext: string,
-  config: AgentConfig,
-  requestTraceMetadata: RequestTraceMetadata,
-): ToolSet
-```
-
-Each delegation tool:
-- Has schema `{ task: string, context?: string }`
-- Resolves its tools from `toolGroups` using the definition's `toolKeys`
-- Creates a fresh `ToolLoopAgent` inside the tool execution with the subagent's instructions, scoped tools, `maxSteps`, and invocation-specific telemetry metadata
-- Calls `subagent.generate({ prompt, abortSignal })` so cancellation propagates through tool execution
-- Returns `{ summary, toolsUsed? }` on success — `toolsUsed` is a flat array of tool names extracted from `result.steps`, giving the orchestrator (and trace persistence) visibility into what the subagent did. Forwards nested connector `userMessages` when present.
-- Returns `{ error: true, summary: "..." }` on failure (errors don't crash the orchestrator)
-- Skips any subagent whose required tool groups are unavailable
-
----
-
-## Orchestrator Wiring
-
-In `packages/agent/src/agent.ts`, the `prepareContext()` function assembles the orchestrator's tool set:
-
-```ts
-const requestTraceMetadata = buildRequestTraceMetadata({ conversationId, requestMode, ... })
-const delegationTools = createSubagentTools(
-  models.getModel,
-  toolGroups,
-  sharedPromptContext,
-  agentConfig,
-  requestTraceMetadata,
-)
-
-const { search_memories } = memoryTools
-const tools = {
-    ...delegationTools,        // delegate_research, delegate_builder, etc.
-    search_memories,           // read-only, so orchestrator can check context before delegating
-    ...createJobTools(...),    // schedule_job, set_timezone
-    ...(onReply ? createReplyTools(onReply) : {}),  // send_message
-}
-```
-
-The orchestrator keeps `search_memories` directly so it can check user context before deciding how to delegate. Only memory writes go through the `delegate_memory_manager` subagent.
-
----
-
-## System Prompt
-
-The orchestrator's system prompt (`packages/agent/src/prompts/system.ts`) includes a "How You Work" section (marked as internal — never exposed to the user) that tells the orchestrator:
-
-- **Available Agents** — what each delegation tool does
-- **When to Delegate** — decision guide (answer directly vs. research vs. build vs. plan-then-build)
-- **Orchestration Rules** — use `search_memories` first, send progress updates before delegating, chain agents sequentially, synthesize results naturally
-
----
-
-## Design Decisions
-
-### Orchestrator-only delegation
-Subagents cannot spawn other subagents. The orchestrator chains them sequentially when needed (e.g., `delegate_planner` then `delegate_builder`). Simpler, easier to debug.
-
-### Per-agent model overrides
-Subagents default to the default model ID from `ModelService`, but `SubagentDef.modelId` can override it (for example research, planner, and integration use a higher-intelligence model). Tracing is handled through AI SDK `experimental_telemetry` with a shared OpenTelemetry tracer, so orchestrator, tool, and subagent spans nest through the active context.
-
-### Shared no-PII trace metadata
-Each top-level request builds trace metadata with internal IDs, enums, and counters (`request_id`, `user_id`, `conversation_id`, request mode, model ID, and related flags). That metadata is attached to orchestrator and subagent AI SDK spans. Prompt context such as memories and formatted time stays in prompts only and is not copied into trace metadata.
-
-### Read-only memory on orchestrator
-The orchestrator gets `search_memories` directly (destructured from the full memory tools) rather than the full `save_memory` + `search_memories` set. This lets the orchestrator check user context before deciding how to delegate without being tempted to write memories itself.
-
-### Prompt-constrained read-only sandbox
-The research agent receives the same `execute_command` tool as the builder but is instructed via system prompt to only run read operations. This keeps the code simple (no separate read-only command tool) at the cost of relying on prompt compliance.
-
----
-
-## Error Handling
-
-- Subagent failures are caught in a try/catch inside the delegation tool's `execute` function
-- Errors return `{ error: true, summary: "Failed to complete task: ..." }` as a normal tool result
-- The orchestrator can retry, delegate to a different agent, or report the issue to the user
-- Infrastructure-level failures (DB, network) still propagate through Effect's error channel
-
----
-
-## Execution Trace Persistence & Context Replay
-
-The agent persists full execution traces at two levels and replays them selectively for context-aware follow-ups.
-
-### Trace storage: `traces` table
-
-Full, untruncated execution traces are stored in the `traces` table with hierarchical structure:
-
-```
-traces {
-  id:            uuid PK
-  messageId:     uuid FK → messages.id (cascade)
-  agentName:     text ("orchestrator" | subagent name)
-  parentTraceId: uuid FK → traces.id (cascade, nullable, self-referential)
-  toolCalls:     jsonb (full [{toolCallId, toolName, input}])
-  toolResults:   jsonb (full [{toolCallId, toolName, output}])
-  durationMs:    integer (nullable)
-  metadata:      jsonb (nullable)
-  createdAt:     timestamp
-}
-```
-
-Each assistant message generates one orchestrator trace row. Subagent traces link to their parent via `parentTraceId`, forming a tree: orchestrator → delegate_research, delegate_builder, etc. Subagent execution timing is captured in `durationMs`.
-
-### Lightweight summaries on messages
-
-The `messages` table retains truncated `toolCalls`/`toolResults` jsonb columns for fast context replay. Extraction happens via `extractTraceSummary()`, which flattens all `steps` from the generation result with large string outputs truncated to 500 chars at the nearest word boundary.
-
-### How context replay works
-
-When loading thread history (`loadThreadTail`), the last 4 assistant messages get tool usage annotations appended:
-
-```
-Assistant response text here.
-
-[Tools used: delegate_research: Found 3 relevant documents; delegate_builder: Created auth middleware]
-```
-
-Older messages load as plain text. This gives the model enough execution context for follow-ups ("can you fix that auth middleware you just created?") without bloating the context window with full tool traces from 20 turns ago.
-
-The `formatArtifactRecap` function separately loads recent tool results with summaries into the system prompt as a "Thread context" section — this provides artifact-level awareness even when the conversation history is truncated.
-
-### Design: persist richly, replay selectively
-
-The `traces` table stores the complete, untruncated execution tree. The `messages` table stores truncated summaries for context loading. The context window sees only lightweight annotations. This means:
-
-- **Debugging**: query `traces` for full hierarchical execution history with timing
-- **Context**: the model gets enough from `messages.toolCalls`/`toolResults` to maintain coherence without wasting tokens
-- **Queryable**: filter traces by `agentName`, inspect specific subagent tool calls, measure duration
-
----
+1. `resolveThread()` chooses the active thread for the inbound message.
+2. `prepareContext()` loads:
+   - the active thread tail
+   - other open-thread summaries
+   - recent thread artifact summaries
+   - a resumed-thread synopsis when needed
+   - user memory and formatted current time
+3. The orchestrator runs with direct access to:
+   - `search_memories`
+   - job tools
+   - reply tools
+   - Codex auth tools when sandbox support is available
+   - delegated subagent tools
+4. A delegated subagent returns `{ summary, toolsUsed? }`.
+5. The orchestrator synthesizes the final user-facing response.
+6. User and assistant messages are saved on `messages` with the resolved `threadId`.
+7. Execution is persisted as a trace tree rooted at the orchestrator run.
 
 ## Thread Routing
 
-The router (`packages/agent/src/router.ts`) resolves which conversation thread each inbound message belongs to. It runs once per request before context assembly.
+Threading is internal. A single platform conversation can contain multiple derived topic threads.
 
-### Routing strategy
+### Resolution order
 
-1. **Heuristic fast-path** — zero-latency checks:
-   - Time gap < 2 min → continue current thread (confidence: 0.85)
-   - Message contains an open thread's label (word-boundary match, min 3 chars) → switch to that thread (confidence: 0.80)
-   - Message matches 2+ thread keywords → switch (confidence: 0.78)
-2. **Model fallback** — `generateObject` call with structured output when heuristics are ambiguous. Returns continue (0.65), switch (0.72), or new (0.70). No open threads → skip model call, go directly to "new".
+1. Ensure the conversation has a default thread.
+2. Archive stale open threads older than 24 hours.
+3. If a channel provides a native thread key, resolve through that.
+4. Otherwise use the derived router:
+   - continue when the last message was under 2 minutes ago
+   - switch when a thread label matches by word boundary
+   - switch when at least 2 stored keywords match
+   - fall back to a structured `generateObject()` routing call for `continue`, `switch`, or `new`
 
-Confidence values are trace-only metadata for observability — they do not gate downstream logic.
-
-### Keywords
-
-Each thread stores 3-5 topic keywords (`text[]` column). Keywords are generated:
-- When the model routes to "new" (returned alongside the label)
-- During synopsis generation (both archival and overflow triggers)
-
-Keywords enable semantic depth — e.g., keywords `["kubernetes", "deploy", "helm"]` match "helm chart deployment" even if the label is "k8s infra".
-
-### Archival
-
-Stale threads (>24h inactive) are auto-archived with a generated synopsis and keywords. The archival pass:
-- Runs unconditionally (no throttle — the indexed `WHERE conversation_id = ? AND status = 'open' AND last_active_at <= ?` query is fast)
-- Batch-fetches messages for all threads needing synopsis in a single `inArray` query (avoids N+1)
-- Caps synopsis generation at 3 threads per pass to bound LLM cost
-
-### Query optimization
-
-`resolveThread` parallelizes independent DB queries using `Effect.all`:
-- Open-thread listing and last-message lookup run concurrently (`concurrency: 2`)
-- Thread metadata fetch and message count run concurrently (`concurrency: 2`)
-- Context loading in `prepareContext` parallelizes user row + profile, then thread metadata + history + other threads + artifacts (`concurrency: 4`)
+Current CLI and Telegram flows use the derived path. The resolver API already supports native thread keys, but callers do not pass them yet.
 
 ### Thread lifecycle
 
 ```
 new → open → archived
-       ↑        |
-       +--------+ (re-opened by router)
 ```
 
-Synopsis generation triggers: thread dormancy (>1h idle), archival (>24h idle), and message count exceeding the tail budget.
+Synopsis generation happens when:
 
----
+- the agent switches away from a thread that has been idle for more than 1 hour
+- a thread is archived after more than 24 hours of inactivity
+- the active thread would overflow the 20-message replay tail
 
-## Adding a New Subagent
+The default thread includes legacy rows with `NULL thread_id`, so pre-threading history is still visible.
 
-1. Add a `SubagentDef` object to the `SUBAGENT_DEFS` array in `definitions.ts`
-2. If it needs new tools, add a new tool group to `buildToolGroups()` in `tool-groups.ts`
-3. Add the new `delegate_<name>` tool to the "Available Agents" section in `system.ts`
-4. Done — the spawner auto-generates the delegation tool
+## Context Replay
 
----
+The prompt is thread-aware, not conversation-wide.
 
-## File Map
+`loadThreadTail()` loads the recent message tail for the active thread. For the last 4 assistant messages, the loader appends lightweight annotations built from recent `tool_result` trace events:
 
-| File | Role |
-|------|------|
-| `packages/agent/src/subagents/definitions.ts` | Subagent type + definitions (data only) |
-| `packages/agent/src/subagents/tool-groups.ts` | Tool grouping + resolution |
-| `packages/agent/src/subagents/spawner.ts` | Factory that creates delegation tools |
-| `packages/agent/src/subagents/index.ts` | Barrel exports |
-| `packages/agent/src/agent.ts` | Orchestrator wiring, trace persistence, context replay |
-| `packages/agent/src/router.ts` | Thread routing (heuristic + model fallback), synopsis generation, archival |
-| `packages/agent/src/router.test.ts` | Tests for routing heuristics, context replay, artifact recap, trace extraction |
-| `packages/agent/src/telemetry.ts` | Shared OpenTelemetry bootstrap + AI SDK telemetry helpers |
-| `packages/agent/src/prompts/system.ts` | Orchestrator system prompt with delegation instructions |
-| `packages/agent/src/tools/messaging.ts` | `createReplyTools` + `createJobTools` (orchestrator-only) |
+```
+[Tools used: delegate_builder: Created auth middleware]
+```
+
+`loadThreadArtifacts()` separately turns recent trace summaries into a compact `Thread context` block for the system prompt. This gives the model artifact awareness without replaying full raw tool payloads.
+
+## Trace Model
+
+Visible transcript and execution state are stored separately.
+
+### `messages`
+
+`messages` stores only the user-visible transcript:
+
+- `conversationId`
+- `threadId`
+- `role`
+- `content`
+- `metadata`
+
+### `traces`
+
+`traces` stores the execution tree:
+
+- one root trace for the orchestrator
+- child traces for delegated subagents
+- `conversationId`, `threadId`, `messageId`
+- `parentTraceId`, `rootTraceId`
+- `agentName`, `status`, timing, metadata
+
+### `trace_events`
+
+`trace_events` stores ordered execution events per trace. The current persistence path writes `tool_call` and `tool_result` events with a monotonic `seq`.
+
+This split keeps prompt replay cheap while preserving full execution fidelity for debugging and follow-up context.
+
+## Tool Grouping
+
+Subagent tool access is defined by named groups in `packages/agent/src/subagents/tool-groups.ts`.
+
+| Group | Tools |
+|---|---|
+| `memory-read` | `search_memories` |
+| `memory-write` | `save_memory` |
+| `computer-read` | `execute_command`, `read_file` |
+| `computer-write` | `write_file` |
+| `integration` | connector management + user-scoped connector session tools |
+| `cua` | desktop automation tools |
+
+The research agent uses the same `execute_command` tool as the builder, but its prompt constrains it to read-only operations.
+
+## Design Choices
+
+- Orchestrator-only delegation keeps control flow simple.
+- Memory writes are isolated behind `delegate_memory_manager`.
+- Shared prompt context is assembled once and passed into subagents at spawn time.
+- Trace metadata is intentionally low-PII. Memories and formatted timestamps stay in prompts, not in telemetry metadata.
+
+## Key Files
+
+| File | Purpose |
+|---|---|
+| `packages/agent/src/agent.ts` | Main request flow, context assembly, persistence |
+| `packages/agent/src/router.ts` | Thread resolution, archival, synopsis generation |
+| `packages/agent/src/context.ts` | Thread-tail loading, artifact recap, replay annotations |
+| `packages/agent/src/synopsis.ts` | Dormancy and overflow synopsis updates |
+| `packages/agent/src/traces.ts` | Trace persistence and tool annotation formatting |
+| `packages/agent/src/subagents/spawner.ts` | `delegate_*` tool creation |
+| `packages/agent/src/subagents/tool-groups.ts` | Tool-group definitions and resolution |
+
