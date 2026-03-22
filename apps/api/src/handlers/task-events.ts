@@ -256,6 +256,10 @@ export const handleTaskEventPost = (request: Request) =>
 						yield* Effect.tryPromise({
 							try: async () => {
 								const notifyNow = new Date()
+						yield* Effect.tryPromise({
+							try: async () => {
+								await telegram.value.sendMessage(target.chatId, text)
+								const notifyNow = new Date()
 								await db
 									.update(schema.tasks)
 									.set({
@@ -264,7 +268,12 @@ export const handleTaskEventPost = (request: Request) =>
 										updatedAt: notifyNow,
 									})
 									.where(eq(schema.tasks.id, task.id))
-								await telegram.value.sendMessage(target.chatId, text)
+							},
+							catch: (e) => {
+								console.error(`[task-events] inline notification failed for task ${task.id}:`, e)
+								return undefined
+							},
+						})
 							},
 							catch: (e) => {
 								console.error(`[task-events] inline notification failed for task ${task.id}:`, e)
