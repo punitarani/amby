@@ -67,7 +67,7 @@ const program = Effect.gen(function* () {
 		`Sandbox: ${sandbox.enabled ? "Daytona connected (on-demand)" : "disabled (no DAYTONA_API_KEY)"}`,
 	)
 
-	const conversationId = yield* agent.ensureConversation("cli")
+	const conversationId = yield* agent.ensureConversation("cli", "default")
 
 	yield* jobRunner.start((job) =>
 		Effect.gen(function* () {

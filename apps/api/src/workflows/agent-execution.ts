@@ -129,7 +129,8 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 								adapter.postMessage(chatIdStr, text).then(() => {})
 							const effect = Effect.gen(function* () {
 								const agent = yield* AgentService
-								const convId = conversationId ?? (yield* agent.ensureConversation("telegram"))
+								const convId =
+									conversationId ?? (yield* agent.ensureConversation("telegram", String(chatId)))
 								conversationId = convId
 
 								if (messageTexts.length > 1) {

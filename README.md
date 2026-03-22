@@ -13,7 +13,7 @@ packages/
   env             Environment config (Effect.Config + Redacted secrets)
   db              Postgres via Drizzle ORM + Effect service layer
   auth            BetterAuth with Drizzle adapter
-  models          OpenRouter provider registry (Claude Haiku 4.5 default)
+  models          OpenRouter provider registry (Gemini 3.1 Flash Lite default)
   memory          Persistent user memory — static facts + dynamic context
   computer        Daytona sandboxes — isolated per-user compute
   channels        Channel abstraction — CLI now, SMS/web/mobile later
@@ -35,6 +35,8 @@ bun run cli             # start the REPL
 ```
 
 Only `OPENROUTER_API_KEY` is required to get started. Sandbox computer access is optional — add `DAYTONA_API_KEY` to enable it (sign up at [daytona.io](https://app.daytona.io)). If you set `POSTHOG_KEY`, both the API and `apps/web` send analytics to the same PostHog project, and the web app proxies browser traffic through `/_a`.
+
+Amby now stores conversations as a platform-level conversation plus internal topic threads. The visible transcript lives on message rows; tool execution is persisted separately as traces for replay and debugging.
 
 ## Scripts
 

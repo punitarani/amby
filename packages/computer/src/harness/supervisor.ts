@@ -539,12 +539,12 @@ export const TaskSupervisorLive = Layer.scoped(
 					if (conversationId) {
 						const convRows = yield* query((d) =>
 							d
-								.select({ channelType: schema.conversations.channelType })
+								.select({ platform: schema.conversations.platform })
 								.from(schema.conversations)
 								.where(eq(schema.conversations.id, conversationId))
 								.limit(1),
 						).pipe(Effect.mapError(sandboxError("Failed to load conversation")))
-						channelType = convRows[0]?.channelType
+						channelType = convRows[0]?.platform
 						if (channelType === "telegram") {
 							const accRows = yield* query((d) =>
 								d

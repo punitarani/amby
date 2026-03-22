@@ -6,7 +6,7 @@ from anywhere (CLI today, phone/web/messaging later). This document describes th
 The MVP is a **text-only CLI runner** that validates the core loop: receive input, think with memory, act with tools,
 respond — or proactively reach out. Voice, web, and mobile channels come later.
 
----
+***
 
 ## Design Principles
 
@@ -28,7 +28,7 @@ respond — or proactively reach out. Voice, web, and mobile channels come later
 6. **Memory as persistent intelligence.** The agent forgets nothing (unless told to). Memory is what makes Amby an
    assistant, not a chatbot.
 
----
+***
 
 ## System Overview
 
@@ -72,13 +72,13 @@ graph TD
     subgraph "Infrastructure"
         DB[(Supabase Postgres<br/>pgvector + pg_cron)]
         Daytona[Daytona API]
-        OpenAI[OpenAI API]
+        OpenRouter[OpenRouter API]
     end
 
     Memory --> DB
     Jobs --> DB
     Computer --> Daytona
-    Models --> OpenAI
+    Models --> OpenRouter
 
     subgraph "Foundation"
         ENV[Env]
@@ -91,7 +91,7 @@ graph TD
     ENV -.-> Computer
 ```
 
----
+***
 
 ## Package Map
 
@@ -122,13 +122,13 @@ graph BT
 | `@amby/env`      | Type-safe environment variables via T3 Env        | `@t3-oss/env-core`, `zod`              |
 | `@amby/db`       | Drizzle ORM, schemas, migrations, Supabase client | `drizzle-orm`, `postgres`, `@amby/env` |
 | `@amby/auth`     | BetterAuth configuration and user authentication  | `better-auth`, `@amby/db`, `@amby/env` |
-| `@amby/models`   | AI provider registry and OpenAI Codex OAuth       | `ai`, `@ai-sdk/openai`, `@amby/env`    |
+| `@amby/models`   | OpenRouter-backed model registry and model selection | `ai`, `@openrouter/ai-sdk-provider`, `@amby/env` |
 | `@amby/memory`   | Memory storage, retrieval, and LLM injection      | `@amby/db`, `ai`                       |
 | `@amby/computer` | Daytona sandbox lifecycle and command execution   | `@daytonaio/sdk`, `@amby/env`          |
 | `@amby/channels` | Channel interface and adapters (CLI for MVP)      | `@amby/env`                            |
 | `@amby/agent`    | Core agent orchestration, tools, jobs             | `ai`, all `@amby/*` packages           |
 
----
+***
 
 ## Package Details
 
@@ -141,13 +141,13 @@ Every other package imports env vars from here — no `process.env` scattered ac
 
 **Defines variables for:**
 
-- Database: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`
-- OpenAI: `OPENAI_API_KEY` (optional fallback when not using Codex OAuth)
-- Daytona: `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_TARGET`
-- Auth: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`
-- Cartesia: `CARTESIA_API_KEY` (future, TTS)
+* Database: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`
+* Models: `OPENROUTER_API_KEY` (required), `OPENAI_API_KEY` (optional, used for Codex in sandboxes)
+* Daytona: `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_TARGET`
+* Auth: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`
+* Cartesia: `CARTESIA_API_KEY` (future, TTS)
 
----
+***
 
 ### @amby/db
 
@@ -164,7 +164,9 @@ Owns all database schemas (Drizzle ORM) and the database client. Single source o
 | `accounts`          | OAuth accounts and tokens (BetterAuth)    |
 | `conversations`     | Top-level conversation containers per user per channel |
 | `conversationThreads` | Topic threads within a conversation (routing, archival, synopsis) |
-| `messages`          | Individual messages within conversations (with execution traces) |
+| `messages`          | User-visible messages within conversations |
+| `traces`            | Orchestrator and subagent execution spans |
+| `traceEvents`       | Ordered tool-call and tool-result events |
 | `channels`          | Registered channel configurations         |
 | `documents`         | Raw ingested content (memory sources)     |
 | `chunks`            | Semantic chunks for vector retrieval      |
@@ -179,7 +181,7 @@ Owns all database schemas (Drizzle ORM) and the database client. Single source o
 
 **Migrations:** Drizzle Kit generates and runs migrations. Supabase provides the Postgres instance.
 
----
+***
 
 ### @amby/auth
 
@@ -190,53 +192,43 @@ defined, but there is no HTTP server to serve auth routes yet.
 
 **Configuration:**
 
-- Database adapter: Drizzle (via `@amby/db`)
-- Social providers: Google, GitHub (future — not MVP)
-- Plugins: added as needed (passkeys, 2FA, etc. — not MVP)
+* Database adapter: Drizzle (via `@amby/db`)
+* Social providers: Google, GitHub (future — not MVP)
+* Plugins: added as needed (passkeys, 2FA, etc. — not MVP)
 
-**Note:** OpenAI Codex OAuth for model access is handled by `@amby/models`, not `@amby/auth`. BetterAuth handles *user
-identity*. Model provider auth is a separate concern.
+**Note:** BetterAuth handles *user identity*. Model-provider configuration is a separate concern.
 
----
+***
 
 ### @amby/models
 
-Manages AI provider connections. Handles OpenAI Codex OAuth, builds the Vercel AI SDK provider registry, and defines
-interfaces for future TTS/STT providers.
+Manages runtime model selection. It builds the OpenRouter-backed Vercel AI SDK registry and defines interfaces for
+future TTS/STT providers.
 
-**Exports:** `registry` (Vercel AI SDK provider registry), `getModel(id)` (resolve a model from the registry),
-`codexAuth` (OpenAI Codex OAuth flow utilities), `TTSProvider` / `STTProvider` (interfaces, future).
+**Exports:** `getModel(id)`, `defaultModelId`, and `TTSProvider` / `STTProvider` (interfaces, future).
 
-#### OpenAI Codex OAuth
+#### Provider registry
 
-Implements the same PKCE-based OAuth flow used by OpenClaw:
-
-1. Generate PKCE verifier/challenge + random state
-2. Open `https://auth.openai.com/oauth/authorize` with the challenge
-3. Capture callback at `http://127.0.0.1:1455/auth/callback` (or manual paste for headless)
-4. Exchange authorization code at `https://auth.openai.com/oauth/token`
-5. Store `{ access, refresh, expires, accountId }` locally
-6. Auto-refresh expired tokens under file lock
-
-**Provider registry:**
+The runtime uses `createOpenRouter()` from `@openrouter/ai-sdk-provider`:
 
 ```
-openai-codex  →  OpenAI provider using Codex OAuth tokens (default)
-openai        →  OpenAI provider using API key (fallback)
+google/gemini-3.1-flash-lite-preview  → default model
+nvidia/nemotron-3-super-120b-a12b     → higher-intelligence override
 ```
 
-Default model: `openai-codex/gpt-5.4`. Users authenticate once; tokens refresh automatically.
+`OPENROUTER_API_KEY` powers the agent runtime. `OPENAI_API_KEY` remains useful for Codex running inside user
+sandboxes, but it is not the primary application model provider.
 
 #### TTS / STT (future — MVP is text-only)
 
 Interfaces defined now, implementations later:
 
-- **TTS default:** Cartesia Sonic 3 (~$0.005/1000 chars, ~90ms first byte)
-- **STT default:** OpenAI Whisper API ($0.006/min, lowest flat rate)
-- Both are swappable via provider interface
-- LiveKit for real-time voice transport when voice is added
+* **TTS default:** Cartesia Sonic 3 (~$0.005/1000 chars, ~90ms first byte)
+* **STT default:** OpenAI Whisper API ($0.006/min, lowest flat rate)
+* Both are swappable via provider interface
+* LiveKit for real-time voice transport when voice is added
 
----
+***
 
 ### @amby/memory
 
@@ -257,7 +249,7 @@ Stores, retrieves, deduplicates, and injects memories into LLM calls.
 Depends on `@amby/db` for the repository implementation. The `MemoryRepository` interface allows swapping the storage
 backend without touching memory logic.
 
----
+***
 
 ### @amby/computer
 
@@ -301,14 +293,14 @@ automatically. The agent never has to worry about sandbox state — the `Sandbox
 
 A Dockerfile defines the base sandbox image:
 
-- Debian slim base
-- Node.js, Python, common CLI tools pre-installed
-- Non-root user with appropriate permissions
-- Pre-configured for the agent's typical workloads
+* Debian slim base
+* Node.js, Python, common CLI tools pre-installed
+* Non-root user with appropriate permissions
+* Pre-configured for the agent's typical workloads
 
 The snapshot is built once and cached by Daytona. New sandboxes launch from this snapshot in seconds.
 
----
+***
 
 ### @amby/channels
 
@@ -333,9 +325,9 @@ Channel {
 
 **MVP — CLI Channel:**
 
-- Uses `readline` for input, `console` for output
-- Single conversation per session
-- Blocking input loop with async message handling
+* Uses `readline` for input, `console` for output
+* Single conversation per session
+* Blocking input loop with async message handling
 
 **Future channels** (not MVP): SMS/iMessage (Twilio, Apple Business Chat), Web (WebSocket), Mobile (push + WebSocket),
 Slack/Discord (bot APIs).
@@ -357,7 +349,7 @@ User
 **Proactive messages** are just the start of a regular conversation. Once the agent sends a proactive message and the
 user replies, the exchange continues reactively in that same conversation thread.
 
----
+***
 
 ### @amby/agent
 
@@ -397,7 +389,7 @@ Tools are defined using the Vercel AI SDK `tool()` helper with Zod input schemas
 The agent is **stateless between requests** — all state lives in the database and memory system. The agent process can
 restart without losing context.
 
----
+***
 
 ## Core Concepts
 
@@ -412,13 +404,13 @@ through a channel. The user can reply, and the conversation continues reactively
 
 Examples of proactive behavior:
 
-- "You have a meeting with Sarah in 30 minutes. Here's a prep summary."
-- "The flight you asked me to track dropped to $280."
-- "You haven't responded to Mike's email from yesterday. Want me to draft a reply?"
+* "You have a meeting with Sarah in 30 minutes. Here's a prep summary."
+* "The flight you asked me to track dropped to $280."
+* "You haven't responded to Mike's email from yesterday. Want me to draft a reply?"
 
 Both modes use the same agent core, memory, and tools. The only difference is the trigger.
 
----
+***
 
 ### Reactive Message Flow
 
@@ -474,7 +466,7 @@ sequenceDiagram
     A->>DB: mark job complete
 ```
 
----
+***
 
 ### Jobs & Scheduling
 
@@ -509,7 +501,7 @@ jobs {
 
 #### Execution Flow
 
-1. **pg_cron** runs a SQL function every minute that marks due jobs as `pending`
+1. **pg\_cron** runs a SQL function every minute that marks due jobs as `pending`
 2. **Job runner** (in the agent process) polls for `pending` jobs
 3. For each pending job: mark as `running` → wake sandbox if needed → execute through the agent with full memory
    context → agent decides what action to take and what to communicate → mark as `completed` (or `failed`) → update
@@ -518,16 +510,16 @@ jobs {
 For the CLI MVP, the job runner is a simple `setInterval` that queries for pending jobs. In production, this becomes a
 worker process, but the interface stays the same.
 
----
+***
 
-### Conversation & Message Persistence
+### Conversation, Thread, and Trace Persistence
 
-Every message — incoming and outgoing — is stored in the database with full execution traces. This provides:
+Amby now separates visible transcript from execution state. This provides:
 
-- Full conversation history for context windows
-- Complete tool execution audit trail (every tool call input and output)
-- Thread-scoped context with intelligent replay
-- Continuity across sessions and channels
+* Full conversation history for context windows
+* Thread-scoped replay instead of flat conversation replay
+* Complete execution audit trails without bloating message rows
+* Continuity across sessions and channels
 
 **Schema:**
 
@@ -535,44 +527,71 @@ Every message — incoming and outgoing — is stored in the database with full 
 conversations {
   id:          uuid
   userId:      string
-  channelId:   string
-  channelType: 'cli' | 'sms' | 'imessage' | 'web' | 'mobile'
-  title:       string (nullable, auto-generated)
+  platform:    'cli' | 'telegram' | 'slack' | 'discord'
+  workspaceKey: string
+  externalConversationKey: string
+  title:       string (nullable)
   metadata:    jsonb
   createdAt:   timestamp
   updatedAt:   timestamp
 }
 
 conversation_threads {
-  id:              uuid
-  conversationId:  string
-  label:           string (nullable, topic name)
-  synopsis:        text (nullable, auto-generated summary)
-  status:          'open' | 'archived'
-  lastActiveAt:    timestamp
-  createdAt:       timestamp
+  id:               uuid
+  conversationId:   string
+  source:           'native' | 'reply_chain' | 'derived' | 'manual'
+  externalThreadKey: string (nullable)
+  label:            string (nullable)
+  synopsis:         text (nullable)
+  keywords:         text[] (nullable)
+  isDefault:        boolean
+  status:           'open' | 'archived'
+  lastActiveAt:     timestamp
+  createdAt:        timestamp
 }
 
 messages {
   id:             uuid
   conversationId: string
   threadId:       string (nullable, FK to conversation_threads)
-  role:           'user' | 'assistant' | 'system' | 'tool'
+  role:           'user' | 'assistant'
   content:        text
-  toolCalls:      jsonb (nullable) — Array<{ toolCallId, toolName, input }>
-  toolResults:    jsonb (nullable) — Array<{ toolCallId, toolName, output }>
   metadata:       jsonb
   createdAt:      timestamp
 }
+
+traces {
+  id:            uuid
+  conversationId: uuid
+  threadId:      uuid (nullable)
+  messageId:     uuid (nullable)
+  parentTraceId: uuid (nullable)
+  rootTraceId:   uuid (nullable)
+  agentName:     text
+  status:        'running' | 'completed' | 'failed'
+  startedAt:     timestamp
+  completedAt:   timestamp (nullable)
+  durationMs:    integer (nullable)
+  metadata:      jsonb (nullable)
+}
+
+trace_events {
+  id:          uuid
+  traceId:     uuid
+  seq:         integer
+  kind:        'tool_call' | 'tool_result' | ...
+  payload:     jsonb
+  createdAt:   timestamp
+}
 ```
 
-**Thread routing:** Each inbound message is routed to a thread via heuristic (time gap < 2 min → continue) or model-based classification (continue / switch / new). Stale threads (>24h inactive) are auto-archived with a generated synopsis. The router throttles archival checks to once per 5 minutes per conversation.
+**Thread routing:** `resolveThread()` always ensures a default thread, then routes by cheap derived heuristics with a model fallback. The resolver API also supports native thread keys, though current CLI and Telegram flows use the derived path.
 
-**Trace persistence:** Assistant messages store the complete execution trace — every orchestrator tool call and result, including subagent delegation results with their `toolsUsed` arrays. Large string outputs are truncated to 500 chars; structured outputs (like subagent `{ summary, toolsUsed }`) are stored as-is.
+**Trace persistence:** The transcript lives on `messages`. Execution lives on `traces` and `trace_events`. Root traces represent orchestrator runs; child traces represent delegated subagents.
 
-**Context replay:** When loading history, the last 4 assistant messages get lightweight `[Tools used: ...]` annotations appended. Older messages load as plain text. This balances execution context against token budget.
+**Context replay:** The active thread tail is replayed directly. The last 4 assistant messages get lightweight `[Tools used: ...]` annotations built from recent `tool_result` events, and a separate thread recap is built from recent trace summaries.
 
----
+***
 
 ## Infrastructure
 
@@ -580,9 +599,9 @@ messages {
 
 Supabase provides the Postgres database with key extensions:
 
-- **pgvector** — vector similarity search for memory retrieval
-- **pg_cron** — scheduled job triggers (marks due jobs as pending)
-- **pg_net** — HTTP calls from SQL (for production webhook triggers, not used in CLI MVP)
+* **pgvector** — vector similarity search for memory retrieval
+* **pg\_cron** — scheduled job triggers (marks due jobs as pending)
+* **pg\_net** — HTTP calls from SQL (for production webhook triggers, not used in CLI MVP)
 
 **Local development:** `supabase init` + `supabase start` spins up a full local stack in Docker (Postgres, GoTrue,
 Storage, Realtime — we primarily use Postgres).
@@ -595,23 +614,24 @@ Drizzle ORM owns all schemas and migrations. Supabase provides the infrastructur
 
 Daytona provides sandboxed compute environments via the `@daytonaio/sdk`:
 
-- **Sandboxes** are isolated Linux environments with process, network, and filesystem isolation
-- **Snapshots** are pre-built Docker images for fast sandbox creation
-- **Lifecycle management** via SDK: `create()`, `start()`, `stop()`, `delete()`
-- **File system** access: `uploadFile()`, `downloadFile()`, `listFiles()`
-- **Process execution**: `executeCommand()`, `codeRun()`, PTY sessions
-- **Regions:** US or EU
-- **Default resources:** 1 vCPU, 1 GB RAM, 3 GB disk (scalable up to 4 vCPU, 8 GB RAM, 10 GB disk)
+* **Sandboxes** are isolated Linux environments with process, network, and filesystem isolation
+* **Snapshots** are pre-built Docker images for fast sandbox creation
+* **Lifecycle management** via SDK: `create()`, `start()`, `stop()`, `delete()`
+* **File system** access: `uploadFile()`, `downloadFile()`, `listFiles()`
+* **Process execution**: `executeCommand()`, `codeRun()`, PTY sessions
+* **Regions:** US or EU
+* **Default resources:** 1 vCPU, 1 GB RAM, 3 GB disk (scalable up to 4 vCPU, 8 GB RAM, 10 GB disk)
 
 Used in both local development and production. No local Docker fallback — always Daytona.
 
-### OpenAI
+### Model Provider
 
-Primary model provider via Codex OAuth:
+Primary runtime provider is OpenRouter:
 
-- **Auth:** PKCE OAuth flow (same as OpenClaw). Tokens stored locally for CLI, in DB for production.
-- **Default model:** `openai-codex/gpt-5.4`
-- **Fallback:** Standard API key auth (`openai/` prefix)
+* **Auth:** API-key based via `OPENROUTER_API_KEY`
+* **Default model:** `google/gemini-3.1-flash-lite-preview`
+* **Higher-intelligence override:** `nvidia/nemotron-3-super-120b-a12b`
+* **Separate concern:** Codex auth for sandboxed background work is handled by the computer harness
 
 ### Cloudflare Workers (Production API)
 
@@ -656,13 +676,13 @@ Telegram POST /webhook
 
 **Key files:**
 
-- `apps/api/src/worker.ts` — Entrypoint. Slim webhook (verify + enqueue), queue consumer, re-exports DO and Workflow classes.
-- `apps/api/src/queue/consumer.ts` — Routes messages: commands handled inline, text messages sent to DO.
-- `apps/api/src/durable-objects/conversation-session.ts` — One instance per Telegram chat. Buffers rapid messages, debounces with a 3s alarm, launches workflows, forwards interrupts.
-- `apps/api/src/workflows/agent-execution.ts` — Durable agent execution. Each step is retryable and persisted. Handles user resolution, agent LLM loop, Telegram response splitting, and DO notification.
-- `apps/api/src/queue/runtime.ts` — Shared Effect runtime factory for queue consumer and workflows.
-- `apps/api/src/telegram/utils.ts` — Extracted utilities: `verifySecret`, `findOrCreateUser`, `handleCommand`, `splitTelegramMessage`.
-- `apps/api/src/telegram/index.ts` — `TelegramBot` Effect service tag and layers (`TelegramBotLive`, `TelegramBotLite`).
+* `apps/api/src/worker.ts` — Entrypoint. Slim webhook (verify + enqueue), queue consumer, re-exports DO and Workflow classes.
+* `apps/api/src/queue/consumer.ts` — Routes messages: commands handled inline, text messages sent to DO.
+* `apps/api/src/durable-objects/conversation-session.ts` — One instance per Telegram chat. Buffers rapid messages, debounces with a 3s alarm, launches workflows, forwards interrupts.
+* `apps/api/src/workflows/agent-execution.ts` — Durable agent execution. Each step is retryable and persisted. Handles user resolution, agent LLM loop, Telegram response splitting, and DO notification.
+* `apps/api/src/queue/runtime.ts` — Shared Effect runtime factory for queue consumer and workflows.
+* `apps/api/src/telegram/utils.ts` — Extracted utilities: `verifySecret`, `findOrCreateUser`, `handleCommand`, `splitTelegramMessage`.
+* `apps/api/src/telegram/index.ts` — `TelegramBot` Effect service tag and layers (`TelegramBotLive`, `TelegramBotLite`).
 
 **Error handling:** Queue retries 3x then dead-letters. Workflow steps retry with exponential backoff. On final failure, the workflow sends an error message to the user and resets the DO to idle.
 
@@ -670,7 +690,7 @@ Telegram POST /webhook
 
 **User interrupts (Phase 4):** If a message arrives while the agent is processing, the DO forwards it to the running workflow via `sendEvent`. The workflow checks for these between LLM rounds via `waitForEvent`.
 
----
+***
 
 ## Project Structure
 
@@ -702,7 +722,9 @@ amby/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       └── index.ts            ← T3 Env config, exports `env`
+│   │       ├── shared.ts           ← Env interface + service tag
+│   │       ├── local.ts            ← Local Bun/Node env loader
+│   │       └── workers.ts          ← Cloudflare Workers env loader
 │   ├── db/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
@@ -714,9 +736,7 @@ amby/
 │   │       │   ├── users.ts
 │   │       │   ├── sessions.ts
 │   │       │   ├── accounts.ts
-│   │       │   ├── conversations.ts
-│   │       │   ├── threads.ts
-│   │       │   ├── messages.ts
+│   │       │   ├── conversations.ts  ← conversations, threads, messages, traces
 │   │       │   ├── channels.ts
 │   │       │   ├── documents.ts
 │   │       │   ├── chunks.ts
@@ -738,10 +758,10 @@ amby/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       ├── registry.ts         ← Vercel AI SDK provider registry
-│   │       ├── oauth/
-│   │       │   └── openai-codex.ts ← PKCE OAuth flow + token management
+│   │       ├── registry.ts         ← OpenRouter-backed model registry
+│   │       ├── errors.ts
 │   │       ├── providers/
+│   │       │   ├── index.ts
 │   │       │   ├── tts.ts          ← TTS interface + Cartesia (future)
 │   │       │   └── stt.ts          ← STT interface + Whisper (future)
 │   │       └── index.ts
@@ -764,9 +784,9 @@ amby/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       ├── sandbox.ts          ← SandboxManager (lifecycle)
-│   │       ├── snapshot.ts         ← Docker snapshot configuration
-│   │       ├── executor.ts         ← Command and file operations
+│   │       ├── sandbox/            ← Sandbox lifecycle + tools
+│   │       ├── harness/            ← Codex task harness + supervisor
+│   │       ├── config.ts
 │   │       └── index.ts
 │   ├── channels/
 │   │   ├── package.json
@@ -789,8 +809,13 @@ amby/
 │           │   ├── spawner.ts      ← Factory that creates delegate_* tools
 │           │   └── index.ts
 │           ├── tools/
+│           │   ├── codex-auth.ts   ← Codex auth status + setup tools
+│           │   ├── delegation.ts   ← Sandbox task delegation tools
 │           │   ├── messaging.ts    ← send_message, schedule_job, set_timezone
 │           │   └── index.ts
+│           ├── context.ts          ← Thread-tail loading + artifact recap
+│           ├── synopsis.ts         ← Thread synopsis lifecycle
+│           ├── traces.ts           ← Trace persistence + replay formatting
 │           ├── jobs/
 │           │   ├── scheduler.ts    ← Job scheduling logic
 │           │   ├── runner.ts       ← Job polling and execution
@@ -816,7 +841,7 @@ amby/
 └── .env.example
 ```
 
----
+***
 
 ## CLI MVP: How It All Comes Together
 
@@ -825,7 +850,7 @@ The CLI app (`apps/cli`) is the thin entry point that wires all packages togethe
 ```
 1. Load environment          →  @amby/env
 2. Connect to database       →  @amby/db
-3. Run OpenAI Codex OAuth    →  @amby/models (if not already authenticated)
+3. Build model registry       →  @amby/models
 4. Create agent instance      →  @amby/agent (wires memory, models, computer, channels)
 5. Register CLI channel       →  @amby/channels
 6. Start job runner           →  setInterval polling for pending jobs
@@ -836,9 +861,6 @@ A single CLI session looks like:
 
 ```
 $ amby
-
-🔐 Authenticating with OpenAI... (opens browser for Codex OAuth)
-✓ Authenticated as user@example.com
 
 📦 Connecting to database...
 ✓ Connected to Supabase (local)
@@ -859,35 +881,35 @@ You have 3 meetings tomorrow:
 Want me to prepare anything for these?
 ```
 
----
+***
 
 ## MVP Scope
 
 ### In Scope
 
-- CLI channel — interactive REPL for testing
-- Agent core — system prompt, tool loop, message handling
-- Memory — Phase 1 from MEMORY.md (store, retrieve, inject, dedupe)
-- Models — OpenAI Codex OAuth + Vercel AI SDK provider registry
-- Computer — Daytona sandbox create/start/stop/execute
-- DB — full schema, Drizzle migrations, Supabase local
-- Env — all env vars typed and validated
-- Auth — BetterAuth config defined (not serving HTTP yet)
-- Jobs — basic scheduling with in-process polling
-- Conversation persistence — all messages stored
+* CLI channel — interactive REPL for testing
+* Agent core — system prompt, tool loop, message handling
+* Memory — Phase 1 from MEMORY.md (store, retrieve, inject, dedupe)
+* Models — OpenRouter-backed Vercel AI SDK provider registry
+* Computer — Daytona sandbox create/start/stop/execute
+* DB — full schema, Drizzle migrations, Supabase local
+* Env — all env vars typed and validated
+* Auth — BetterAuth config defined (not serving HTTP yet)
+* Jobs — basic scheduling with in-process polling
+* Conversation persistence — all messages stored
 
 ### Out of Scope (Future)
 
-- Web, mobile, SMS, iMessage channels
-- Voice (TTS/STT via Cartesia + Whisper, LiveKit transport)
-- Tests
-- Production deployment
-- User dashboard / admin UI
-- Advanced memory (versioning, forgetting, compression — phases 2-3 of MEMORY.md)
-- Multi-user / multi-tenant
-- Rate limiting, billing, usage tracking
+* Web, mobile, SMS, iMessage channels
+* Voice (TTS/STT via Cartesia + Whisper, LiveKit transport)
+* Tests
+* Production deployment
+* User dashboard / admin UI
+* Advanced memory (versioning, forgetting, compression — phases 2-3 of MEMORY.md)
+* Multi-user / multi-tenant
+* Rate limiting, billing, usage tracking
 
----
+***
 
 ## Future Roadmap
 
@@ -897,7 +919,7 @@ Want me to prepare anything for these?
 **Web & mobile channels.** WebSocket-based real-time connection. Push notifications for proactive messages. Shared
 conversation history and memory across all devices. The channel abstraction makes adding these straightforward.
 
-**Production infra.** Supabase hosted. Proper worker processes for job execution. pg_cron + pg_net for webhook-based job
+**Production infra.** Supabase hosted. Proper worker processes for job execution. pg\_cron + pg\_net for webhook-based job
 triggers. BetterAuth serving HTTP for user sign-up/login. Deployment to a long-running cloud compute environment.
 
 **Trust features.** Clear audit trails for all agent actions. Permission-based action approval (the agent asks before

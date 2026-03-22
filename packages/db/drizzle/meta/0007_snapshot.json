@@ -1,6 +1,6 @@
 {
-	"id": "433774cf-c58f-44dd-a2d1-0d32aaf1650c",
-	"prevId": "8a9e4386-2977-4ae5-95d8-6ba02224cbee",
+	"id": "a5bfb6c7-8347-4b89-8b6c-10b5657e8edb",
+	"prevId": "433774cf-c58f-44dd-a2d1-0d32aaf1650c",
 	"version": "7",
 	"dialect": "postgresql",
 	"tables": {
@@ -214,6 +214,166 @@
 			"checkConstraints": {},
 			"isRLSEnabled": false
 		},
+		"public.conversation_threads": {
+			"name": "conversation_threads",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"conversation_id": {
+					"name": "conversation_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"source": {
+					"name": "source",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"external_thread_key": {
+					"name": "external_thread_key",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"label": {
+					"name": "label",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"synopsis": {
+					"name": "synopsis",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"keywords": {
+					"name": "keywords",
+					"type": "text[]",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"is_default": {
+					"name": "is_default",
+					"type": "boolean",
+					"primaryKey": false,
+					"notNull": true,
+					"default": false
+				},
+				"status": {
+					"name": "status",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'open'"
+				},
+				"last_active_at": {
+					"name": "last_active_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				}
+			},
+			"indexes": {
+				"threads_conversation_active_idx": {
+					"name": "threads_conversation_active_idx",
+					"columns": [
+						{
+							"expression": "conversation_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						},
+						{
+							"expression": "status",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						},
+						{
+							"expression": "last_active_at",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"threads_default_unique_idx": {
+					"name": "threads_default_unique_idx",
+					"columns": [
+						{
+							"expression": "conversation_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": true,
+					"where": "is_default = true",
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"threads_external_key_idx": {
+					"name": "threads_external_key_idx",
+					"columns": [
+						{
+							"expression": "conversation_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						},
+						{
+							"expression": "external_thread_key",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": true,
+					"where": "external_thread_key IS NOT NULL",
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				}
+			},
+			"foreignKeys": {
+				"conversation_threads_conversation_id_conversations_id_fk": {
+					"name": "conversation_threads_conversation_id_conversations_id_fk",
+					"tableFrom": "conversation_threads",
+					"tableTo": "conversations",
+					"columnsFrom": ["conversation_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
 		"public.conversations": {
 			"name": "conversations",
 			"schema": "",
@@ -231,12 +391,24 @@
 					"primaryKey": false,
 					"notNull": true
 				},
-				"channel_type": {
-					"name": "channel_type",
+				"platform": {
+					"name": "platform",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"workspace_key": {
+					"name": "workspace_key",
 					"type": "text",
 					"primaryKey": false,
 					"notNull": true,
-					"default": "'cli'"
+					"default": "''"
+				},
+				"external_conversation_key": {
+					"name": "external_conversation_key",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
 				},
 				"title": {
 					"name": "title",
@@ -266,8 +438,8 @@
 				}
 			},
 			"indexes": {
-				"conversations_user_updated_idx": {
-					"name": "conversations_user_updated_idx",
+				"conversations_platform_key_idx": {
+					"name": "conversations_platform_key_idx",
 					"columns": [
 						{
 							"expression": "user_id",
@@ -276,7 +448,34 @@
 							"nulls": "last"
 						},
 						{
-							"expression": "updated_at",
+							"expression": "platform",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						},
+						{
+							"expression": "workspace_key",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						},
+						{
+							"expression": "external_conversation_key",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": true,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"conversations_user_idx": {
+					"name": "conversations_user_idx",
+					"columns": [
+						{
+							"expression": "user_id",
 							"isExpression": false,
 							"asc": true,
 							"nulls": "last"
@@ -322,6 +521,12 @@
 					"primaryKey": false,
 					"notNull": true
 				},
+				"thread_id": {
+					"name": "thread_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
 				"role": {
 					"name": "role",
 					"type": "text",
@@ -333,18 +538,6 @@
 					"type": "text",
 					"primaryKey": false,
 					"notNull": true
-				},
-				"tool_calls": {
-					"name": "tool_calls",
-					"type": "jsonb",
-					"primaryKey": false,
-					"notNull": false
-				},
-				"tool_results": {
-					"name": "tool_results",
-					"type": "jsonb",
-					"primaryKey": false,
-					"notNull": false
 				},
 				"metadata": {
 					"name": "metadata",
@@ -381,6 +574,27 @@
 					"concurrently": false,
 					"method": "btree",
 					"with": {}
+				},
+				"messages_thread_idx": {
+					"name": "messages_thread_idx",
+					"columns": [
+						{
+							"expression": "thread_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						},
+						{
+							"expression": "created_at",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
 				}
 			},
 			"foreignKeys": {
@@ -391,6 +605,290 @@
 					"columnsFrom": ["conversation_id"],
 					"columnsTo": ["id"],
 					"onDelete": "cascade",
+					"onUpdate": "no action"
+				},
+				"messages_thread_id_conversation_threads_id_fk": {
+					"name": "messages_thread_id_conversation_threads_id_fk",
+					"tableFrom": "messages",
+					"tableTo": "conversation_threads",
+					"columnsFrom": ["thread_id"],
+					"columnsTo": ["id"],
+					"onDelete": "set null",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.trace_events": {
+			"name": "trace_events",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"trace_id": {
+					"name": "trace_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"seq": {
+					"name": "seq",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"kind": {
+					"name": "kind",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"payload": {
+					"name": "payload",
+					"type": "jsonb",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				}
+			},
+			"indexes": {
+				"trace_events_trace_seq_idx": {
+					"name": "trace_events_trace_seq_idx",
+					"columns": [
+						{
+							"expression": "trace_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						},
+						{
+							"expression": "seq",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				}
+			},
+			"foreignKeys": {
+				"trace_events_trace_id_traces_id_fk": {
+					"name": "trace_events_trace_id_traces_id_fk",
+					"tableFrom": "trace_events",
+					"tableTo": "traces",
+					"columnsFrom": ["trace_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.traces": {
+			"name": "traces",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"conversation_id": {
+					"name": "conversation_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"thread_id": {
+					"name": "thread_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"message_id": {
+					"name": "message_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"parent_trace_id": {
+					"name": "parent_trace_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"root_trace_id": {
+					"name": "root_trace_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"agent_name": {
+					"name": "agent_name",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"status": {
+					"name": "status",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'running'"
+				},
+				"started_at": {
+					"name": "started_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"completed_at": {
+					"name": "completed_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"duration_ms": {
+					"name": "duration_ms",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"metadata": {
+					"name": "metadata",
+					"type": "jsonb",
+					"primaryKey": false,
+					"notNull": false
+				}
+			},
+			"indexes": {
+				"traces_conversation_idx": {
+					"name": "traces_conversation_idx",
+					"columns": [
+						{
+							"expression": "conversation_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"traces_message_id_idx": {
+					"name": "traces_message_id_idx",
+					"columns": [
+						{
+							"expression": "message_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"traces_parent_trace_id_idx": {
+					"name": "traces_parent_trace_id_idx",
+					"columns": [
+						{
+							"expression": "parent_trace_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"traces_root_trace_id_idx": {
+					"name": "traces_root_trace_id_idx",
+					"columns": [
+						{
+							"expression": "root_trace_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"traces_thread_idx": {
+					"name": "traces_thread_idx",
+					"columns": [
+						{
+							"expression": "thread_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				}
+			},
+			"foreignKeys": {
+				"traces_conversation_id_conversations_id_fk": {
+					"name": "traces_conversation_id_conversations_id_fk",
+					"tableFrom": "traces",
+					"tableTo": "conversations",
+					"columnsFrom": ["conversation_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				},
+				"traces_thread_id_conversation_threads_id_fk": {
+					"name": "traces_thread_id_conversation_threads_id_fk",
+					"tableFrom": "traces",
+					"tableTo": "conversation_threads",
+					"columnsFrom": ["thread_id"],
+					"columnsTo": ["id"],
+					"onDelete": "set null",
+					"onUpdate": "no action"
+				},
+				"traces_message_id_messages_id_fk": {
+					"name": "traces_message_id_messages_id_fk",
+					"tableFrom": "traces",
+					"tableTo": "messages",
+					"columnsFrom": ["message_id"],
+					"columnsTo": ["id"],
+					"onDelete": "set null",
 					"onUpdate": "no action"
 				}
 			},
