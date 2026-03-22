@@ -340,7 +340,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							requestMode: mode,
 							requestMetadata: metadata,
 						})
-						const delegationTools = createSubagentTools(
+						const { tools: delegationTools, traceStore: subagentTraces } = createSubagentTools(
 							models.getModel,
 							toolGroups,
 							sharedPromptContext,
@@ -449,6 +449,7 @@ export const makeAgentServiceLive = (userId: string) =>
 								messageId: savedMessageId,
 								agentName: "orchestrator",
 								steps: result.steps,
+								subagentTraces,
 							})
 						}
 

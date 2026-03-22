@@ -1,5 +1,6 @@
 import { eq, schema } from "@amby/db"
 import { Effect } from "effect"
+import type { SubagentTraceStore } from "./subagents/spawner"
 
 const TOOL_OUTPUT_TRUNCATE = 500
 const SUMMARY_TRUNCATE = 200
@@ -164,10 +165,10 @@ export function persistExecutionTrace(
 			}>
 		}>
 		durationMs?: number
+		subagentTraces?: SubagentTraceStore
 	},
 ): Effect.Effect<void, import("@amby/db").DbError> {
 	return Effect.gen(function* () {
-		// 1. Create root trace
 		const rootTraceId = yield* createTrace(query, {
 			conversationId: params.conversationId,
 			threadId: params.threadId,
@@ -175,7 +176,6 @@ export function persistExecutionTrace(
 			agentName: params.agentName,
 		})
 
-		// 2. Batch insert trace events for all steps
 		const rootEvents: Array<{
 			traceId: string
 			seq: number
@@ -205,83 +205,54 @@ export function persistExecutionTrace(
 			yield* query((d) => d.insert(schema.traceEvents).values(rootEvents))
 		}
 
-		// 3. Insert child traces for delegation results
-		const orchResults = params.steps.flatMap((s) =>
-			s.toolResults.map((tr) => ({
-				toolCallId: tr.toolCallId,
-				toolName: tr.toolName,
-				output: tr.output,
-			})),
-		)
+		if (params.subagentTraces) {
+			for (const [, subTrace] of params.subagentTraces) {
+				const childTraceId = yield* createTrace(query, {
+					conversationId: params.conversationId,
+					threadId: params.threadId,
+					messageId: params.messageId,
+					parentTraceId: rootTraceId,
+					rootTraceId,
+					agentName: subTrace.agentName,
+				})
 
-		for (const tr of orchResults) {
-			if (
-				!tr.toolName.startsWith("delegate_") ||
-				typeof tr.output !== "object" ||
-				tr.output === null ||
-				!("_trace" in tr.output)
-			) {
-				continue
-			}
-			const subTrace = (
-				tr.output as {
-					_trace: {
-						agentName: string
-						steps: Array<{
-							toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown }>
-							toolResults: Array<{
-								toolCallId: string
-								toolName: string
-								output: unknown
-							}>
-						}>
-						durationMs: number
+				const childEvents: Array<{
+					traceId: string
+					seq: number
+					kind: import("@amby/db").TraceEventKind
+					payload: Record<string, unknown>
+				}> = []
+				let childSeq = 0
+				for (const childStep of subTrace.steps) {
+					for (const tc of childStep.toolCalls) {
+						childEvents.push({
+							traceId: childTraceId,
+							seq: childSeq++,
+							kind: "tool_call",
+							payload: { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input },
+						})
+					}
+					for (const childTr of childStep.toolResults) {
+						childEvents.push({
+							traceId: childTraceId,
+							seq: childSeq++,
+							kind: "tool_result",
+							payload: {
+								toolCallId: childTr.toolCallId,
+								toolName: childTr.toolName,
+								output: childTr.output,
+							},
+						})
 					}
 				}
-			)._trace
-
-			const childTraceId = yield* createTrace(query, {
-				conversationId: params.conversationId,
-				threadId: params.threadId,
-				messageId: params.messageId,
-				parentTraceId: rootTraceId,
-				rootTraceId,
-				agentName: subTrace.agentName,
-			})
-
-			const childEvents: Array<{
-				traceId: string
-				seq: number
-				kind: import("@amby/db").TraceEventKind
-				payload: Record<string, unknown>
-			}> = []
-			let childSeq = 0
-			for (const childStep of subTrace.steps) {
-				for (const tc of childStep.toolCalls) {
-					childEvents.push({
-						traceId: childTraceId,
-						seq: childSeq++,
-						kind: "tool_call",
-						payload: { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input },
-					})
+				if (childEvents.length > 0) {
+					yield* query((d) => d.insert(schema.traceEvents).values(childEvents))
 				}
-				for (const tr of childStep.toolResults) {
-					childEvents.push({
-						traceId: childTraceId,
-						seq: childSeq++,
-						kind: "tool_result",
-						payload: { toolCallId: tr.toolCallId, toolName: tr.toolName, output: tr.output },
-					})
-				}
-			}
-			if (childEvents.length > 0) {
-				yield* query((d) => d.insert(schema.traceEvents).values(childEvents))
-			}
 
-			yield* completeTrace(query, childTraceId, "completed", subTrace.durationMs)
+				yield* completeTrace(query, childTraceId, "completed", subTrace.durationMs)
+			}
 		}
 
-		// 4. Complete root trace
 		yield* completeTrace(query, rootTraceId, "completed", params.durationMs)
 	}).pipe(
 		Effect.catchAll((e) =>
