@@ -1,9 +1,9 @@
 import type { CodexAuthSummary, TaskSupervisor } from "@amby/computer"
-import { CODEX_DEVICE_AUTH_SETTINGS_URL, CODEX_DEVICE_AUTH_URL } from "@amby/computer"
 import { tool } from "ai"
 import type { Context } from "effect"
 import { Effect } from "effect"
 import { z } from "zod"
+import { buildCodexDeviceSignInUserMessages } from "./codex-sign-in-messages"
 
 type Supervisor = Context.Tag.Service<typeof TaskSupervisor>
 
@@ -11,11 +11,7 @@ const withUserMessages = (summary: CodexAuthSummary) =>
 	summary.status === "pending" && summary.pending?.type === "device_code"
 		? {
 				...summary,
-				userMessages: [
-					`Toggle on "Enable device code authorization for Codex" in ${CODEX_DEVICE_AUTH_SETTINGS_URL}`,
-					`Go to ${CODEX_DEVICE_AUTH_URL} and enter this code`,
-					summary.pending.userCode,
-				],
+				userMessages: buildCodexDeviceSignInUserMessages(summary.pending.userCode),
 			}
 		: summary
 

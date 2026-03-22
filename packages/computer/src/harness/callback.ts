@@ -3,9 +3,7 @@
 const CALLBACK_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000
 
 const bufToHex = (buf: ArrayBuffer | Uint8Array) =>
-	[...new Uint8Array(buf instanceof ArrayBuffer ? buf : new Uint8Array(buf))]
-		.map((b) => b.toString(16).padStart(2, "0"))
-		.join("")
+	[...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("")
 
 export async function mintCallbackSecret(): Promise<{ raw: string; hash: string }> {
 	const bytes = crypto.getRandomValues(new Uint8Array(32))

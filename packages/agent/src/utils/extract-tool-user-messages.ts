@@ -1,18 +1,19 @@
 /**
- * Collect user-facing messages from all tool results in a step, deduplicated.
+ * Collect user-facing messages from tool results, deduplicated.
  *
- * Iterates all results (not just the last) because connector tools may appear
- * at any position. Only codex-auth and connector tools emit userMessages, and
- * Set-based dedup prevents repeats.
+ * Iterates all results because connector tools may appear at any position.
+ * Only codex-auth / delegation / connector tools emit userMessages; Set-based dedup prevents repeats.
  */
 export const extractToolUserMessages = (
-	toolResults: ReadonlyArray<{ output?: unknown } | undefined>,
+	toolResults: ReadonlyArray<unknown> | undefined,
 ): string[] | undefined => {
+	if (!toolResults?.length) return undefined
+
 	const messages: string[] = []
 	const seen = new Set<string>()
 
 	for (const toolResult of toolResults) {
-		const output = toolResult?.output
+		const output = getToolResultOutput(toolResult)
 		if (
 			typeof output === "object" &&
 			output !== null &&
@@ -29,4 +30,27 @@ export const extractToolUserMessages = (
 	}
 
 	return messages.length > 0 ? messages : undefined
+}
+
+function getToolResultOutput(toolResult: unknown): unknown {
+	if (typeof toolResult !== "object" || toolResult === null) return undefined
+	const tr = toolResult as Record<string, unknown>
+	return tr.output ?? tr.result
+}
+
+/**
+ * ToolLoopAgent exposes `toolResults` for the **last step only**. If the model runs
+ * `delegate_task` (with userMessages) and then a final text-only step, those messages
+ * are only present on earlier `steps[].toolResults`. Flatten all steps so Codex/connector
+ * prompts always reach the user.
+ */
+export function collectAllToolResultsForUserMessages(result: {
+	toolResults?: ReadonlyArray<unknown>
+	steps?: ReadonlyArray<{ toolResults?: ReadonlyArray<unknown> }>
+}): ReadonlyArray<unknown> | undefined {
+	if (result.steps && result.steps.length > 0) {
+		const merged = result.steps.flatMap((s) => s.toolResults ?? [])
+		return merged.length > 0 ? merged : undefined
+	}
+	return result.toolResults
 }

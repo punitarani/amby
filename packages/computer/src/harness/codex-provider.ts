@@ -8,7 +8,7 @@ const AGENTS_MD = `# Task Instructions
 You are a background agent executing a delegated task. Work autonomously to completion.
 
 ## Output Requirements
-- Write your final output to ../artifacts/result.md
+- Your final message will be captured as the task result — make it complete and well-formatted
 - Save any generated files, data, or screenshots to ../artifacts/
 - Be thorough and complete — there is no follow-up interaction
 `
@@ -53,6 +53,11 @@ function buildCodexConfigToml(needsBrowser: boolean, includeNotify: boolean): st
 		parts.push(PLAYWRIGHT_CONFIG.trim())
 	}
 	return parts.join("\n\n")
+}
+
+async function downloadText(sandbox: Sandbox, path: string): Promise<string> {
+	const buf = await sandbox.fs.downloadFile(path)
+	return utf8SizeLimited(buf)
 }
 
 export class CodexProvider implements TaskProvider {
@@ -104,21 +109,15 @@ export class CodexProvider implements TaskProvider {
 	}
 
 	async collectResult(sandbox: Sandbox, artifactRoot: string): Promise<TaskResult> {
-		let output = ""
-		try {
-			const buf = await sandbox.fs.downloadFile(`${artifactRoot}/result.md`)
-			output = utf8SizeLimited(buf)
-		} catch {
-			// result.md may not exist if codex failed early
-		}
+		const output = await downloadText(sandbox, `${artifactRoot}/result.md`).catch((e) => {
+			console.warn("[CodexProvider] failed to download result.md:", e)
+			return ""
+		})
 
-		let stderr = ""
-		try {
-			const buf = await sandbox.fs.downloadFile(`${artifactRoot}/stderr.log`)
-			stderr = utf8SizeLimited(buf)
-		} catch {
-			// stderr.log may not exist
-		}
+		const stderr = await downloadText(sandbox, `${artifactRoot}/stderr.log`).catch((e) => {
+			console.warn("[CodexProvider] failed to download stderr.log:", e)
+			return ""
+		})
 
 		// Generate summary (first 500 chars or first paragraph)
 		const summary = output
@@ -127,7 +126,7 @@ export class CodexProvider implements TaskProvider {
 				? `Task failed: ${stderr.slice(0, 200)}`
 				: "No output produced"
 
-		return { output, summary }
+		return { output, summary, stderr }
 	}
 
 	getArtifactRoot(taskId: string): string {

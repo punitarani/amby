@@ -3,6 +3,49 @@ import { tool } from "ai"
 import type { Context } from "effect"
 import { Effect } from "effect"
 import { z } from "zod"
+import { buildCodexDeviceSignInUserMessages } from "./codex-sign-in-messages"
+
+type Supervisor = Context.Tag.Service<typeof TaskSupervisor>
+
+async function ensureCodexAuthForDelegation(supervisor: Supervisor, userId: string) {
+	const auth = await Effect.runPromise(supervisor.getCodexAuthStatus(userId))
+
+	if (auth.status === "authenticated" && auth.method) {
+		return { ok: true as const }
+	}
+
+	if (auth.status === "pending" && auth.pending?.type === "device_code") {
+		return {
+			ok: false as const,
+			userMessages: buildCodexDeviceSignInUserMessages(auth.pending.userCode),
+		}
+	}
+
+	try {
+		const afterStart = await Effect.runPromise(supervisor.startCodexChatgptAuth(userId))
+		if (afterStart.status === "pending" && afterStart.pending?.type === "device_code") {
+			return {
+				ok: false as const,
+				userMessages: buildCodexDeviceSignInUserMessages(afterStart.pending.userCode),
+			}
+		}
+		if (afterStart.status === "authenticated" && afterStart.method) {
+			return { ok: true as const }
+		}
+		return {
+			ok: false as const,
+			error:
+				afterStart.error ??
+				"Codex sign-in could not be started. Try again in a moment or use get_codex_auth_status.",
+		}
+	} catch (e) {
+		const message = e instanceof Error ? e.message : String(e)
+		return {
+			ok: false as const,
+			error: message,
+		}
+	}
+}
 
 export function createSandboxDelegationTools(
 	supervisor: Context.Tag.Service<typeof TaskSupervisor>,
@@ -27,6 +70,21 @@ export function createSandboxDelegationTools(
 					.describe("Set true if the task requires web browsing (adds Playwright)"),
 			}),
 			execute: async ({ prompt, needsBrowser }) => {
+				const ensured = await ensureCodexAuthForDelegation(supervisor, userId)
+				if (!ensured.ok) {
+					if ("userMessages" in ensured) {
+						return {
+							error: "codex_auth_required",
+							status: "pending_setup",
+							userMessages: ensured.userMessages,
+						}
+					}
+					return {
+						error: "codex_auth_failed",
+						message: ensured.error,
+					}
+				}
+
 				const result = await Effect.runPromise(
 					supervisor.startTask({
 						userId,

@@ -182,6 +182,7 @@ export function archiveStaleThreads(
 					and(
 						eq(schema.conversationThreads.conversationId, conversationId),
 						eq(schema.conversationThreads.status, "open"),
+						eq(schema.conversationThreads.isDefault, false),
 						lte(schema.conversationThreads.lastActiveAt, cutoff),
 					),
 				),
@@ -283,10 +284,13 @@ export function ensureDefaultThread(
 
 		if (rows[0]) return rows[0].id
 
-		// Conflict — select the existing default thread
+		// Conflict — select the existing default thread and ensure it's open
 		const existing = yield* query((d) =>
 			d
-				.select({ id: schema.conversationThreads.id })
+				.select({
+					id: schema.conversationThreads.id,
+					status: schema.conversationThreads.status,
+				})
 				.from(schema.conversationThreads)
 				.where(
 					and(
@@ -297,7 +301,18 @@ export function ensureDefaultThread(
 				.limit(1),
 		)
 
-		if (existing[0]) return existing[0].id
+		const defaultRow = existing[0]
+		if (defaultRow) {
+			if (defaultRow.status !== "open") {
+				yield* query((d) =>
+					d
+						.update(schema.conversationThreads)
+						.set({ status: "open" })
+						.where(eq(schema.conversationThreads.id, defaultRow.id)),
+				)
+			}
+			return defaultRow.id
+		}
 
 		// Shouldn't happen, but fallback to oldest thread
 		const fallback = yield* query((d) =>

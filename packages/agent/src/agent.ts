@@ -49,7 +49,10 @@ import { createCodexAuthTools } from "./tools/codex-auth"
 import { createSandboxDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
 import { persistExecutionTrace } from "./traces"
-import { extractToolUserMessages } from "./utils/extract-tool-user-messages"
+import {
+	collectAllToolResultsForUserMessages,
+	extractToolUserMessages,
+} from "./utils/extract-tool-user-messages"
 
 function buildThreadMeta(threadCtx: ResolveThreadResult) {
 	return {
@@ -428,7 +431,9 @@ export const makeAgentServiceLive = (userId: string) =>
 						})
 
 						const toolUserMessages = onReply
-							? extractToolUserMessages(result.toolResults)
+							? extractToolUserMessages(
+									collectAllToolResultsForUserMessages(result) ?? result.toolResults,
+								)
 							: undefined
 						if (toolUserMessages && onReply) {
 							yield* sendToolUserMessages(toolUserMessages, onReply)
