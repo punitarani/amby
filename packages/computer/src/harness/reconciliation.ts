@@ -1,6 +1,7 @@
 import type { Database, TaskStatus } from "@amby/db"
 import { and, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, schema } from "@amby/db"
 import type { Sandbox } from "@daytonaio/sdk"
+import { DaytonaNotFoundError } from "@daytonaio/sdk"
 import { STALE_HEARTBEAT_MS, TASK_BASE } from "../config"
 import { CodexProvider } from "./codex-provider"
 import { parseReplyTarget } from "./reply-target"
@@ -31,6 +32,14 @@ function shouldSkipProbeFinalize(task: TaskRow): boolean {
 
 function statusJsonPath(taskId: string) {
 	return `${TASK_BASE}/${taskId}/artifacts/status.json`
+}
+
+async function touchProbeTimestamp(db: Database, taskId: string) {
+	const now = new Date()
+	await db
+		.update(schema.tasks)
+		.set({ lastProbeAt: now, updatedAt: now })
+		.where(eq(schema.tasks.id, taskId))
 }
 
 function parseStatusJson(raw: string | null): {
@@ -80,7 +89,12 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 		const now = new Date()
 		await db
 			.update(schema.tasks)
-			.set({ status: "lost", completedAt: now, updatedAt: now })
+			.set({
+				status: "lost",
+				error: "Task lost: missing session or command ID",
+				completedAt: now,
+				updatedAt: now,
+			})
 			.where(nonTerminalTaskWhere(task.id))
 		await insertReconcilerEvent(db, task.id, "task.lost", { reason: "missing_session" })
 		return
@@ -90,11 +104,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 		const cmd = await sandbox.process.getSessionCommand(task.sessionId, task.commandId)
 		if (cmd.exitCode != null) {
 			if (shouldSkipProbeFinalize(task)) {
-				const skipNow = new Date()
-				await db
-					.update(schema.tasks)
-					.set({ lastProbeAt: skipNow, updatedAt: skipNow })
-					.where(eq(schema.tasks.id, task.id))
+				await touchProbeTimestamp(db, task.id)
 				await insertReconcilerEvent(db, task.id, "reconciler.probe", {
 					exitCode: cmd.exitCode,
 					source: "session_command",
@@ -113,6 +123,10 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 					status: nextStatus,
 					exitCode: cmd.exitCode,
 					outputSummary: result.summary.slice(0, 2000),
+					error:
+						cmd.exitCode !== 0
+							? (result.stderr || "Task failed with no error output").slice(0, 2000)
+							: null,
 					completedAt: probeNow,
 					heartbeatAt: probeNow,
 					updatedAt: probeNow,
@@ -147,6 +161,9 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 					status: nextStatus,
 					exitCode: statusJson.exitCode ?? (success ? 0 : 1),
 					outputSummary: result.summary.slice(0, 2000),
+					error: !success
+						? (result.stderr || "Task failed with no error output").slice(0, 2000)
+						: null,
 					completedAt: sjNow,
 					heartbeatAt: sjNow,
 					updatedAt: sjNow,
@@ -164,31 +181,91 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 			!trustStatusJson &&
 			(statusJson?.status === "succeeded" || statusJson?.status === "failed")
 		) {
-			const naNow = new Date()
-			await db
-				.update(schema.tasks)
-				.set({ lastProbeAt: naNow, updatedAt: naNow })
-				.where(eq(schema.tasks.id, task.id))
+			await touchProbeTimestamp(db, task.id)
 			await insertReconcilerEvent(db, task.id, "reconciler.probe", {
 				source: "still_running",
 				statusJsonDebug: statusJson,
 				note: "status_json_not_authoritative_lastEventSeq_gt_0",
 			})
 		} else {
-			const elseNow = new Date()
-			await db
-				.update(schema.tasks)
-				.set({ lastProbeAt: elseNow, updatedAt: elseNow })
-				.where(eq(schema.tasks.id, task.id))
+			await touchProbeTimestamp(db, task.id)
 			await insertReconcilerEvent(db, task.id, "reconciler.probe", { source: "still_running" })
 		}
 	} catch (e) {
-		console.error(`[probeSingleTask] failed for task ${task.id}:`, e)
-		const errNow = new Date()
-		await db
-			.update(schema.tasks)
-			.set({ lastProbeAt: errNow, updatedAt: errNow })
-			.where(eq(schema.tasks.id, task.id))
+		if (e instanceof DaytonaNotFoundError) {
+			// Session is gone — fall back to status.json to determine outcome
+			console.warn(
+				`[probeSingleTask] session not found for task ${task.id}, falling back to status.json`,
+			)
+			try {
+				const raw = await sandbox.fs.downloadFile(statusJsonPath(task.id)).catch(() => null)
+				const statusJson = parseStatusJson(raw?.toString("utf-8") ?? null)
+
+				if (statusJson?.status === "succeeded" || statusJson?.status === "failed") {
+					const result = await provider.collectResult(sandbox, provider.getArtifactRoot(task.id))
+					const success = statusJson.status === "succeeded"
+					const nextStatus: TaskStatus = success ? "succeeded" : "failed"
+					const now = new Date()
+					const updated = await db
+						.update(schema.tasks)
+						.set({
+							status: nextStatus,
+							exitCode: statusJson.exitCode ?? (success ? 0 : 1),
+							outputSummary: result.summary.slice(0, 2000),
+							error: !success
+								? (result.stderr || "Task failed with no error output").slice(0, 2000)
+								: null,
+							completedAt: now,
+							heartbeatAt: now,
+							updatedAt: now,
+							callbackSecretHash: null,
+						})
+						.where(nonTerminalTaskWhere(task.id))
+						.returning({ id: schema.tasks.id })
+					if (updated.length > 0) {
+						await insertReconcilerEvent(db, task.id, "reconciler.probe", {
+							source: "status_json_after_session_lost",
+							statusJson,
+						})
+					}
+				} else {
+					// No usable status.json — mark task as lost
+					const now = new Date()
+					await db
+						.update(schema.tasks)
+						.set({
+							status: "lost",
+							error: "Task lost: Daytona session no longer exists and no status.json found",
+							completedAt: now,
+							updatedAt: now,
+						})
+						.where(nonTerminalTaskWhere(task.id))
+					await insertReconcilerEvent(db, task.id, "task.lost", {
+						reason: "session_not_found",
+						statusJson: statusJson ?? null,
+					})
+				}
+			} catch (fallbackErr) {
+				console.error(`[probeSingleTask] fallback also failed for task ${task.id}:`, fallbackErr)
+				const now = new Date()
+				await db
+					.update(schema.tasks)
+					.set({
+						status: "lost",
+						error: "Task lost: Daytona session gone and fallback probe failed",
+						completedAt: now,
+						updatedAt: now,
+					})
+					.where(nonTerminalTaskWhere(task.id))
+				await insertReconcilerEvent(db, task.id, "task.lost", {
+					reason: "session_not_found_fallback_failed",
+				})
+			}
+		} else {
+			// Transient error — log and retry on next cycle
+			console.error(`[probeSingleTask] failed for task ${task.id}:`, e)
+			await touchProbeTimestamp(db, task.id)
+		}
 	}
 }
 

@@ -12,6 +12,25 @@ function deterministicEventId(taskId, seq, eventType) {
   return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20, 32);
 }
 
+async function sendWithRetry(url, secret, body, baseHeaders, retries) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const ts = String(Date.now());
+      const hmac = crypto.createHmac("sha256", secret).update(ts + "." + body).digest("hex");
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { ...baseHeaders, "X-Amby-Timestamp": ts, "X-Amby-Signature": "sha256=" + hmac },
+        body,
+      });
+      if (res.ok || res.status === 409) return;
+      if (i === retries) console.error("[callback] failed, status:", res.status);
+    } catch (e) {
+      if (i === retries) console.error("[callback] failed:", e.message || e);
+    }
+    if (i < retries) await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+  }
+}
+
 async function main() {
   const eventType = process.argv[2] || "";
   const status = process.argv[3] || "";
@@ -31,22 +50,14 @@ async function main() {
     exitCode: exitCode === "" ? null : Number(exitCode),
     sentAt: occurredAt,
   });
-  const ts = String(Date.now());
-  const hmac = crypto.createHmac("sha256", AMBY_CALLBACK_SECRET).update(ts + "." + body).digest("hex");
-  try {
-    await fetch(AMBY_CALLBACK_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + AMBY_CALLBACK_SECRET,
-        "X-Amby-Callback-Id": AMBY_CALLBACK_ID,
-        "X-Amby-Timestamp": ts,
-        "X-Amby-Seq": seq,
-        "X-Amby-Signature": "sha256=" + hmac,
-      },
-      body,
-    });
-  } catch (_) {}
+  const isTerminal = eventType === "task.completed" || eventType === "task.failed";
+  const retries = isTerminal ? 3 : 0;
+  await sendWithRetry(AMBY_CALLBACK_URL, AMBY_CALLBACK_SECRET, body, {
+    "Content-Type": "application/json",
+    Authorization: "Bearer " + AMBY_CALLBACK_SECRET,
+    "X-Amby-Callback-Id": AMBY_CALLBACK_ID,
+    "X-Amby-Seq": seq,
+  }, retries);
 }
 
 main();
@@ -93,7 +104,7 @@ async function main() {
   const ts = String(Date.now());
   const hmac = crypto.createHmac("sha256", AMBY_CALLBACK_SECRET).update(ts + "." + body).digest("hex");
   try {
-    await fetch(AMBY_CALLBACK_URL, {
+    const res = await fetch(AMBY_CALLBACK_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -105,7 +116,10 @@ async function main() {
       },
       body,
     });
-  } catch (_) {}
+    if (!res.ok) console.error("[notify] callback failed with status", res.status);
+  } catch (e) {
+    console.error("[notify] callback error:", e.message || e);
+  }
 }
 
 main();
@@ -124,7 +138,7 @@ SEQ="\${AMBY_EVENT_SEQ_START:-1}"
 ARTIFACTS="../artifacts"
 
 send() {
-  node ../callback.js "$1" "$2" "$3" "$SEQ" "$4" 2>/dev/null || true
+  node ../callback.js "$1" "$2" "$3" "$SEQ" "$4" >>../artifacts/callback.log 2>&1 || true
   SEQ=$((SEQ + 1))
 }
 
@@ -133,14 +147,14 @@ write_status() {
     var a=process.argv, s=a[1], x=a[2], m=a[3], q=a[4], t=a[5];
     var j=JSON.stringify({taskId:t,status:s,seq:Number(q),exitCode:x===""?null:Number(x),message:m,updatedAt:new Date().toISOString()});
     require("fs").writeFileSync(a[6]+"/status.json",j);
-  ' "$1" "$2" "$3" "$SEQ" "$AMBY_TASK_ID" "$ARTIFACTS" 2>/dev/null || true
+  ' "$1" "$2" "$3" "$SEQ" "$AMBY_TASK_ID" "$ARTIFACTS" >>../artifacts/callback.log 2>&1 || true
 }
 
 write_status "running" "" "preparing"
 send "task.started" "running" "Task started" ""
 
-cd workspace
-prompt=$(cat prompt.txt)
+cd workspace || { write_status "failed" "1" "Failed to enter workspace"; send "task.failed" "failed" "Failed to enter workspace" "1"; exit 1; }
+prompt=$(cat prompt.txt) || { write_status "failed" "1" "Missing prompt.txt"; send "task.failed" "failed" "Missing prompt.txt" "1"; exit 1; }
 codex exec --full-auto --output-last-message -o ../artifacts/result.md "$prompt" \\
   >../artifacts/stdout.log 2>../artifacts/stderr.log &
 CODEX_PID=$!
@@ -158,8 +172,9 @@ if [ "$EXIT_CODE" -eq 0 ]; then
   write_status "succeeded" "$EXIT_CODE" "Task completed"
   send "task.completed" "succeeded" "Task completed" "$EXIT_CODE"
 else
-  write_status "failed" "$EXIT_CODE" "Task failed"
-  send "task.failed" "failed" "Task failed" "$EXIT_CODE"
+  ERR_TAIL=$(tail -c 1000 ../artifacts/stderr.log 2>/dev/null | head -c 500 || echo "Unknown error")
+  write_status "failed" "$EXIT_CODE" "$ERR_TAIL"
+  send "task.failed" "failed" "$ERR_TAIL" "$EXIT_CODE"
 fi
 `
 }

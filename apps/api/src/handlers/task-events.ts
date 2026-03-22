@@ -180,7 +180,10 @@ export const handleTaskEventPost = (request: Request) =>
 							updatedAt: now,
 						})
 						.where(eq(schema.tasks.id, task.id)),
-				catch: () => undefined,
+				catch: (e) => {
+					console.error(`[task-events] codex.notify DB update failed for task ${task.id}:`, e)
+					return undefined
+				},
 			})
 		} else {
 			const nextStatus = mapHarnessEventToStatus(body.eventType)
@@ -205,6 +208,9 @@ export const handleTaskEventPost = (request: Request) =>
 				if (body.message) {
 					patch.outputSummary = body.message.slice(0, 2000)
 				}
+				if (body.eventType === "task.failed") {
+					patch.error = (body.message || "Task failed with no error output").slice(0, 2000)
+				}
 			}
 
 			const casResult = yield* Effect.tryPromise({
@@ -218,10 +224,16 @@ export const handleTaskEventPost = (request: Request) =>
 								: eq(schema.tasks.id, task.id),
 						)
 						.returning({ id: schema.tasks.id }),
-				catch: () => [] as { id: string }[],
+				catch: (e) => {
+					console.error(`[task-events] DB update failed for task ${task.id}:`, e)
+					return [] as { id: string }[]
+				},
 			})
-			// CAS returned 0 rows → lost race; still ack so sender doesn't retry
-			void casResult
+			if (casResult.length === 0 && isHarnessSeq) {
+				console.warn(
+					`[task-events] CAS miss for task ${task.id}: seq ${seq} <= lastEventSeq ${task.lastEventSeq} (event: ${body.eventType})`,
+				)
+			}
 		}
 
 		return jsonResponse(
