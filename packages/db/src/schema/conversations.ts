@@ -36,7 +36,7 @@ export const conversations = pgTable(
 			.notNull()
 			.references(() => users.id, { onDelete: "cascade" }),
 		platform: text("platform").$type<Platform>().notNull(),
-		workspaceKey: text("workspace_key"),
+		workspaceKey: text("workspace_key").notNull().default(""),
 		externalConversationKey: text("external_conversation_key").notNull(),
 		title: text("title"),
 		metadata: jsonb("metadata").$type<Record<string, unknown>>(),

@@ -522,7 +522,7 @@ export const makeAgentServiceLive = (userId: string) =>
 								userId,
 								platform,
 								externalConversationKey,
-								workspaceKey: workspaceKey ?? null,
+								workspaceKey: workspaceKey ?? "",
 							})
 							.onConflictDoUpdate({
 								target: [

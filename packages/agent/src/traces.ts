@@ -175,35 +175,34 @@ export function persistExecutionTrace(
 			agentName: params.agentName,
 		})
 
-		// 2. Append trace events for each step
+		// 2. Batch insert trace events for all steps
+		const rootEvents: Array<{
+			traceId: string
+			seq: number
+			kind: import("@amby/db").TraceEventKind
+			payload: Record<string, unknown>
+		}> = []
 		let seq = 0
 		for (const step of params.steps) {
 			for (const tc of step.toolCalls) {
-				yield* appendTraceEvent(
-					query,
-					rootTraceId,
-					"tool_call",
-					{
-						toolCallId: tc.toolCallId,
-						toolName: tc.toolName,
-						input: tc.input,
-					},
-					seq++,
-				)
+				rootEvents.push({
+					traceId: rootTraceId,
+					seq: seq++,
+					kind: "tool_call",
+					payload: { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input },
+				})
 			}
 			for (const tr of step.toolResults) {
-				yield* appendTraceEvent(
-					query,
-					rootTraceId,
-					"tool_result",
-					{
-						toolCallId: tr.toolCallId,
-						toolName: tr.toolName,
-						output: tr.output,
-					},
-					seq++,
-				)
+				rootEvents.push({
+					traceId: rootTraceId,
+					seq: seq++,
+					kind: "tool_result",
+					payload: { toolCallId: tr.toolCallId, toolName: tr.toolName, output: tr.output },
+				})
 			}
+		}
+		if (rootEvents.length > 0) {
+			yield* query((d) => d.insert(schema.traceEvents).values(rootEvents))
 		}
 
 		// 3. Insert child traces for delegation results
@@ -250,34 +249,33 @@ export function persistExecutionTrace(
 				agentName: subTrace.agentName,
 			})
 
+			const childEvents: Array<{
+				traceId: string
+				seq: number
+				kind: import("@amby/db").TraceEventKind
+				payload: Record<string, unknown>
+			}> = []
 			let childSeq = 0
 			for (const childStep of subTrace.steps) {
 				for (const tc of childStep.toolCalls) {
-					yield* appendTraceEvent(
-						query,
-						childTraceId,
-						"tool_call",
-						{
-							toolCallId: tc.toolCallId,
-							toolName: tc.toolName,
-							input: tc.input,
-						},
-						childSeq++,
-					)
+					childEvents.push({
+						traceId: childTraceId,
+						seq: childSeq++,
+						kind: "tool_call",
+						payload: { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input },
+					})
 				}
 				for (const tr of childStep.toolResults) {
-					yield* appendTraceEvent(
-						query,
-						childTraceId,
-						"tool_result",
-						{
-							toolCallId: tr.toolCallId,
-							toolName: tr.toolName,
-							output: tr.output,
-						},
-						childSeq++,
-					)
+					childEvents.push({
+						traceId: childTraceId,
+						seq: childSeq++,
+						kind: "tool_result",
+						payload: { toolCallId: tr.toolCallId, toolName: tr.toolName, output: tr.output },
+					})
 				}
+			}
+			if (childEvents.length > 0) {
+				yield* query((d) => d.insert(schema.traceEvents).values(childEvents))
 			}
 
 			yield* completeTrace(query, childTraceId, "completed", subTrace.durationMs)

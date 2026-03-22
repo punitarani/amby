@@ -177,6 +177,7 @@ const ensureTelegramConversation = (userId: string, chatId: number) =>
 					userId,
 					platform: "telegram",
 					externalConversationKey: String(chatId),
+					workspaceKey: "",
 				})
 				.onConflictDoNothing(),
 		)

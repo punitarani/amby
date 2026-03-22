@@ -37,9 +37,9 @@ CREATE TABLE "traces" (
 );
 --> statement-breakpoint
 DROP INDEX "conversations_user_updated_idx";--> statement-breakpoint
-ALTER TABLE "conversations" ADD COLUMN "platform" text NOT NULL;--> statement-breakpoint
-ALTER TABLE "conversations" ADD COLUMN "workspace_key" text;--> statement-breakpoint
-ALTER TABLE "conversations" ADD COLUMN "external_conversation_key" text NOT NULL;--> statement-breakpoint
+ALTER TABLE "conversations" ADD COLUMN "platform" text NOT NULL DEFAULT 'telegram';--> statement-breakpoint
+ALTER TABLE "conversations" ADD COLUMN "workspace_key" text NOT NULL DEFAULT '';--> statement-breakpoint
+ALTER TABLE "conversations" ADD COLUMN "external_conversation_key" text NOT NULL DEFAULT '';--> statement-breakpoint
 ALTER TABLE "messages" ADD COLUMN "thread_id" uuid;--> statement-breakpoint
 ALTER TABLE "conversation_threads" ADD CONSTRAINT "conversation_threads_conversation_id_conversations_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "trace_events" ADD CONSTRAINT "trace_events_trace_id_traces_id_fk" FOREIGN KEY ("trace_id") REFERENCES "public"."traces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -59,6 +59,8 @@ ALTER TABLE "messages" ADD CONSTRAINT "messages_thread_id_conversation_threads_i
 CREATE UNIQUE INDEX "conversations_platform_key_idx" ON "conversations" USING btree ("platform","workspace_key","external_conversation_key");--> statement-breakpoint
 CREATE INDEX "conversations_user_idx" ON "conversations" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "messages_thread_idx" ON "messages" USING btree ("thread_id","created_at");--> statement-breakpoint
+ALTER TABLE "conversations" ALTER COLUMN "platform" DROP DEFAULT;--> statement-breakpoint
+ALTER TABLE "conversations" ALTER COLUMN "external_conversation_key" DROP DEFAULT;--> statement-breakpoint
 ALTER TABLE "conversations" DROP COLUMN "channel_type";--> statement-breakpoint
 ALTER TABLE "messages" DROP COLUMN "tool_calls";--> statement-breakpoint
 ALTER TABLE "messages" DROP COLUMN "tool_results";

@@ -401,7 +401,8 @@
 					"name": "workspace_key",
 					"type": "text",
 					"primaryKey": false,
-					"notNull": false
+					"notNull": true,
+					"default": "''"
 				},
 				"external_conversation_key": {
 					"name": "external_conversation_key",

@@ -12,7 +12,6 @@ const STALE_ARCHIVE_MS = 24 * 60 * 60 * 1000
 const OPEN_THREADS_CAP = 10
 const TAIL_BUDGET = 20
 const SYNOPSIS_BATCH_CAP = 3
-const ARCHIVAL_THROTTLE_MS = 5 * 60 * 1000
 
 export type RouteSource = "native" | "reply_chain" | "derived" | "manual"
 export type RouteAction = "continue" | "switch" | "new"
@@ -164,22 +163,12 @@ ${transcript}`,
 	return { synopsis: object.synopsis.trim(), keywords: object.keywords }
 }
 
-// --- Archival throttle ---
-
-const archivalLastRun = new Map<string, number>()
-
 export function archiveStaleThreads(
 	query: QueryFn,
 	conversationId: string,
 	model: LanguageModel,
 ): Effect.Effect<void, AgentError> {
 	const now = Date.now()
-	const lastRun = archivalLastRun.get(conversationId) ?? 0
-	if (now - lastRun < ARCHIVAL_THROTTLE_MS) {
-		return Effect.void
-	}
-	archivalLastRun.set(conversationId, now)
-
 	const cutoff = new Date(now - STALE_ARCHIVE_MS)
 	return Effect.gen(function* () {
 		const stale = yield* query((d) =>

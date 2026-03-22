@@ -1,4 +1,4 @@
-import { and, desc, eq, ne, schema } from "@amby/db"
+import { and, desc, eq, inArray, ne, schema } from "@amby/db"
 import { Effect } from "effect"
 import { messageThreadFilter } from "./router"
 import { formatToolAnnotation } from "./traces"
@@ -54,7 +54,10 @@ export function formatArtifactRecap(
 				row.traceAnnotation.length > ARTIFACT_TRUNCATE
 					? `${row.traceAnnotation.slice(0, ARTIFACT_TRUNCATE)}…`
 					: row.traceAnnotation
-			bullets.push(s.trim())
+			// Split multi-line annotations into separate bullets
+			for (const line of s.trim().split("\n")) {
+				if (line.trim()) bullets.push(line.trim())
+			}
 		}
 	}
 	if (bullets.length === 0) return ""
@@ -108,6 +111,7 @@ export function loadThreadTail(
 						and(
 							eq(schema.traces.conversationId, conversationId),
 							eq(schema.traceEvents.kind, "tool_result"),
+							inArray(schema.traces.messageId, recentMessageIds),
 						),
 					),
 			)
@@ -116,7 +120,6 @@ export function loadThreadTail(
 			const toolResultsByMessage = new Map<string, unknown[]>()
 			for (const row of traceRows) {
 				if (!row.messageId) continue
-				if (!recentMessageIds.includes(row.messageId)) continue
 				const existing = toolResultsByMessage.get(row.messageId) ?? []
 				existing.push({
 					toolName: (row.payload as Record<string, unknown>).toolName,
@@ -208,15 +211,18 @@ export function loadThreadArtifacts(query: QueryFn, conversationId: string, thre
 					and(
 						eq(schema.traces.conversationId, conversationId),
 						eq(schema.traceEvents.kind, "tool_result"),
+						inArray(
+							schema.traces.messageId,
+							msgRows.map((r) => r.id),
+						),
 					),
 				),
 		)
 
-		const messageIds = new Set(msgRows.map((r) => r.id))
 		const annotationsByMessage = new Map<string, string>()
 
 		for (const row of traceRows) {
-			if (!row.messageId || !messageIds.has(row.messageId)) continue
+			if (!row.messageId) continue
 			const payload = row.payload as Record<string, unknown>
 			const output = payload.output
 			let summary = ""
