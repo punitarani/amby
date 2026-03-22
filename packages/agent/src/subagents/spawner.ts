@@ -6,7 +6,10 @@ import {
 	createTelemetrySettings,
 	type RequestTraceMetadata,
 } from "../telemetry"
-import { extractToolUserMessages } from "../utils/extract-tool-user-messages"
+import {
+	collectAllToolResultsForUserMessages,
+	extractToolUserMessages,
+} from "../utils/extract-tool-user-messages"
 import { SUBAGENT_DEFS } from "./definitions"
 import { resolveTools, type ToolGroups } from "./tool-groups"
 
@@ -78,7 +81,9 @@ export function createSubagentTools(
 					const userMessage = context ? `${task}\n\nAdditional context: ${context}` : task
 
 					const result = await subagent.generate({ prompt: userMessage, abortSignal })
-					const userMessages = extractToolUserMessages(result.toolResults)
+					const userMessages = extractToolUserMessages(
+						collectAllToolResultsForUserMessages(result) ?? result.toolResults,
+					)
 
 					const toolsUsed = (result.steps ?? []).flatMap((step) =>
 						step.toolCalls.map((tc) => tc.toolName),
