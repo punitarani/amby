@@ -191,9 +191,20 @@ export const makeAgentServiceLive = (userId: string) =>
 									.where(eq(schema.conversationThreads.id, threadCtx.threadId))
 									.limit(1),
 							),
-							loadThreadTail(query, conversationId, threadCtx.threadId),
+							loadThreadTail(
+								query,
+								conversationId,
+								threadCtx.threadId,
+								undefined,
+								threadCtx.threadId === threadCtx.defaultThreadId,
+							),
 							loadOtherThreadSummaries(query, conversationId, threadCtx.threadId),
-							loadThreadArtifacts(query, conversationId, threadCtx.threadId),
+							loadThreadArtifacts(
+								query,
+								conversationId,
+								threadCtx.threadId,
+								threadCtx.threadId === threadCtx.defaultThreadId,
+							),
 						],
 						{ concurrency: 4 },
 					)

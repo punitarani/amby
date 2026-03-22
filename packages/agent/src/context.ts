@@ -70,6 +70,7 @@ export function loadThreadTail(
 	conversationId: string,
 	threadId: string,
 	limit = THREAD_TAIL_LIMIT,
+	includeUnthreaded = false,
 ) {
 	return Effect.gen(function* () {
 		// Load messages
@@ -81,7 +82,7 @@ export function loadThreadTail(
 					content: schema.messages.content,
 				})
 				.from(schema.messages)
-				.where(messageThreadFilter(conversationId, threadId))
+				.where(messageThreadFilter(conversationId, threadId, includeUnthreaded))
 				.orderBy(desc(schema.messages.createdAt))
 				.limit(limit),
 		)
@@ -179,7 +180,12 @@ export function loadOtherThreadSummaries(
 	)
 }
 
-export function loadThreadArtifacts(query: QueryFn, conversationId: string, threadId: string) {
+export function loadThreadArtifacts(
+	query: QueryFn,
+	conversationId: string,
+	threadId: string,
+	includeUnthreaded = false,
+) {
 	return Effect.gen(function* () {
 		// Load recent assistant messages in thread
 		const msgRows = yield* query((d) =>
@@ -190,7 +196,10 @@ export function loadThreadArtifacts(query: QueryFn, conversationId: string, thre
 				})
 				.from(schema.messages)
 				.where(
-					and(messageThreadFilter(conversationId, threadId), eq(schema.messages.role, "assistant")),
+					and(
+						messageThreadFilter(conversationId, threadId, includeUnthreaded),
+						eq(schema.messages.role, "assistant"),
+					),
 				)
 				.orderBy(desc(schema.messages.createdAt))
 				.limit(ARTIFACT_MSG_LIMIT),

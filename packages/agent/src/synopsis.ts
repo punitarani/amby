@@ -18,12 +18,13 @@ export function fetchTranscriptForSynopsis(
 	query: QueryFn,
 	conversationId: string,
 	threadId: string,
+	includeUnthreaded = false,
 ) {
 	return query((d) =>
 		d
 			.select({ role: schema.messages.role, content: schema.messages.content })
 			.from(schema.messages)
-			.where(messageThreadFilter(conversationId, threadId))
+			.where(messageThreadFilter(conversationId, threadId, includeUnthreaded))
 			.orderBy(desc(schema.messages.createdAt))
 			.limit(THREAD_TAIL_LIMIT),
 	).pipe(
@@ -41,9 +42,15 @@ export function maybeGenerateSynopsis(
 	model: LanguageModel,
 	threadId: string,
 	conversationId: string,
+	includeUnthreaded = false,
 ) {
 	return Effect.gen(function* () {
-		const transcript = yield* fetchTranscriptForSynopsis(query, conversationId, threadId)
+		const transcript = yield* fetchTranscriptForSynopsis(
+			query,
+			conversationId,
+			threadId,
+			includeUnthreaded,
+		)
 		if (!transcript.trim()) return
 
 		const { synopsis, keywords } = yield* Effect.tryPromise({
@@ -78,18 +85,25 @@ export function synopsisPreviousThreadIfDormantSwitch(
 
 		if (!switchedAway) return
 
+		const prevIsDefault = threadCtx.previousLastThreadId === threadCtx.defaultThreadId
 		const lastRows = yield* query((d) =>
 			d
 				.select({ createdAt: schema.messages.createdAt })
 				.from(schema.messages)
-				.where(messageThreadFilter(conversationId, threadCtx.previousLastThreadId))
+				.where(messageThreadFilter(conversationId, threadCtx.previousLastThreadId, prevIsDefault))
 				.orderBy(desc(schema.messages.createdAt))
 				.limit(1),
 		)
 		const lastAt = lastRows[0]?.createdAt
 		if (!lastAt || Date.now() - lastAt.getTime() <= DORMANT_MS) return
 
-		yield* maybeGenerateSynopsis(query, model, threadCtx.previousLastThreadId, conversationId)
+		yield* maybeGenerateSynopsis(
+			query,
+			model,
+			threadCtx.previousLastThreadId,
+			conversationId,
+			prevIsDefault,
+		)
 	}).pipe(Effect.catchAll(() => Effect.void))
 }
 
@@ -104,6 +118,12 @@ export function synopsisCurrentThreadIfOverflowsAfterSave(
 		const projectedCount = threadCtx.threadMessageCount + inboundMessageCount
 		if (projectedCount <= THREAD_TAIL_LIMIT) return
 
-		yield* maybeGenerateSynopsis(query, model, threadCtx.threadId, conversationId)
+		yield* maybeGenerateSynopsis(
+			query,
+			model,
+			threadCtx.threadId,
+			conversationId,
+			threadCtx.threadId === threadCtx.defaultThreadId,
+		)
 	}).pipe(Effect.catchAll(() => Effect.void))
 }

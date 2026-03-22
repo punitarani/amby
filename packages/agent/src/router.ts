@@ -1,5 +1,5 @@
 import type { ThreadSource } from "@amby/db"
-import { and, asc, desc, eq, inArray, lte, schema, sql } from "@amby/db"
+import { and, asc, desc, eq, inArray, isNull, lte, or, schema, sql } from "@amby/db"
 import type { LanguageModel } from "ai"
 import { generateObject } from "ai"
 import { Effect } from "effect"
@@ -323,19 +323,27 @@ export function ensureDefaultThread(
 	)
 }
 
-// --- messageThreadFilter (simplified) ---
+// --- messageThreadFilter ---
+// When includeUnthreaded is true, also matches messages with NULL thread_id.
+// Use this for the default thread so pre-migration messages (which have no
+// thread_id) are visible instead of silently dropped by strict equality.
 
-export function messageThreadFilter(conversationId: string, threadId: string) {
-	return and(
-		eq(schema.messages.conversationId, conversationId),
-		eq(schema.messages.threadId, threadId),
-	)
+export function messageThreadFilter(
+	conversationId: string,
+	threadId: string,
+	includeUnthreaded = false,
+) {
+	const threadCondition = includeUnthreaded
+		? or(eq(schema.messages.threadId, threadId), isNull(schema.messages.threadId))
+		: eq(schema.messages.threadId, threadId)
+	return and(eq(schema.messages.conversationId, conversationId), threadCondition)
 }
 
 // --- ResolveThreadResult ---
 
 export type ResolveThreadResult = {
 	threadId: string
+	defaultThreadId: string
 	decision: RouteDecision
 	threadMessageCount: number
 	previousLastThreadId: string
@@ -411,6 +419,7 @@ export function resolveThread(
 
 			return {
 				threadId,
+				defaultThreadId,
 				decision: { action: "continue" as RouteAction, threadId, source: "native" as RouteSource },
 				threadMessageCount: Number(countRows[0]?.c ?? 0),
 				previousLastThreadId: defaultThreadId,
@@ -470,6 +479,7 @@ export function resolveThread(
 		if (!lastRow) {
 			return {
 				threadId: defaultThreadId,
+				defaultThreadId,
 				decision: {
 					action: "continue" as RouteAction,
 					threadId: defaultThreadId,
@@ -535,7 +545,13 @@ export function resolveThread(
 					d
 						.select({ c: sql<number>`count(*)::int` })
 						.from(schema.messages)
-						.where(messageThreadFilter(conversationId, resolvedThreadId)),
+						.where(
+							messageThreadFilter(
+								conversationId,
+								resolvedThreadId,
+								resolvedThreadId === defaultThreadId,
+							),
+						),
 				),
 			],
 			{ concurrency: 2 },
@@ -559,6 +575,7 @@ export function resolveThread(
 
 		return {
 			threadId: resolvedThreadId,
+			defaultThreadId,
 			decision,
 			threadMessageCount,
 			previousLastThreadId,
