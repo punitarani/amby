@@ -198,25 +198,24 @@ export const TaskSupervisorLive = Layer.scoped(
 		const provider = new CodexProvider()
 		const activeTasks = new Map<string, ActiveTask>()
 
-		const loadSandboxAuthConfig = async (userId: string) => {
+		const loadAuthConfig = async (userId: string) => {
 			const rows = await db
-				.select({ authConfig: schema.sandboxes.authConfig })
-				.from(schema.sandboxes)
-				.where(eq(schema.sandboxes.userId, userId))
+				.select({ authConfig: schema.userVolumes.authConfig })
+				.from(schema.userVolumes)
+				.where(eq(schema.userVolumes.userId, userId))
 				.limit(1)
 			return rows[0]?.authConfig
 		}
 
-		const saveSandboxAuthConfig = async (userId: string, authConfig: unknown, sandbox: Sandbox) => {
+		const saveAuthConfig = async (userId: string, authConfig: unknown) => {
 			const next = readHarnessAuthConfig(authConfig)
 			await db
-				.update(schema.sandboxes)
+				.update(schema.userVolumes)
 				.set({
 					authConfig: Object.keys(next).length === 0 ? null : (next as Record<string, unknown>),
-					lastActivityAt: new Date(),
+					updatedAt: new Date(),
 				})
-				.where(eq(schema.sandboxes.userId, userId))
-			return sandbox
+				.where(eq(schema.userVolumes.userId, userId))
 		}
 
 		const readSandboxText = async (sandbox: Sandbox, path: string) => {
@@ -246,7 +245,7 @@ export const TaskSupervisorLive = Layer.scoped(
 			userId: string,
 			sandbox: Sandbox,
 		): Promise<CodexAuthSummary> => {
-			const raw = await loadSandboxAuthConfig(userId)
+			const raw = await loadAuthConfig(userId)
 			const current = readHarnessAuthConfig(raw).codex
 			const authJson = await readSandboxText(sandbox, CODEX_AUTH_FILE)
 			if (!current && !authJson) return summarizeCodexAuth(null)
@@ -258,12 +257,12 @@ export const TaskSupervisorLive = Layer.scoped(
 						raw,
 						"Codex credentials exist in the sandbox, but the cache is invalid. Reconnect Codex.",
 					)
-					await saveSandboxAuthConfig(userId, invalid, sandbox)
+					await saveAuthConfig(userId, invalid)
 					return summarizeCodexAuth(invalid)
 				}
 
 				const authenticated = setCodexAuthenticated(raw, parsed.cache, parsed.apiKeyLast4)
-				await saveSandboxAuthConfig(userId, authenticated, sandbox)
+				await saveAuthConfig(userId, authenticated)
 				await deletePendingSession(sandbox, current?.pending?.sessionId)
 				return summarizeCodexAuth(authenticated)
 			}
@@ -282,7 +281,7 @@ export const TaskSupervisorLive = Layer.scoped(
 
 					const log = await readSandboxText(sandbox, CODEX_AUTH_LOG)
 					const invalid = setCodexInvalid(raw, summarizeLoginFailure(log, cmd.exitCode))
-					await saveSandboxAuthConfig(userId, invalid, sandbox)
+					await saveAuthConfig(userId, invalid)
 					await deletePendingSession(sandbox, current.pending.sessionId)
 					return summarizeCodexAuth(invalid)
 				} catch {
@@ -290,7 +289,7 @@ export const TaskSupervisorLive = Layer.scoped(
 						raw,
 						"The Codex login session ended before authentication completed. Start it again.",
 					)
-					await saveSandboxAuthConfig(userId, invalid, sandbox)
+					await saveAuthConfig(userId, invalid)
 					return summarizeCodexAuth(invalid)
 				}
 			}
@@ -300,7 +299,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					raw,
 					"Stored Codex credentials were not found in the sandbox. Reconnect Codex.",
 				)
-				await saveSandboxAuthConfig(userId, invalid, sandbox)
+				await saveAuthConfig(userId, invalid)
 				return summarizeCodexAuth(invalid)
 			}
 
@@ -549,7 +548,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					const sandbox = yield* sandboxService.ensure(userId)
 					return yield* Effect.tryPromise({
 						try: async () => {
-							const raw = await loadSandboxAuthConfig(userId)
+							const raw = await loadAuthConfig(userId)
 							const current = readHarnessAuthConfig(raw).codex
 
 							await ensureCodexHome(sandbox)
@@ -568,7 +567,7 @@ export const TaskSupervisorLive = Layer.scoped(
 								{ method: "api_key", updatedAt: new Date().toISOString() },
 								trimmed.slice(-4),
 							)
-							await saveSandboxAuthConfig(userId, next, sandbox)
+							await saveAuthConfig(userId, next)
 							return summarizeCodexAuth(next)
 						},
 						catch: sandboxErrorFromDefect,
@@ -592,7 +591,7 @@ export const TaskSupervisorLive = Layer.scoped(
 								throw new Error("Failed to install Codex CLI in sandbox.")
 							}
 
-							const raw = await loadSandboxAuthConfig(userId)
+							const raw = await loadAuthConfig(userId)
 							const previous = readHarnessAuthConfig(raw).codex
 
 							await ensureCodexHome(sandbox)
@@ -637,7 +636,7 @@ export const TaskSupervisorLive = Layer.scoped(
 								commandId: execResult.cmdId,
 								startedAt: new Date().toISOString(),
 							})
-							await saveSandboxAuthConfig(userId, next, sandbox)
+							await saveAuthConfig(userId, next)
 							return summarizeCodexAuth(next)
 						},
 						catch: sandboxErrorFromDefect,
@@ -658,7 +657,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					const sandbox = yield* sandboxService.ensure(userId)
 					return yield* Effect.tryPromise({
 						try: async () => {
-							const raw = await loadSandboxAuthConfig(userId)
+							const raw = await loadAuthConfig(userId)
 							const current = readHarnessAuthConfig(raw).codex
 
 							await ensureCodexHome(sandbox)
@@ -670,7 +669,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							)
 
 							const next = setCodexAuthenticated(raw, parsed.cache)
-							await saveSandboxAuthConfig(userId, next, sandbox)
+							await saveAuthConfig(userId, next)
 							return summarizeCodexAuth(next)
 						},
 						catch: sandboxErrorFromDefect,
@@ -682,13 +681,13 @@ export const TaskSupervisorLive = Layer.scoped(
 					const sandbox = yield* sandboxService.ensure(userId)
 					return yield* Effect.tryPromise({
 						try: async () => {
-							const raw = await loadSandboxAuthConfig(userId)
+							const raw = await loadAuthConfig(userId)
 							const current = readHarnessAuthConfig(raw).codex
 							await deletePendingSession(sandbox, current?.pending?.sessionId)
 							await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_FILE} ${CODEX_AUTH_LOG}`)
 
 							const next = clearCodexAuth(raw)
-							await saveSandboxAuthConfig(userId, next, sandbox)
+							await saveAuthConfig(userId, next)
 							return summarizeCodexAuth(next)
 						},
 						catch: sandboxErrorFromDefect,

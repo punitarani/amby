@@ -5,6 +5,11 @@ export class SandboxError extends Data.TaggedError("SandboxError")<{
 	readonly cause?: unknown
 }> {}
 
+export class VolumeError extends Data.TaggedError("VolumeError")<{
+	readonly message: string
+	readonly cause?: unknown
+}> {}
+
 /** Map an unexpected defect (thrown value) into {@link SandboxError} for `Effect.tryPromise` catch. */
 export function sandboxErrorFromDefect(cause: unknown): SandboxError {
 	return new SandboxError({

@@ -6,9 +6,13 @@ This document describes the sandbox compute layer (`@amby/computer`) and the tas
 
 ## Overview
 
-Amby runs a per-user Daytona sandbox for direct tool use (execute_command, read_file, write_file). On top of this, the **task delegation system** lets the agent spawn Codex CLI processes inside the sandbox for autonomous multi-step work — research, code generation, web scraping, data analysis.
+Amby uses a **volume-first** model: each user gets a persistent Daytona volume plus a disposable main sandbox. The volume is the persistent computer — auth state and workspace data survive sandbox replacement. The sandbox is a disposable runtime that can be recreated at any time on the same volume.
+
+On top of this, the **task delegation system** lets the agent spawn Codex CLI processes inside the sandbox for autonomous multi-step work — research, code generation, web scraping, data analysis.
 
 The user interacts with one agent. Under the hood, heavy work runs asynchronously in the sandbox via Daytona sessions.
+
+**Future**: additional sandboxes sharing the same volume (N sandboxes : 1 volume : 1 user).
 
 ```
 User ──> Channel ──> AgentService.handleMessage()
@@ -49,7 +53,8 @@ User ──> Channel ──> AgentService.handleMessage()
 
 | Decision | Choice | Why |
 |---|---|---|
-| Sandbox per task or per user? | **Per user** | Reuse existing sandbox. Each task gets its own folder. `sandboxId` in DB allows per-task sandboxes later. |
+| Volume per user | **1 volume : 1 user** | Volume is the persistent computer. Auth, workspace data survive sandbox replacement. Schema supports N sandboxes per volume. |
+| Sandbox per task or per user? | **Per user (main sandbox)** | Reuse existing sandbox. Each task gets its own folder. `role` column supports additional sandboxes later. |
 | Codex install | **HarnessInstaller** | `CodexInstaller.ensureInstalled()` runs once per sandbox lifecycle, caches result in `/.amby/harnesses.json`. |
 | Sync or async? | **Always async** | `delegate_task` returns immediately. `get_task` polls briefly (max 15s) or returns instantly. |
 | Auth | **Codex-managed auth cache** | Keep Codex credentials in `CODEX_HOME/auth.json`. Prefer ChatGPT device login for headless flows; use API keys for automation. |
@@ -70,6 +75,8 @@ index.ts                  # barrel re-export
 sandbox-config.ts         # lightweight re-export for provisioning workflow (avoids heavy deps)
 
 sandbox/                  # Daytona sandbox lifecycle + agent tools
+  resolve-sandbox.ts      # Shared sandbox utilities (create params, state transition retry, etc.)
+  resolve-volume.ts       # Volume-first ensure path (ensureVolume, ensureMainSandbox, replaceSandbox)
   service.ts              # SandboxService (Effect service), config constants, sandbox image
   tools.ts                # execute_command, read_file, write_file tools
   cua-tools.ts            # Computer Use Agent GUI tools (screenshot, click, type, etc.)
@@ -269,7 +276,7 @@ Codex auth now follows the official Codex CLI model instead of a custom OAuth im
 
 - **ChatGPT login**: Start `codex login --device-auth` inside the sandbox and relay the verification URL + one-time code to the user. Codex writes the resulting session to `CODEX_HOME/auth.json`.
 - **API key**: Write the official API-key auth cache shape to `CODEX_HOME/auth.json` and record only non-secret metadata in the DB.
-- **Persistence**: Store auth state and pending device-login metadata in `sandboxes.auth_config`, while the actual credentials stay in the sandbox filesystem.
+- **Persistence**: Store auth state and pending device-login metadata in `user_volumes.auth_config` (survives sandbox replacement), while the actual credentials stay in the sandbox filesystem via the mounted volume.
 - **Fallback**: If device auth is unavailable, import a trusted `~/.codex/auth.json` from another machine rather than implementing a custom OAuth callback flow.
 
 ---

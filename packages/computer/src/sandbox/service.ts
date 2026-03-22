@@ -3,9 +3,9 @@ import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Daytona } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
-import { AGENT_WORKDIR, COMMAND_EXEC_TIMEOUT, sandboxName } from "../config"
+import { AGENT_WORKDIR, COMMAND_EXEC_TIMEOUT } from "../config"
 import { SandboxError } from "../errors"
-import { ensureSandboxStarted, tryCacheSandbox } from "./resolve-sandbox"
+import { ensureMainSandbox } from "./resolve-volume"
 
 export { sandboxImage } from "./sandbox-image"
 
@@ -68,19 +68,11 @@ export const SandboxServiceLive = Layer.effect(
 			enabled: true,
 
 			ensure: (userId) =>
-				Effect.gen(function* () {
-					const name = sandboxName(userId, isDev)
-					const fromCache = yield* tryCacheSandbox(cache, userId, db)
-					if (fromCache) return fromCache
-					return yield* ensureSandboxStarted({
-						daytona,
-						db,
-						userId,
-						name,
-						isDev,
-						cache,
-					})
-				}),
+				ensureMainSandbox({ daytona, db, userId, isDev, cache }).pipe(
+					Effect.catchTag("VolumeError", (e) =>
+						Effect.fail(new SandboxError({ message: e.message, cause: e.cause })),
+					),
+				),
 
 			exec: (sandbox, command, cwd?) =>
 				Effect.tryPromise({

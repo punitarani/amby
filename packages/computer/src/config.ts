@@ -50,6 +50,12 @@ export const CODEX_DEVICE_AUTH_URL = "https://auth.openai.com/codex/device"
 
 export const CUA_STALE_MINUTES = 15
 
+// ── Volume ─────────────────────────────────────────────────────────────
+
+export const VOLUME_MOUNT_PATH = AGENT_HOME
+export const volumeName = (userId: string, isDev: boolean) =>
+	`amby-vol-${userId}${isDev ? "-dev" : ""}`
+
 // ── Naming patterns ────────────────────────────────────────────────────
 
 export const sandboxName = (userId: string, isDev: boolean) =>
