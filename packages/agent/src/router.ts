@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, lte, or, schema, sql } from "@amby/db"
 import type { LanguageModel } from "ai"
-import { generateObject, generateText } from "ai"
+import { generateObject } from "ai"
 import { Effect } from "effect"
 import { z } from "zod"
 import { AgentError } from "./errors"
@@ -10,10 +10,7 @@ export const DORMANT_MS = 60 * 60 * 1000
 const STALE_ARCHIVE_MS = 24 * 60 * 60 * 1000
 const OPEN_THREADS_CAP = 10
 const TAIL_BUDGET = 20
-const ARCHIVE_THROTTLE_MS = 5 * 60 * 1000
-const ARCHIVE_MAP_CAP = 100
-
-const _archiveLastCheck = new Map<string, number>()
+const SYNOPSIS_BATCH_CAP = 3
 
 export type RouteAction = "continue" | "switch" | "new"
 
@@ -23,6 +20,7 @@ export type RouteAction = "continue" | "switch" | "new"
  *
  * - 0.85 — heuristic continue (short time gap)
  * - 0.80 — heuristic switch (label substring match)
+ * - 0.78 — heuristic switch (keyword match, ≥2 hits)
  * - 0.72 — model-routed switch
  * - 0.70 — model-routed new thread
  * - 0.65 — model-routed continue (default fallback)
@@ -31,6 +29,7 @@ export type RouteDecision = {
 	action: RouteAction
 	threadId: string
 	label?: string
+	keywords?: string[]
 	confidence: number
 }
 
@@ -38,7 +37,7 @@ export type OpenThreadRow = {
 	id: string
 	label: string | null
 	synopsis: string | null
-	status: "open" | "archived"
+	keywords: string[] | null
 	lastActiveAt: Date
 }
 
@@ -48,37 +47,51 @@ const routeObjectSchema = z.object({
 	threadIndex: z.number().int().min(0).optional().nullable(),
 	/** Short label when action is "new" (e.g. topic name). */
 	label: z.string().max(120).optional(),
+	/** 3-5 topic keywords for semantic matching. */
+	keywords: z.array(z.string().max(40)).max(5).optional(),
 })
+
+function matchesLabel(message: string, label: string): boolean {
+	if (label.length < 3) return false
+	return new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(message)
+}
 
 export function routeMessage(
 	message: string,
 	lastThreadId: string,
 	lastMessageAt: Date,
-	openThreads: ReadonlyArray<{ id: string; label: string | null; synopsis: string | null }>,
+	openThreads: ReadonlyArray<OpenThreadRow>,
 ): RouteDecision | null {
 	const gapMs = Date.now() - lastMessageAt.getTime()
 	if (gapMs < GAP_CONTINUE_MS) {
 		return { action: "continue", threadId: lastThreadId, confidence: 0.85 }
 	}
 
-	const msgLower = message.toLowerCase()
+	// Label match with word boundaries
 	for (const thread of openThreads) {
-		if (thread.label && msgLower.includes(thread.label.toLowerCase())) {
+		if (thread.label && matchesLabel(message, thread.label)) {
 			return { action: "switch", threadId: thread.id, confidence: 0.8 }
+		}
+	}
+
+	// Keyword match: 2+ keyword hits → switch
+	for (const thread of openThreads) {
+		if (!thread.keywords?.length) continue
+		const hits = thread.keywords.filter((kw) => matchesLabel(message, kw)).length
+		if (hits >= 2) {
+			return { action: "switch", threadId: thread.id, confidence: 0.78 }
 		}
 	}
 
 	return null
 }
 
-function buildRouterPrompt(
-	message: string,
-	openThreads: ReadonlyArray<{ id: string; label: string | null; synopsis: string | null }>,
-): string {
+function buildRouterPrompt(message: string, openThreads: ReadonlyArray<OpenThreadRow>): string {
 	const lines = openThreads.map((t, i) => {
 		const label = t.label?.trim() || "(untitled)"
 		const syn = t.synopsis?.trim() || "(no summary yet)"
-		return `${i}. id=${t.id} label="${label}" synopsis: ${syn}`
+		const kws = t.keywords?.length ? ` keywords: [${t.keywords.join(", ")}]` : ""
+		return `${i}. id=${t.id} label="${label}"${kws} synopsis: ${syn}`
 	})
 	return `You route a user message to exactly one conversation thread. Prefer continuing the most recently active thread unless the message clearly starts a new topic or clearly refers to another listed thread.
 
@@ -91,43 +104,45 @@ ${message}
 Return JSON only via the schema:
 - action "continue": stay on the current active thread (index 0 if unsure).
 - action "switch": pick threadIndex for a different listed thread.
-- action "new": the user is clearly starting a unrelated new topic; provide a short label.
+- action "new": the user is clearly starting a unrelated new topic; provide a short label and 3-5 topic keywords.
 Bias toward "continue" when ambiguous.`
 }
 
 export async function routeWithModel(
 	model: LanguageModel,
 	message: string,
-	openThreads: ReadonlyArray<{ id: string; label: string | null; synopsis: string | null }>,
+	openThreads: ReadonlyArray<OpenThreadRow>,
 	lastThreadId: string,
 ): Promise<RouteDecision> {
-	const candidateThreads =
-		openThreads.length > 0 ? openThreads : [{ id: lastThreadId, label: null, synopsis: null }]
+	// No open threads → skip model call, go straight to "new"
+	if (openThreads.length === 0) {
+		return { action: "new", threadId: crypto.randomUUID(), confidence: 0.7 }
+	}
 
 	const { object } = await generateObject({
 		model,
 		schema: routeObjectSchema,
-		prompt: buildRouterPrompt(message, candidateThreads.slice(0, OPEN_THREADS_CAP)),
+		prompt: buildRouterPrompt(message, openThreads.slice(0, OPEN_THREADS_CAP)),
 	})
 
 	if (object.action === "new") {
-		// Pre-generate UUID so caller can reference immediately; insert uses this as explicit PK
 		return {
 			action: "new",
 			threadId: crypto.randomUUID(),
 			label: object.label?.trim() || undefined,
+			keywords: object.keywords?.length ? object.keywords : undefined,
 			confidence: 0.7,
 		}
 	}
 
 	if (object.action === "switch") {
 		const idx = object.threadIndex ?? 0
-		const picked = candidateThreads[idx]
+		const picked = openThreads[idx]
 		if (picked) {
 			return { action: "switch", threadId: picked.id, confidence: 0.72 }
 		}
 		console.warn(
-			`[Router] threadIndex=${idx} out of bounds (max=${candidateThreads.length - 1}), falling back to continue`,
+			`[Router] threadIndex=${idx} out of bounds (max=${openThreads.length - 1}), falling back to continue`,
 		)
 	}
 
@@ -138,15 +153,24 @@ type QueryFn = <T>(
 	fn: (db: import("@amby/db").Database) => Promise<T>,
 ) => Effect.Effect<T, import("@amby/db").DbError>
 
-export async function generateSynopsis(model: LanguageModel, transcript: string): Promise<string> {
-	const { text } = await generateText({
+export async function generateSynopsis(
+	model: LanguageModel,
+	transcript: string,
+): Promise<{ synopsis: string; keywords: string[] }> {
+	const { object } = await generateObject({
 		model,
-		prompt: `Summarize this conversation thread in 2-3 sentences. Focus on: what the user wanted, what was done, and any outstanding items.
+		schema: z.object({
+			synopsis: z.string(),
+			keywords: z.array(z.string().max(40)).max(5),
+		}),
+		prompt: `Summarize this conversation thread and extract topic keywords.
+Synopsis: 2-3 sentences covering what the user wanted, what was done, outstanding items.
+Keywords: 3-5 single-word or short-phrase topic identifiers.
 
 Thread transcript:
 ${transcript}`,
 	})
-	return text.trim()
+	return { synopsis: object.synopsis.trim(), keywords: object.keywords }
 }
 
 export function archiveStaleThreads(
@@ -156,9 +180,6 @@ export function archiveStaleThreads(
 ): Effect.Effect<void, AgentError> {
 	const cutoff = new Date(Date.now() - STALE_ARCHIVE_MS)
 	return Effect.gen(function* () {
-		const lastCheck = _archiveLastCheck.get(conversationId)
-		if (lastCheck && Date.now() - lastCheck < ARCHIVE_THROTTLE_MS) return
-
 		const stale = yield* query((d) =>
 			d
 				.select({
@@ -176,7 +197,6 @@ export function archiveStaleThreads(
 		)
 
 		const needsSynopsis = stale.filter((r) => !r.synopsis?.trim())
-		const SYNOPSIS_BATCH_CAP = 3
 
 		// Batch-fetch messages for all threads needing synopsis in one query
 		const threadIds = needsSynopsis.map((r) => r.id)
@@ -221,7 +241,7 @@ export function archiveStaleThreads(
 					.map((m) => `${m.role}: ${m.content}`)
 					.join("\n")
 				if (lines.trim()) {
-					const synopsis = yield* Effect.tryPromise({
+					const { synopsis, keywords } = yield* Effect.tryPromise({
 						try: () => generateSynopsis(model, lines),
 						catch: (cause) =>
 							new AgentError({ message: "Failed to generate synopsis for archival", cause }),
@@ -229,7 +249,7 @@ export function archiveStaleThreads(
 					yield* query((d) =>
 						d
 							.update(schema.conversationThreads)
-							.set({ synopsis, status: "archived" })
+							.set({ synopsis, keywords, status: "archived" })
 							.where(eq(schema.conversationThreads.id, row.id)),
 					)
 					synopsisCount++
@@ -243,12 +263,6 @@ export function archiveStaleThreads(
 					.where(eq(schema.conversationThreads.id, row.id)),
 			)
 		}
-
-		if (_archiveLastCheck.size >= ARCHIVE_MAP_CAP) {
-			const oldestKey = _archiveLastCheck.keys().next().value
-			if (oldestKey !== undefined) _archiveLastCheck.delete(oldestKey)
-		}
-		_archiveLastCheck.set(conversationId, Date.now())
 	}).pipe(
 		Effect.mapError((e) =>
 			e instanceof AgentError
@@ -339,7 +353,7 @@ export function resolveThread(
 							id: schema.conversationThreads.id,
 							label: schema.conversationThreads.label,
 							synopsis: schema.conversationThreads.synopsis,
-							status: schema.conversationThreads.status,
+							keywords: schema.conversationThreads.keywords,
 							lastActiveAt: schema.conversationThreads.lastActiveAt,
 						})
 						.from(schema.conversationThreads)
@@ -371,7 +385,7 @@ export function resolveThread(
 			id: r.id,
 			label: r.label,
 			synopsis: r.synopsis,
-			status: r.status,
+			keywords: r.keywords,
 			lastActiveAt: r.lastActiveAt,
 		}))
 
@@ -399,6 +413,7 @@ export function resolveThread(
 						id: resolvedThreadId,
 						conversationId,
 						label: decision.label ?? null,
+						keywords: decision.keywords ?? null,
 						status: "open",
 						lastActiveAt: now,
 					})
@@ -411,47 +426,45 @@ export function resolveThread(
 			resolvedThreadId = row.id
 		}
 
-		// Single query to get thread metadata (status + lastActiveAt) for dormancy check and update
-		const threadMeta = yield* query((d) =>
-			d
-				.select({
-					id: schema.conversationThreads.id,
-					status: schema.conversationThreads.status,
-					lastActiveAt: schema.conversationThreads.lastActiveAt,
-				})
-				.from(schema.conversationThreads)
-				.where(eq(schema.conversationThreads.id, resolvedThreadId))
-				.limit(1),
+		// Parallelize thread metadata fetch and message count
+		const [threadMeta, countRows] = yield* Effect.all(
+			[
+				query((d) =>
+					d
+						.select({
+							id: schema.conversationThreads.id,
+							status: schema.conversationThreads.status,
+							lastActiveAt: schema.conversationThreads.lastActiveAt,
+						})
+						.from(schema.conversationThreads)
+						.where(eq(schema.conversationThreads.id, resolvedThreadId))
+						.limit(1),
+				),
+				query((d) =>
+					d
+						.select({ c: sql<number>`count(*)::int` })
+						.from(schema.messages)
+						.where(messageThreadFilter(conversationId, resolvedThreadId, defaultThreadId)),
+				),
+			],
+			{ concurrency: 2 },
 		)
+
 		const metaRow = threadMeta[0]
 		const threadWasDormant = metaRow
 			? now.getTime() - metaRow.lastActiveAt.getTime() > DORMANT_MS
 			: false
 
+		// Idempotent update: re-open if archived, always update lastActiveAt
 		if (decision.action !== "new" && metaRow) {
-			if (metaRow.status === "archived") {
-				yield* query((d) =>
-					d
-						.update(schema.conversationThreads)
-						.set({ status: "open", lastActiveAt: now })
-						.where(eq(schema.conversationThreads.id, resolvedThreadId)),
-				)
-			} else {
-				yield* query((d) =>
-					d
-						.update(schema.conversationThreads)
-						.set({ lastActiveAt: now })
-						.where(eq(schema.conversationThreads.id, resolvedThreadId)),
-				)
-			}
+			yield* query((d) =>
+				d
+					.update(schema.conversationThreads)
+					.set({ status: "open", lastActiveAt: now })
+					.where(eq(schema.conversationThreads.id, resolvedThreadId)),
+			)
 		}
 
-		const countRows = yield* query((d) =>
-			d
-				.select({ c: sql<number>`count(*)::int` })
-				.from(schema.messages)
-				.where(messageThreadFilter(conversationId, resolvedThreadId, defaultThreadId)),
-		)
 		const threadMessageCount = Number(countRows[0]?.c ?? 0)
 
 		return {

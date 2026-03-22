@@ -176,16 +176,31 @@ The research agent receives the same `execute_command` tool as the builder but i
 
 ## Execution Trace Persistence & Context Replay
 
-The agent persists full execution traces and replays them selectively for context-aware follow-ups.
+The agent persists full execution traces at two levels and replays them selectively for context-aware follow-ups.
 
-### What gets persisted
+### Trace storage: `traces` table
 
-Every assistant message stores two jsonb columns alongside the text:
+Full, untruncated execution traces are stored in the `traces` table with hierarchical structure:
 
-- **`toolCalls`** — `Array<{ toolCallId, toolName, input }>` — every tool the orchestrator invoked during that turn
-- **`toolResults`** — `Array<{ toolCallId, toolName, output }>` — every tool result, with large string outputs truncated to 500 chars. Subagent results retain their `{ summary, toolsUsed? }` structure, so the trace captures delegation depth.
+```
+traces {
+  id:            uuid PK
+  messageId:     uuid FK → messages.id (cascade)
+  agentName:     text ("orchestrator" | subagent name)
+  parentTraceId: uuid FK → traces.id (cascade, nullable, self-referential)
+  toolCalls:     jsonb (full [{toolCallId, toolName, input}])
+  toolResults:   jsonb (full [{toolCallId, toolName, output}])
+  durationMs:    integer (nullable)
+  metadata:      jsonb (nullable)
+  createdAt:     timestamp
+}
+```
 
-Extraction happens via `extractTraceData()`, which flattens all `steps` from the generation result into these two arrays. Both streaming and non-streaming paths capture steps identically. Long string outputs are truncated at the nearest word boundary before 500 characters to avoid cutting mid-word.
+Each assistant message generates one orchestrator trace row. Subagent traces link to their parent via `parentTraceId`, forming a tree: orchestrator → delegate_research, delegate_builder, etc. Subagent execution timing is captured in `durationMs`.
+
+### Lightweight summaries on messages
+
+The `messages` table retains truncated `toolCalls`/`toolResults` jsonb columns for fast context replay. Extraction happens via `extractTraceSummary()`, which flattens all `steps` from the generation result with large string outputs truncated to 500 chars at the nearest word boundary.
 
 ### How context replay works
 
@@ -203,11 +218,11 @@ The `formatArtifactRecap` function separately loads recent tool results with sum
 
 ### Design: persist richly, replay selectively
 
-The DB stores the complete trace (every tool call input/output). The context window sees only lightweight annotations. This means:
+The `traces` table stores the complete, untruncated execution tree. The `messages` table stores truncated summaries for context loading. The context window sees only lightweight annotations. This means:
 
-- **Debugging**: query `messages.toolCalls` / `messages.toolResults` directly for full execution history
-- **Context**: the model gets enough to maintain coherence without wasting tokens on raw tool I/O
-- **No new tables**: uses the existing `toolCalls` / `toolResults` jsonb columns on the `messages` table
+- **Debugging**: query `traces` for full hierarchical execution history with timing
+- **Context**: the model gets enough from `messages.toolCalls`/`toolResults` to maintain coherence without wasting tokens
+- **Queryable**: filter traces by `agentName`, inspect specific subagent tool calls, measure duration
 
 ---
 
@@ -219,23 +234,33 @@ The router (`packages/agent/src/router.ts`) resolves which conversation thread e
 
 1. **Heuristic fast-path** — zero-latency checks:
    - Time gap < 2 min → continue current thread (confidence: 0.85)
-   - Message contains an open thread's label → switch to that thread (confidence: 0.80)
-2. **Model fallback** — `generateObject` call with structured output when heuristics are ambiguous. Returns continue (0.65), switch (0.72), or new (0.70).
+   - Message contains an open thread's label (word-boundary match, min 3 chars) → switch to that thread (confidence: 0.80)
+   - Message matches 2+ thread keywords → switch (confidence: 0.78)
+2. **Model fallback** — `generateObject` call with structured output when heuristics are ambiguous. Returns continue (0.65), switch (0.72), or new (0.70). No open threads → skip model call, go directly to "new".
 
 Confidence values are trace-only metadata for observability — they do not gate downstream logic.
 
+### Keywords
+
+Each thread stores 3-5 topic keywords (`text[]` column). Keywords are generated:
+- When the model routes to "new" (returned alongside the label)
+- During synopsis generation (both archival and overflow triggers)
+
+Keywords enable semantic depth — e.g., keywords `["kubernetes", "deploy", "helm"]` match "helm chart deployment" even if the label is "k8s infra".
+
 ### Archival
 
-Stale threads (>24h inactive) are auto-archived with a generated synopsis. The archival pass:
-- Throttles to once per 5 minutes per conversation (`_archiveLastCheck` map, capped at 100 entries with LRU eviction)
+Stale threads (>24h inactive) are auto-archived with a generated synopsis and keywords. The archival pass:
+- Runs unconditionally (no throttle — the indexed `WHERE conversation_id = ? AND status = 'open' AND last_active_at <= ?` query is fast)
 - Batch-fetches messages for all threads needing synopsis in a single `inArray` query (avoids N+1)
 - Caps synopsis generation at 3 threads per pass to bound LLM cost
 
 ### Query optimization
 
-`resolveThread` parallelizes independent DB queries using `Effect.all({ concurrency: 2 })`:
-- Open-thread listing and last-message lookup run concurrently
-- Thread metadata (status + lastActiveAt) is fetched in a single query that serves both the dormancy check and the status update
+`resolveThread` parallelizes independent DB queries using `Effect.all`:
+- Open-thread listing and last-message lookup run concurrently (`concurrency: 2`)
+- Thread metadata fetch and message count run concurrently (`concurrency: 2`)
+- Context loading in `prepareContext` parallelizes user row + profile, then thread metadata + history + other threads + artifacts (`concurrency: 4`)
 
 ### Thread lifecycle
 

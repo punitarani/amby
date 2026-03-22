@@ -50,13 +50,16 @@ const THREAD_TAIL_LIMIT = 20
 const ARTIFACT_MSG_LIMIT = 5
 const OTHER_THREAD_CAP = 5
 const RECENT_WITH_TOOLS = 4
+const SUMMARY_TRUNCATE = 200
+const ARTIFACT_TRUNCATE = 400
+const TOOL_OUTPUT_TRUNCATE = 500
 
 type TraceData = {
 	toolCalls?: Array<{ toolCallId: string; toolName: string; input: unknown }>
 	toolResults?: Array<{ toolCallId: string; toolName: string; output: unknown }>
 }
 
-export function extractTraceData(
+export function extractTraceSummary(
 	steps: ReadonlyArray<{
 		toolCalls: ReadonlyArray<{ toolCallId: string; toolName: string; input: unknown }>
 		toolResults: ReadonlyArray<{
@@ -86,14 +89,17 @@ export function extractTraceData(
 	}
 }
 
+/** @deprecated Use extractTraceSummary instead */
+export const extractTraceData = extractTraceSummary
+
 export function summarizeToolOutput(output: unknown): unknown {
 	if (typeof output === "object" && output !== null && "summary" in output) {
 		return output
 	}
 	if (typeof output === "string") {
-		if (output.length <= 500) return output
-		const cutPoint = output.lastIndexOf(" ", 500)
-		const safePoint = cutPoint > 400 ? cutPoint : 500
+		if (output.length <= TOOL_OUTPUT_TRUNCATE) return output
+		const cutPoint = output.lastIndexOf(" ", TOOL_OUTPUT_TRUNCATE)
+		const safePoint = cutPoint > TOOL_OUTPUT_TRUNCATE - 100 ? cutPoint : TOOL_OUTPUT_TRUNCATE
 		return `${output.slice(0, safePoint)}…`
 	}
 	return output
@@ -120,7 +126,7 @@ export function formatToolAnnotation(toolResults: unknown[]): string {
 			output !== null &&
 			"summary" in output &&
 			typeof output.summary === "string"
-				? output.summary.slice(0, 200)
+				? output.summary.slice(0, SUMMARY_TRUNCATE)
 				: ""
 		return summary ? `${name}: ${summary}` : name
 	})
@@ -180,7 +186,8 @@ export function formatArtifactRecap(
 					continue
 				}
 				if (typeof output === "string" && output.trim()) {
-					const s = output.length > 400 ? `${output.slice(0, 400)}…` : output
+					const s =
+						output.length > ARTIFACT_TRUNCATE ? `${output.slice(0, ARTIFACT_TRUNCATE)}…` : output
 					bullets.push(s.trim())
 				}
 			}
@@ -292,11 +299,10 @@ export const makeAgentServiceLive = (userId: string) =>
 					}),
 				)
 
-			const loadThreadArtifacts = (
+			const loadRawArtifacts = (
 				conversationId: string,
 				threadId: string,
 				defaultThreadId: string,
-				threadLabel: string | null,
 			) =>
 				query((d) =>
 					d
@@ -314,7 +320,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						)
 						.orderBy(desc(schema.messages.createdAt))
 						.limit(ARTIFACT_MSG_LIMIT),
-				).pipe(Effect.map((rows) => formatArtifactRecap(rows, threadLabel)))
+				)
 
 			const saveMessage = (
 				conversationId: string,
@@ -328,15 +334,18 @@ export const makeAgentServiceLive = (userId: string) =>
 				},
 			) =>
 				query((d) =>
-					d.insert(schema.messages).values({
-						conversationId,
-						role,
-						content,
-						threadId: opts?.threadId,
-						metadata: opts?.metadata,
-						toolCalls: opts?.toolCalls,
-						toolResults: opts?.toolResults,
-					}),
+					d
+						.insert(schema.messages)
+						.values({
+							conversationId,
+							role,
+							content,
+							threadId: opts?.threadId,
+							metadata: opts?.metadata,
+							toolCalls: opts?.toolCalls,
+							toolResults: opts?.toolResults,
+						})
+						.returning({ id: schema.messages.id }),
 				)
 
 			const maybeSaveAssistantMessage = (
@@ -347,7 +356,107 @@ export const makeAgentServiceLive = (userId: string) =>
 					toolCalls?: unknown[]
 					toolResults?: unknown[]
 				},
-			) => (content.trim() ? saveMessage(conversationId, "assistant", content, opts) : Effect.void)
+			) =>
+				content.trim()
+					? saveMessage(conversationId, "assistant", content, opts)
+					: Effect.succeed([])
+
+			const persistTraces = (
+				messageId: string,
+				steps: ReadonlyArray<{
+					toolCalls: ReadonlyArray<{
+						toolCallId: string
+						toolName: string
+						input: unknown
+					}>
+					toolResults: ReadonlyArray<{
+						toolCallId: string
+						toolName: string
+						output: unknown
+					}>
+				}>,
+			) =>
+				Effect.gen(function* () {
+					const orchCalls = steps.flatMap((s) =>
+						s.toolCalls.map((tc) => ({
+							toolCallId: tc.toolCallId,
+							toolName: tc.toolName,
+							input: tc.input,
+						})),
+					)
+					const orchResults = steps.flatMap((s) =>
+						s.toolResults.map((tr) => ({
+							toolCallId: tr.toolCallId,
+							toolName: tr.toolName,
+							output: tr.output,
+						})),
+					)
+
+					// Insert orchestrator trace
+					const orchRows = yield* query((d) =>
+						d
+							.insert(schema.traces)
+							.values({
+								messageId,
+								agentName: "orchestrator",
+								toolCalls: orchCalls.length ? orchCalls : null,
+								toolResults: orchResults.length ? orchResults : null,
+							})
+							.returning({ id: schema.traces.id }),
+					)
+					const orchRow = orchRows[0]
+					if (!orchRow) return
+
+					// Extract subagent traces from delegate_* results
+					const subTraces = orchResults
+						.filter(
+							(tr) =>
+								tr.toolName.startsWith("delegate_") &&
+								typeof tr.output === "object" &&
+								tr.output !== null &&
+								"_trace" in tr.output,
+						)
+						.map(
+							(tr) =>
+								(
+									tr.output as {
+										_trace: {
+											agentName: string
+											steps: Array<{
+												toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown }>
+												toolResults: Array<{
+													toolCallId: string
+													toolName: string
+													output: unknown
+												}>
+											}>
+											durationMs: number
+										}
+									}
+								)._trace,
+						)
+
+					if (subTraces.length > 0) {
+						yield* query((d) =>
+							d.insert(schema.traces).values(
+								subTraces.map((t) => ({
+									messageId,
+									parentTraceId: orchRow.id,
+									agentName: t.agentName,
+									toolCalls: t.steps.flatMap((s) => s.toolCalls),
+									toolResults: t.steps.flatMap((s) => s.toolResults),
+									durationMs: t.durationMs,
+								})),
+							),
+						)
+					}
+				}).pipe(
+					Effect.catchAll((e) =>
+						Effect.sync(() => {
+							console.warn("[Traces] Persistence failed:", e)
+						}),
+					),
+				)
 
 			const prepareContext = (
 				conversationId: string,
@@ -355,12 +464,19 @@ export const makeAgentServiceLive = (userId: string) =>
 				onReply?: ReplyFn,
 			) =>
 				Effect.gen(function* () {
-					const userRow = yield* query((d) =>
-						d
-							.select({ timezone: schema.users.timezone })
-							.from(schema.users)
-							.where(eq(schema.users.id, userId))
-							.limit(1),
+					// Parallel: user row + profile
+					const [userRow, profile] = yield* Effect.all(
+						[
+							query((d) =>
+								d
+									.select({ timezone: schema.users.timezone })
+									.from(schema.users)
+									.where(eq(schema.users.id, userId))
+									.limit(1),
+							),
+							memory.getProfile(userId),
+						],
+						{ concurrency: 2 },
 					)
 					const userTimezone = userRow[0]?.timezone ?? "UTC"
 
@@ -370,35 +486,32 @@ export const makeAgentServiceLive = (userId: string) =>
 						timeStyle: "long",
 					}).format(new Date())
 
-					const profile = yield* memory.getProfile(userId)
 					const deduped = deduplicateMemories(profile.static, profile.dynamic)
 					const memoryContext = buildMemoriesText(deduped)
 
-					const threadRow = yield* query((d) =>
-						d
-							.select({
-								label: schema.conversationThreads.label,
-								synopsis: schema.conversationThreads.synopsis,
-							})
-							.from(schema.conversationThreads)
-							.where(eq(schema.conversationThreads.id, threadCtx.threadId))
-							.limit(1),
+					// Parallel: thread metadata, history, other threads, artifacts
+					const [threadRow, history, otherThreads, artifactRows] = yield* Effect.all(
+						[
+							query((d) =>
+								d
+									.select({
+										label: schema.conversationThreads.label,
+										synopsis: schema.conversationThreads.synopsis,
+									})
+									.from(schema.conversationThreads)
+									.where(eq(schema.conversationThreads.id, threadCtx.threadId))
+									.limit(1),
+							),
+							loadThreadTail(conversationId, threadCtx.threadId, threadCtx.defaultThreadId),
+							loadOtherThreadSummaries(conversationId, threadCtx.threadId),
+							loadRawArtifacts(conversationId, threadCtx.threadId, threadCtx.defaultThreadId),
+						],
+						{ concurrency: 4 },
 					)
+
 					const threadLabel = threadRow[0]?.label ?? null
 					const threadSynopsis = threadRow[0]?.synopsis?.trim() ?? ""
-
-					const history = yield* loadThreadTail(
-						conversationId,
-						threadCtx.threadId,
-						threadCtx.defaultThreadId,
-					)
-					const otherThreads = yield* loadOtherThreadSummaries(conversationId, threadCtx.threadId)
-					const artifactRecap = yield* loadThreadArtifacts(
-						conversationId,
-						threadCtx.threadId,
-						threadCtx.defaultThreadId,
-						threadLabel,
-					)
+					const artifactRecap = formatArtifactRecap(artifactRows, threadLabel)
 
 					const threadSynopsisBlock =
 						threadCtx.threadWasDormant && threadSynopsis
@@ -446,26 +559,20 @@ export const makeAgentServiceLive = (userId: string) =>
 						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
 						: buildSystemPrompt(formatted, userTimezone)
 
-					const extraBlocks = [
-						otherThreads,
-						threadSynopsisBlock,
-						artifactRecap.trim() ? artifactRecap : "",
+					const contextSections = [otherThreads, threadSynopsisBlock, artifactRecap].filter(Boolean)
+					const extraContext = contextSections.join("\n\n")
+
+					const systemPrompt = [
+						basePrompt,
+						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
+						extraContext,
 					]
 						.filter(Boolean)
 						.join("\n\n")
 
-					const systemPromptWithMemory = memoryContext
-						? `${basePrompt}\n\n# User Memory Context\n${memoryContext}`
-						: basePrompt
-					const systemPrompt =
-						extraBlocks.length > 0
-							? `${systemPromptWithMemory}\n\n${extraBlocks}`
-							: systemPromptWithMemory
-
-					// extraBlocks is a pre-joined string of thread context sections (empty string filtered by .filter(Boolean))
 					const sharedPromptContext = [
 						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
-						extraBlocks,
+						extraContext,
 						`# Current Date/Time\n${formatted} (${userTimezone})`,
 					]
 						.filter(Boolean)
@@ -494,8 +601,6 @@ export const makeAgentServiceLive = (userId: string) =>
 					model: baseModel,
 					instructions: systemPrompt,
 					tools,
-					// Delegation-heavy turns, especially connected-app work, need extra
-					// roundtrips on top of the base agent steps.
 					stopWhen: stepCountIs(ORCHESTRATOR_MAX_STEPS),
 					experimental_telemetry: createTelemetrySettings({
 						functionId,
@@ -524,12 +629,35 @@ export const makeAgentServiceLive = (userId: string) =>
 					),
 				)
 
-			const persistThreadSynopsis = (threadId: string, synopsis: string) =>
-				query((d) =>
-					d
-						.update(schema.conversationThreads)
-						.set({ synopsis })
-						.where(eq(schema.conversationThreads.id, threadId)),
+			const maybeGenerateSynopsis = (
+				threadId: string,
+				conversationId: string,
+				defaultThreadId: string,
+			) =>
+				Effect.gen(function* () {
+					const transcript = yield* fetchTranscriptForSynopsis(
+						conversationId,
+						threadId,
+						defaultThreadId,
+					)
+					if (!transcript.trim()) return
+
+					const { synopsis, keywords } = yield* Effect.tryPromise({
+						try: () => generateSynopsis(baseModel, transcript),
+						catch: (cause) => new AgentError({ message: "Synopsis generation failed", cause }),
+					})
+					yield* query((d) =>
+						d
+							.update(schema.conversationThreads)
+							.set({ synopsis, keywords })
+							.where(eq(schema.conversationThreads.id, threadId)),
+					)
+				}).pipe(
+					Effect.catchAll((e) =>
+						Effect.sync(() => {
+							console.warn("[Synopsis] Failed:", e)
+						}),
+					),
 				)
 
 			const synopsisPreviousThreadIfDormantSwitch = (
@@ -560,19 +688,11 @@ export const makeAgentServiceLive = (userId: string) =>
 					const lastAt = lastRows[0]?.createdAt
 					if (!lastAt || Date.now() - lastAt.getTime() <= DORMANT_MS) return
 
-					const transcript = yield* fetchTranscriptForSynopsis(
-						conversationId,
+					yield* maybeGenerateSynopsis(
 						threadCtx.previousLastThreadId,
+						conversationId,
 						threadCtx.defaultThreadId,
 					)
-					if (!transcript.trim()) return
-
-					const synopsis = yield* Effect.tryPromise({
-						try: () => generateSynopsis(baseModel, transcript),
-						catch: (cause) =>
-							new AgentError({ message: "Synopsis generation failed (previous thread)", cause }),
-					})
-					yield* persistThreadSynopsis(threadCtx.previousLastThreadId, synopsis)
 				}).pipe(Effect.catchAll(() => Effect.void))
 
 			const synopsisCurrentThreadIfOverflowsAfterSave = (
@@ -584,19 +704,11 @@ export const makeAgentServiceLive = (userId: string) =>
 					const projectedCount = threadCtx.threadMessageCount + inboundMessageCount
 					if (projectedCount <= THREAD_TAIL_LIMIT) return
 
-					const transcript = yield* fetchTranscriptForSynopsis(
-						conversationId,
+					yield* maybeGenerateSynopsis(
 						threadCtx.threadId,
+						conversationId,
 						threadCtx.defaultThreadId,
 					)
-					if (!transcript.trim()) return
-
-					const synopsis = yield* Effect.tryPromise({
-						try: () => generateSynopsis(baseModel, transcript),
-						catch: (cause) =>
-							new AgentError({ message: "Synopsis generation failed (tail overflow)", cause }),
-					})
-					yield* persistThreadSynopsis(threadCtx.threadId, synopsis)
 				}).pipe(Effect.catchAll(() => Effect.void))
 
 			const sendToolUserMessages = (toolUserMessages: string[], onReply: ReplyFn) =>
@@ -613,13 +725,15 @@ export const makeAgentServiceLive = (userId: string) =>
 				metadata,
 				onReply,
 				onTextDelta,
+				onPart,
 			}: {
 				conversationId: string
-				mode: Extract<TraceRequestMode, "message" | "batched-message">
+				mode: TraceRequestMode
 				requestMessages: ReadonlyArray<{ role: "user"; content: string }>
 				metadata?: Record<string, unknown>
 				onReply?: ReplyFn
 				onTextDelta?: (text: string) => void
+				onPart?: (part: StreamPart) => void
 			}) =>
 				withTelemetryFlush(
 					Effect.gen(function* () {
@@ -650,24 +764,53 @@ export const makeAgentServiceLive = (userId: string) =>
 							agent_role: "orchestrator",
 							agent_name: "orchestrator",
 						}
+						const functionId = onPart ? "amby.orchestrator.stream" : "amby.orchestrator.generate"
 						const agent = createOrchestrator(
 							systemPrompt,
 							{ ...delegationTools, ...tools } as ToolSet,
-							"amby.orchestrator.generate",
+							functionId as "amby.orchestrator.generate" | "amby.orchestrator.stream",
 							orchestratorMetadata,
 						)
 
+						const messages = onPart
+							? [
+									...history,
+									...requestMessages.map((m) => ({ role: "user" as const, content: m.content })),
+								]
+							: [...history, ...requestMessages]
+
 						const result = yield* Effect.tryPromise({
 							try: async () => {
-								if (onTextDelta) {
-									const stream = await agent.stream({
-										messages: [...history, ...requestMessages],
-									})
+								if (onPart || onTextDelta) {
+									const stream = await agent.stream({ messages })
+
 									for await (const part of stream.fullStream) {
-										if (part.type === "text-delta") {
-											onTextDelta(part.text)
+										switch (part.type) {
+											case "text-delta":
+												if (onTextDelta) onTextDelta(part.text)
+												if (onPart) onPart({ type: "text-delta", text: part.text })
+												break
+											case "tool-call":
+												if (onPart) {
+													onPart({
+														type: "tool-call",
+														toolName: part.toolName,
+														args: part.input as Record<string, unknown>,
+													})
+												}
+												break
+											case "tool-result":
+												if (onPart) {
+													onPart({
+														type: "tool-result",
+														toolName: part.toolName,
+														result: part.output,
+													})
+												}
+												break
 										}
 									}
+
 									const [text, toolResults, steps] = await Promise.all([
 										stream.text,
 										stream.toolResults,
@@ -675,12 +818,15 @@ export const makeAgentServiceLive = (userId: string) =>
 									])
 									return { text, toolResults, steps }
 								}
-								return await agent.generate({
-									messages: [...history, ...requestMessages],
-								})
+								return await agent.generate({ messages })
 							},
-							catch: (cause) => new AgentError({ message: "Failed to generate response", cause }),
+							catch: (cause) =>
+								new AgentError({
+									message: onPart ? "Failed to stream response" : "Failed to generate response",
+									cause,
+								}),
 						})
+
 						const toolUserMessages = onReply
 							? extractToolUserMessages(result.toolResults)
 							: undefined
@@ -691,7 +837,7 @@ export const makeAgentServiceLive = (userId: string) =>
 
 						const threadMeta = buildThreadMeta(threadCtx)
 						const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
-						const trace = extractTraceData(result.steps ?? [])
+						const trace = extractTraceSummary(result.steps ?? [])
 
 						for (const message of requestMessages) {
 							yield* saveMessage(conversationId, "user", message.content, {
@@ -699,11 +845,17 @@ export const makeAgentServiceLive = (userId: string) =>
 								threadId: threadCtx.threadId,
 							})
 						}
-						yield* maybeSaveAssistantMessage(conversationId, finalText, {
+						const savedRows = yield* maybeSaveAssistantMessage(conversationId, finalText, {
 							threadId: threadCtx.threadId,
 							toolCalls: trace.toolCalls,
 							toolResults: trace.toolResults,
 						})
+
+						// Persist full traces if we have a message ID
+						const savedMessageId = savedRows[0]?.id
+						if (savedMessageId && result.steps?.length) {
+							yield* persistTraces(savedMessageId, result.steps)
+						}
 
 						yield* synopsisCurrentThreadIfOverflowsAfterSave(
 							conversationId,
@@ -744,96 +896,20 @@ export const makeAgentServiceLive = (userId: string) =>
 						Effect.mapError((e) =>
 							e instanceof AgentError
 								? e
-								: new AgentError({ message: "Agent batched message handling failed", cause: e }),
+								: new AgentError({
+										message: "Agent batched message handling failed",
+										cause: e,
+									}),
 						),
 					),
 
 				streamMessage: (conversationId, content, onPart) =>
-					withTelemetryFlush(
-						Effect.gen(function* () {
-							const threadCtx = yield* resolveThread(query, conversationId, content, baseModel)
-
-							yield* synopsisPreviousThreadIfDormantSwitch(conversationId, threadCtx)
-
-							const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
-								yield* prepareContext(conversationId, threadCtx)
-							const requestTraceMetadata = buildRequestTraceMetadata({
-								conversationId,
-								requestMode: "stream-message",
-							})
-							const delegationTools = createSubagentTools(
-								models.getModel,
-								toolGroups,
-								sharedPromptContext,
-								agentConfig,
-								requestTraceMetadata,
-							)
-							const orchestratorMetadata: AgentTraceMetadata = {
-								...requestTraceMetadata,
-								user_id: agentConfig.userId,
-								model_id: agentConfig.modelId,
-								cua_enabled: agentConfig.cuaEnabled,
-								agent_role: "orchestrator",
-								agent_name: "orchestrator",
-							}
-							const agent = createOrchestrator(
-								systemPrompt,
-								{ ...delegationTools, ...tools } as ToolSet,
-								"amby.orchestrator.stream",
-								orchestratorMetadata,
-							)
-
-							const result = yield* Effect.tryPromise({
-								try: async () => {
-									const stream = await agent.stream({
-										messages: [...history, { role: "user" as const, content }],
-									})
-
-									for await (const part of stream.fullStream) {
-										switch (part.type) {
-											case "text-delta":
-												onPart({ type: "text-delta", text: part.text })
-												break
-											case "tool-call":
-												onPart({
-													type: "tool-call",
-													toolName: part.toolName,
-													args: part.input as Record<string, unknown>,
-												})
-												break
-											case "tool-result":
-												onPart({
-													type: "tool-result",
-													toolName: part.toolName,
-													result: part.output,
-												})
-												break
-										}
-									}
-
-									const [text, steps] = await Promise.all([stream.text, stream.steps])
-									return { text, steps }
-								},
-								catch: (cause) => new AgentError({ message: "Failed to stream response", cause }),
-							})
-
-							const threadMeta = buildThreadMeta(threadCtx)
-							const trace = extractTraceData(result.steps ?? [])
-							yield* saveMessage(conversationId, "user", content, {
-								metadata: threadMeta,
-								threadId: threadCtx.threadId,
-							})
-							yield* saveMessage(conversationId, "assistant", result.text, {
-								threadId: threadCtx.threadId,
-								toolCalls: trace.toolCalls,
-								toolResults: trace.toolResults,
-							})
-
-							yield* synopsisCurrentThreadIfOverflowsAfterSave(conversationId, threadCtx, 2)
-
-							return result.text
-						}),
-					).pipe(
+					runGenerateRequest({
+						conversationId,
+						mode: "stream-message",
+						requestMessages: [{ role: "user", content }],
+						onPart,
+					}).pipe(
 						Effect.mapError((e) =>
 							e instanceof AgentError
 								? e

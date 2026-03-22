@@ -1,5 +1,5 @@
 {
-	"id": "aed2a7ed-aaa7-49c8-9458-4bd99559086c",
+	"id": "433774cf-c58f-44dd-a2d1-0d32aaf1650c",
 	"prevId": "8a9e4386-2977-4ae5-95d8-6ba02224cbee",
 	"version": "7",
 	"dialect": "postgresql",
@@ -294,6 +294,101 @@
 					"tableFrom": "conversations",
 					"tableTo": "users",
 					"columnsFrom": ["user_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.messages": {
+			"name": "messages",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"conversation_id": {
+					"name": "conversation_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"role": {
+					"name": "role",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"content": {
+					"name": "content",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"tool_calls": {
+					"name": "tool_calls",
+					"type": "jsonb",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"tool_results": {
+					"name": "tool_results",
+					"type": "jsonb",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"metadata": {
+					"name": "metadata",
+					"type": "jsonb",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				}
+			},
+			"indexes": {
+				"messages_conversation_created_idx": {
+					"name": "messages_conversation_created_idx",
+					"columns": [
+						{
+							"expression": "conversation_id",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						},
+						{
+							"expression": "created_at",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				}
+			},
+			"foreignKeys": {
+				"messages_conversation_id_conversations_id_fk": {
+					"name": "messages_conversation_id_conversations_id_fk",
+					"tableFrom": "messages",
+					"tableTo": "conversations",
+					"columnsFrom": ["conversation_id"],
 					"columnsTo": ["id"],
 					"onDelete": "cascade",
 					"onUpdate": "no action"
@@ -1086,234 +1181,6 @@
 					"tableFrom": "tasks",
 					"tableTo": "conversations",
 					"columnsFrom": ["conversation_id"],
-					"columnsTo": ["id"],
-					"onDelete": "set null",
-					"onUpdate": "no action"
-				}
-			},
-			"compositePrimaryKeys": {},
-			"uniqueConstraints": {},
-			"policies": {},
-			"checkConstraints": {},
-			"isRLSEnabled": false
-		},
-		"public.conversation_threads": {
-			"name": "conversation_threads",
-			"schema": "",
-			"columns": {
-				"id": {
-					"name": "id",
-					"type": "uuid",
-					"primaryKey": true,
-					"notNull": true,
-					"default": "gen_random_uuid()"
-				},
-				"conversation_id": {
-					"name": "conversation_id",
-					"type": "uuid",
-					"primaryKey": false,
-					"notNull": true
-				},
-				"label": {
-					"name": "label",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": false
-				},
-				"synopsis": {
-					"name": "synopsis",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": false
-				},
-				"status": {
-					"name": "status",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": true,
-					"default": "'open'"
-				},
-				"last_active_at": {
-					"name": "last_active_at",
-					"type": "timestamp with time zone",
-					"primaryKey": false,
-					"notNull": true,
-					"default": "now()"
-				},
-				"created_at": {
-					"name": "created_at",
-					"type": "timestamp with time zone",
-					"primaryKey": false,
-					"notNull": true,
-					"default": "now()"
-				}
-			},
-			"indexes": {
-				"threads_conversation_active_idx": {
-					"name": "threads_conversation_active_idx",
-					"columns": [
-						{
-							"expression": "conversation_id",
-							"isExpression": false,
-							"asc": true,
-							"nulls": "last"
-						},
-						{
-							"expression": "status",
-							"isExpression": false,
-							"asc": true,
-							"nulls": "last"
-						},
-						{
-							"expression": "last_active_at",
-							"isExpression": false,
-							"asc": true,
-							"nulls": "last"
-						}
-					],
-					"isUnique": false,
-					"concurrently": false,
-					"method": "btree",
-					"with": {}
-				}
-			},
-			"foreignKeys": {
-				"conversation_threads_conversation_id_conversations_id_fk": {
-					"name": "conversation_threads_conversation_id_conversations_id_fk",
-					"tableFrom": "conversation_threads",
-					"tableTo": "conversations",
-					"columnsFrom": ["conversation_id"],
-					"columnsTo": ["id"],
-					"onDelete": "cascade",
-					"onUpdate": "no action"
-				}
-			},
-			"compositePrimaryKeys": {},
-			"uniqueConstraints": {},
-			"policies": {},
-			"checkConstraints": {},
-			"isRLSEnabled": false
-		},
-		"public.messages": {
-			"name": "messages",
-			"schema": "",
-			"columns": {
-				"id": {
-					"name": "id",
-					"type": "uuid",
-					"primaryKey": true,
-					"notNull": true,
-					"default": "gen_random_uuid()"
-				},
-				"conversation_id": {
-					"name": "conversation_id",
-					"type": "uuid",
-					"primaryKey": false,
-					"notNull": true
-				},
-				"thread_id": {
-					"name": "thread_id",
-					"type": "uuid",
-					"primaryKey": false,
-					"notNull": false
-				},
-				"role": {
-					"name": "role",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": true
-				},
-				"content": {
-					"name": "content",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": true
-				},
-				"tool_calls": {
-					"name": "tool_calls",
-					"type": "jsonb",
-					"primaryKey": false,
-					"notNull": false
-				},
-				"tool_results": {
-					"name": "tool_results",
-					"type": "jsonb",
-					"primaryKey": false,
-					"notNull": false
-				},
-				"metadata": {
-					"name": "metadata",
-					"type": "jsonb",
-					"primaryKey": false,
-					"notNull": false
-				},
-				"created_at": {
-					"name": "created_at",
-					"type": "timestamp with time zone",
-					"primaryKey": false,
-					"notNull": true,
-					"default": "now()"
-				}
-			},
-			"indexes": {
-				"messages_conversation_created_idx": {
-					"name": "messages_conversation_created_idx",
-					"columns": [
-						{
-							"expression": "conversation_id",
-							"isExpression": false,
-							"asc": true,
-							"nulls": "last"
-						},
-						{
-							"expression": "created_at",
-							"isExpression": false,
-							"asc": true,
-							"nulls": "last"
-						}
-					],
-					"isUnique": false,
-					"concurrently": false,
-					"method": "btree",
-					"with": {}
-				},
-				"messages_thread_idx": {
-					"name": "messages_thread_idx",
-					"columns": [
-						{
-							"expression": "thread_id",
-							"isExpression": false,
-							"asc": true,
-							"nulls": "last"
-						},
-						{
-							"expression": "created_at",
-							"isExpression": false,
-							"asc": true,
-							"nulls": "last"
-						}
-					],
-					"isUnique": false,
-					"concurrently": false,
-					"method": "btree",
-					"with": {}
-				}
-			},
-			"foreignKeys": {
-				"messages_conversation_id_conversations_id_fk": {
-					"name": "messages_conversation_id_conversations_id_fk",
-					"tableFrom": "messages",
-					"tableTo": "conversations",
-					"columnsFrom": ["conversation_id"],
-					"columnsTo": ["id"],
-					"onDelete": "cascade",
-					"onUpdate": "no action"
-				},
-				"messages_thread_id_conversation_threads_id_fk": {
-					"name": "messages_thread_id_conversation_threads_id_fk",
-					"tableFrom": "messages",
-					"tableTo": "conversation_threads",
-					"columnsFrom": ["thread_id"],
 					"columnsTo": ["id"],
 					"onDelete": "set null",
 					"onUpdate": "no action"

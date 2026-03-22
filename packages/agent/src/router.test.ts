@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import {
 	buildReplayMessages,
 	extractTraceData,
+	extractTraceSummary,
 	formatArtifactRecap,
 	formatToolAnnotation,
 	summarizeToolOutput,
@@ -10,8 +11,20 @@ import { routeMessage } from "./router"
 
 describe("routeMessage", () => {
 	const threads = [
-		{ id: "t1", label: "deployment", synopsis: "deploying the app" },
-		{ id: "t2", label: "billing", synopsis: "billing discussion" },
+		{
+			id: "t1",
+			label: "deployment",
+			synopsis: "deploying the app",
+			keywords: null,
+			lastActiveAt: new Date(),
+		},
+		{
+			id: "t2",
+			label: "billing",
+			synopsis: "billing discussion",
+			keywords: ["invoice", "payment", "stripe"],
+			lastActiveAt: new Date(),
+		},
 	]
 
 	it("returns continue when gap is short", () => {
@@ -34,6 +47,41 @@ describe("routeMessage", () => {
 	it("returns null when ambiguous (no heuristic match)", () => {
 		const oldDate = new Date(Date.now() - 300_000)
 		const result = routeMessage("something unrelated", "t1", oldDate, threads)
+		expect(result).toBeNull()
+	})
+
+	it("does NOT match short labels (< 3 chars)", () => {
+		const shortLabelThreads = [
+			{ id: "t1", label: "a", synopsis: null, keywords: null, lastActiveAt: new Date() },
+		]
+		const oldDate = new Date(Date.now() - 300_000)
+		const result = routeMessage("about something", "t1", oldDate, shortLabelThreads)
+		expect(result).toBeNull()
+	})
+
+	it("uses word boundary matching (label 'log' does NOT match 'dialog')", () => {
+		const labelThreads = [
+			{ id: "t1", label: "log", synopsis: null, keywords: null, lastActiveAt: new Date() },
+		]
+		const oldDate = new Date(Date.now() - 300_000)
+		expect(routeMessage("check the dialog box", "t1", oldDate, labelThreads)).toBeNull()
+		const match = routeMessage("check the log output", "t1", oldDate, labelThreads)
+		expect(match?.action).toBe("switch")
+	})
+
+	it("switches on keyword match (2+ hits)", () => {
+		const oldDate = new Date(Date.now() - 300_000)
+		const result = routeMessage("send the invoice and payment details", "t1", oldDate, threads)
+		expect(result).not.toBeNull()
+		expect(result?.action).toBe("switch")
+		expect(result?.threadId).toBe("t2")
+		expect(result?.confidence).toBe(0.78)
+	})
+
+	it("does NOT switch on single keyword hit", () => {
+		const oldDate = new Date(Date.now() - 300_000)
+		const result = routeMessage("check the invoice", "t1", oldDate, threads)
+		// Single keyword hit is not enough — should fall through to null
 		expect(result).toBeNull()
 	})
 })
@@ -126,9 +174,9 @@ describe("summarizeToolOutput", () => {
 	})
 })
 
-describe("extractTraceData", () => {
+describe("extractTraceSummary", () => {
 	it("returns undefined fields for empty steps", () => {
-		const result = extractTraceData([])
+		const result = extractTraceSummary([])
 		expect(result.toolCalls).toBeUndefined()
 		expect(result.toolResults).toBeUndefined()
 	})
@@ -144,10 +192,23 @@ describe("extractTraceData", () => {
 				toolResults: [{ toolCallId: "c2", toolName: "read", output: "content" }],
 			},
 		]
-		const result = extractTraceData(steps)
+		const result = extractTraceSummary(steps)
 		expect(result.toolCalls).toHaveLength(2)
 		expect(result.toolResults).toHaveLength(2)
 		expect(result.toolCalls?.[0]?.toolName).toBe("search")
 		expect(result.toolCalls?.[1]?.toolName).toBe("read")
+	})
+
+	it("is aliased as extractTraceData for backwards compatibility", () => {
+		expect(extractTraceData).toBe(extractTraceSummary)
+	})
+})
+
+describe("generateSynopsis return type", () => {
+	// This test validates the type contract — generateSynopsis returns { synopsis, keywords }
+	// We can't easily test the actual LLM call, but we verify the import works
+	it("generateSynopsis is exported from router", async () => {
+		const { generateSynopsis } = await import("./router")
+		expect(typeof generateSynopsis).toBe("function")
 	})
 })
