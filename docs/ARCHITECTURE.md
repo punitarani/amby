@@ -6,7 +6,7 @@ from anywhere (CLI today, phone/web/messaging later). This document describes th
 The MVP is a **text-only CLI runner** that validates the core loop: receive input, think with memory, act with tools,
 respond — or proactively reach out. Voice, web, and mobile channels come later.
 
----
+***
 
 ## Design Principles
 
@@ -28,7 +28,7 @@ respond — or proactively reach out. Voice, web, and mobile channels come later
 6. **Memory as persistent intelligence.** The agent forgets nothing (unless told to). Memory is what makes Amby an
    assistant, not a chatbot.
 
----
+***
 
 ## System Overview
 
@@ -91,7 +91,7 @@ graph TD
     ENV -.-> Computer
 ```
 
----
+***
 
 ## Package Map
 
@@ -128,7 +128,7 @@ graph BT
 | `@amby/channels` | Channel interface and adapters (CLI for MVP)      | `@amby/env`                            |
 | `@amby/agent`    | Core agent orchestration, tools, jobs             | `ai`, all `@amby/*` packages           |
 
----
+***
 
 ## Package Details
 
@@ -141,13 +141,13 @@ Every other package imports env vars from here — no `process.env` scattered ac
 
 **Defines variables for:**
 
-- Database: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`
-- OpenAI: `OPENAI_API_KEY` (optional fallback when not using Codex OAuth)
-- Daytona: `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_TARGET`
-- Auth: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`
-- Cartesia: `CARTESIA_API_KEY` (future, TTS)
+* Database: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`
+* OpenAI: `OPENAI_API_KEY` (optional fallback when not using Codex OAuth)
+* Daytona: `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_TARGET`
+* Auth: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`
+* Cartesia: `CARTESIA_API_KEY` (future, TTS)
 
----
+***
 
 ### @amby/db
 
@@ -162,8 +162,9 @@ Owns all database schemas (Drizzle ORM) and the database client. Single source o
 | `users`             | User accounts (BetterAuth compatible)     |
 | `sessions`          | Auth sessions (BetterAuth)                |
 | `accounts`          | OAuth accounts and tokens (BetterAuth)    |
-| `conversations`     | Conversation threads per user per channel |
-| `messages`          | Individual messages within conversations  |
+| `conversations`     | Top-level conversation containers per user per channel |
+| `conversationThreads` | Topic threads within a conversation (routing, archival, synopsis) |
+| `messages`          | Individual messages within conversations (with execution traces) |
 | `channels`          | Registered channel configurations         |
 | `documents`         | Raw ingested content (memory sources)     |
 | `chunks`            | Semantic chunks for vector retrieval      |
@@ -178,7 +179,7 @@ Owns all database schemas (Drizzle ORM) and the database client. Single source o
 
 **Migrations:** Drizzle Kit generates and runs migrations. Supabase provides the Postgres instance.
 
----
+***
 
 ### @amby/auth
 
@@ -189,14 +190,14 @@ defined, but there is no HTTP server to serve auth routes yet.
 
 **Configuration:**
 
-- Database adapter: Drizzle (via `@amby/db`)
-- Social providers: Google, GitHub (future — not MVP)
-- Plugins: added as needed (passkeys, 2FA, etc. — not MVP)
+* Database adapter: Drizzle (via `@amby/db`)
+* Social providers: Google, GitHub (future — not MVP)
+* Plugins: added as needed (passkeys, 2FA, etc. — not MVP)
 
 **Note:** OpenAI Codex OAuth for model access is handled by `@amby/models`, not `@amby/auth`. BetterAuth handles *user
 identity*. Model provider auth is a separate concern.
 
----
+***
 
 ### @amby/models
 
@@ -230,12 +231,12 @@ Default model: `openai-codex/gpt-5.4`. Users authenticate once; tokens refresh a
 
 Interfaces defined now, implementations later:
 
-- **TTS default:** Cartesia Sonic 3 (~$0.005/1000 chars, ~90ms first byte)
-- **STT default:** OpenAI Whisper API ($0.006/min, lowest flat rate)
-- Both are swappable via provider interface
-- LiveKit for real-time voice transport when voice is added
+* **TTS default:** Cartesia Sonic 3 (~$0.005/1000 chars, ~90ms first byte)
+* **STT default:** OpenAI Whisper API ($0.006/min, lowest flat rate)
+* Both are swappable via provider interface
+* LiveKit for real-time voice transport when voice is added
 
----
+***
 
 ### @amby/memory
 
@@ -256,7 +257,7 @@ Stores, retrieves, deduplicates, and injects memories into LLM calls.
 Depends on `@amby/db` for the repository implementation. The `MemoryRepository` interface allows swapping the storage
 backend without touching memory logic.
 
----
+***
 
 ### @amby/computer
 
@@ -300,14 +301,14 @@ automatically. The agent never has to worry about sandbox state — the `Sandbox
 
 A Dockerfile defines the base sandbox image:
 
-- Debian slim base
-- Node.js, Python, common CLI tools pre-installed
-- Non-root user with appropriate permissions
-- Pre-configured for the agent's typical workloads
+* Debian slim base
+* Node.js, Python, common CLI tools pre-installed
+* Non-root user with appropriate permissions
+* Pre-configured for the agent's typical workloads
 
 The snapshot is built once and cached by Daytona. New sandboxes launch from this snapshot in seconds.
 
----
+***
 
 ### @amby/channels
 
@@ -332,9 +333,9 @@ Channel {
 
 **MVP — CLI Channel:**
 
-- Uses `readline` for input, `console` for output
-- Single conversation per session
-- Blocking input loop with async message handling
+* Uses `readline` for input, `console` for output
+* Single conversation per session
+* Blocking input loop with async message handling
 
 **Future channels** (not MVP): SMS/iMessage (Twilio, Apple Business Chat), Web (WebSocket), Mobile (push + WebSocket),
 Slack/Discord (bot APIs).
@@ -356,7 +357,7 @@ User
 **Proactive messages** are just the start of a regular conversation. Once the agent sends a proactive message and the
 user replies, the exchange continues reactively in that same conversation thread.
 
----
+***
 
 ### @amby/agent
 
@@ -396,7 +397,7 @@ Tools are defined using the Vercel AI SDK `tool()` helper with Zod input schemas
 The agent is **stateless between requests** — all state lives in the database and memory system. The agent process can
 restart without losing context.
 
----
+***
 
 ## Core Concepts
 
@@ -411,13 +412,13 @@ through a channel. The user can reply, and the conversation continues reactively
 
 Examples of proactive behavior:
 
-- "You have a meeting with Sarah in 30 minutes. Here's a prep summary."
-- "The flight you asked me to track dropped to $280."
-- "You haven't responded to Mike's email from yesterday. Want me to draft a reply?"
+* "You have a meeting with Sarah in 30 minutes. Here's a prep summary."
+* "The flight you asked me to track dropped to $280."
+* "You haven't responded to Mike's email from yesterday. Want me to draft a reply?"
 
 Both modes use the same agent core, memory, and tools. The only difference is the trigger.
 
----
+***
 
 ### Reactive Message Flow
 
@@ -473,7 +474,7 @@ sequenceDiagram
     A->>DB: mark job complete
 ```
 
----
+***
 
 ### Jobs & Scheduling
 
@@ -508,7 +509,7 @@ jobs {
 
 #### Execution Flow
 
-1. **pg_cron** runs a SQL function every minute that marks due jobs as `pending`
+1. **pg\_cron** runs a SQL function every minute that marks due jobs as `pending`
 2. **Job runner** (in the agent process) polls for `pending` jobs
 3. For each pending job: mark as `running` → wake sandbox if needed → execute through the agent with full memory
    context → agent decides what action to take and what to communicate → mark as `completed` (or `failed`) → update
@@ -517,23 +518,23 @@ jobs {
 For the CLI MVP, the job runner is a simple `setInterval` that queries for pending jobs. In production, this becomes a
 worker process, but the interface stays the same.
 
----
+***
 
 ### Conversation & Message Persistence
 
-Every message — incoming and outgoing — is stored in the database. This provides:
+Every message — incoming and outgoing — is stored in the database with full execution traces. This provides:
 
-- Full conversation history for context windows
-- Audit trail for all agent actions
-- Continuity across sessions and channels
+* Full conversation history for context windows
+* Complete tool execution audit trail (every tool call input and output)
+* Thread-scoped context with intelligent replay
+* Continuity across sessions and channels
 
-**Conversation schema:**
+**Schema:**
 
 ```
 conversations {
   id:          uuid
   userId:      string
-  channelId:   string
   channelType: 'cli' | 'sms' | 'imessage' | 'web' | 'mobile'
   title:       string (nullable, auto-generated)
   metadata:    jsonb
@@ -541,19 +542,49 @@ conversations {
   updatedAt:   timestamp
 }
 
+conversation_threads {
+  id:              uuid
+  conversationId:  string
+  label:           string (nullable, topic name)
+  synopsis:        text (nullable, auto-generated summary)
+  keywords:        text[] (nullable, 3-5 topic keywords for semantic matching)
+  status:          'open' | 'archived'
+  lastActiveAt:    timestamp
+  createdAt:       timestamp
+}
+
 messages {
   id:             uuid
   conversationId: string
+  threadId:       string (nullable, FK to conversation_threads)
   role:           'user' | 'assistant' | 'system' | 'tool'
   content:        text
-  toolCalls:      jsonb (nullable)
-  toolResults:    jsonb (nullable)
+  toolCalls:      jsonb (nullable) — Array<{ toolCallId, toolName, input }> (truncated summaries)
+  toolResults:    jsonb (nullable) — Array<{ toolCallId, toolName, output }> (truncated summaries)
   metadata:       jsonb
   createdAt:      timestamp
 }
+
+traces {
+  id:            uuid
+  messageId:     uuid FK → messages.id (cascade)
+  agentName:     text ("orchestrator" | subagent name)
+  parentTraceId: uuid FK → traces.id (cascade, self-referential)
+  toolCalls:     jsonb (full, untruncated)
+  toolResults:   jsonb (full, untruncated)
+  durationMs:    integer (nullable)
+  metadata:      jsonb (nullable)
+  createdAt:     timestamp
+}
 ```
 
----
+**Thread routing:** Each inbound message is routed to a thread via heuristic (time gap < 2 min → continue, label word-boundary match → switch, 2+ keyword hits → switch) or model-based classification (continue / switch / new). Stale threads (>24h inactive) are auto-archived with a generated synopsis and keywords.
+
+**Trace persistence:** Two-level trace storage. The `messages` table stores truncated summaries for fast context replay. The `traces` table stores full, untruncated execution traces with hierarchical structure (orchestrator → subagent via `parentTraceId`), timing data, and complete tool I/O.
+
+**Context replay:** When loading history, the last 4 assistant messages get lightweight `[Tools used: ...]` annotations appended. Older messages load as plain text. This balances execution context against token budget.
+
+***
 
 ## Infrastructure
 
@@ -561,9 +592,9 @@ messages {
 
 Supabase provides the Postgres database with key extensions:
 
-- **pgvector** — vector similarity search for memory retrieval
-- **pg_cron** — scheduled job triggers (marks due jobs as pending)
-- **pg_net** — HTTP calls from SQL (for production webhook triggers, not used in CLI MVP)
+* **pgvector** — vector similarity search for memory retrieval
+* **pg\_cron** — scheduled job triggers (marks due jobs as pending)
+* **pg\_net** — HTTP calls from SQL (for production webhook triggers, not used in CLI MVP)
 
 **Local development:** `supabase init` + `supabase start` spins up a full local stack in Docker (Postgres, GoTrue,
 Storage, Realtime — we primarily use Postgres).
@@ -576,13 +607,13 @@ Drizzle ORM owns all schemas and migrations. Supabase provides the infrastructur
 
 Daytona provides sandboxed compute environments via the `@daytonaio/sdk`:
 
-- **Sandboxes** are isolated Linux environments with process, network, and filesystem isolation
-- **Snapshots** are pre-built Docker images for fast sandbox creation
-- **Lifecycle management** via SDK: `create()`, `start()`, `stop()`, `delete()`
-- **File system** access: `uploadFile()`, `downloadFile()`, `listFiles()`
-- **Process execution**: `executeCommand()`, `codeRun()`, PTY sessions
-- **Regions:** US or EU
-- **Default resources:** 1 vCPU, 1 GB RAM, 3 GB disk (scalable up to 4 vCPU, 8 GB RAM, 10 GB disk)
+* **Sandboxes** are isolated Linux environments with process, network, and filesystem isolation
+* **Snapshots** are pre-built Docker images for fast sandbox creation
+* **Lifecycle management** via SDK: `create()`, `start()`, `stop()`, `delete()`
+* **File system** access: `uploadFile()`, `downloadFile()`, `listFiles()`
+* **Process execution**: `executeCommand()`, `codeRun()`, PTY sessions
+* **Regions:** US or EU
+* **Default resources:** 1 vCPU, 1 GB RAM, 3 GB disk (scalable up to 4 vCPU, 8 GB RAM, 10 GB disk)
 
 Used in both local development and production. No local Docker fallback — always Daytona.
 
@@ -590,9 +621,9 @@ Used in both local development and production. No local Docker fallback — alwa
 
 Primary model provider via Codex OAuth:
 
-- **Auth:** PKCE OAuth flow (same as OpenClaw). Tokens stored locally for CLI, in DB for production.
-- **Default model:** `openai-codex/gpt-5.4`
-- **Fallback:** Standard API key auth (`openai/` prefix)
+* **Auth:** PKCE OAuth flow (same as OpenClaw). Tokens stored locally for CLI, in DB for production.
+* **Default model:** `openai-codex/gpt-5.4`
+* **Fallback:** Standard API key auth (`openai/` prefix)
 
 ### Cloudflare Workers (Production API)
 
@@ -637,13 +668,13 @@ Telegram POST /webhook
 
 **Key files:**
 
-- `apps/api/src/worker.ts` — Entrypoint. Slim webhook (verify + enqueue), queue consumer, re-exports DO and Workflow classes.
-- `apps/api/src/queue/consumer.ts` — Routes messages: commands handled inline, text messages sent to DO.
-- `apps/api/src/durable-objects/conversation-session.ts` — One instance per Telegram chat. Buffers rapid messages, debounces with a 3s alarm, launches workflows, forwards interrupts.
-- `apps/api/src/workflows/agent-execution.ts` — Durable agent execution. Each step is retryable and persisted. Handles user resolution, agent LLM loop, Telegram response splitting, and DO notification.
-- `apps/api/src/queue/runtime.ts` — Shared Effect runtime factory for queue consumer and workflows.
-- `apps/api/src/telegram/utils.ts` — Extracted utilities: `verifySecret`, `findOrCreateUser`, `handleCommand`, `splitTelegramMessage`.
-- `apps/api/src/telegram/index.ts` — `TelegramBot` Effect service tag and layers (`TelegramBotLive`, `TelegramBotLite`).
+* `apps/api/src/worker.ts` — Entrypoint. Slim webhook (verify + enqueue), queue consumer, re-exports DO and Workflow classes.
+* `apps/api/src/queue/consumer.ts` — Routes messages: commands handled inline, text messages sent to DO.
+* `apps/api/src/durable-objects/conversation-session.ts` — One instance per Telegram chat. Buffers rapid messages, debounces with a 3s alarm, launches workflows, forwards interrupts.
+* `apps/api/src/workflows/agent-execution.ts` — Durable agent execution. Each step is retryable and persisted. Handles user resolution, agent LLM loop, Telegram response splitting, and DO notification.
+* `apps/api/src/queue/runtime.ts` — Shared Effect runtime factory for queue consumer and workflows.
+* `apps/api/src/telegram/utils.ts` — Extracted utilities: `verifySecret`, `findOrCreateUser`, `handleCommand`, `splitTelegramMessage`.
+* `apps/api/src/telegram/index.ts` — `TelegramBot` Effect service tag and layers (`TelegramBotLive`, `TelegramBotLite`).
 
 **Error handling:** Queue retries 3x then dead-letters. Workflow steps retry with exponential backoff. On final failure, the workflow sends an error message to the user and resets the DO to idle.
 
@@ -651,7 +682,7 @@ Telegram POST /webhook
 
 **User interrupts (Phase 4):** If a message arrives while the agent is processing, the DO forwards it to the running workflow via `sendEvent`. The workflow checks for these between LLM rounds via `waitForEvent`.
 
----
+***
 
 ## Project Structure
 
@@ -695,8 +726,7 @@ amby/
 │   │       │   ├── users.ts
 │   │       │   ├── sessions.ts
 │   │       │   ├── accounts.ts
-│   │       │   ├── conversations.ts
-│   │       │   ├── messages.ts
+│   │       │   ├── conversations.ts  ← conversations, threads, messages, traces
 │   │       │   ├── channels.ts
 │   │       │   ├── documents.ts
 │   │       │   ├── chunks.ts
@@ -761,7 +791,8 @@ amby/
 │       ├── package.json
 │       ├── tsconfig.json
 │       └── src/
-│           ├── agent.ts            ← Orchestrator wiring (prepareContext, handleMessage)
+│           ├── agent.ts            ← Orchestrator wiring, trace persistence, context replay
+│           ├── router.ts           ← Thread routing, synopsis generation, archival
 │           ├── subagents/
 │           │   ├── definitions.ts  ← Subagent types and 5 definitions
 │           │   ├── tool-groups.ts  ← Tool grouping and resolution
@@ -783,7 +814,9 @@ amby/
 ├── supabase/
 │   └── config.toml                 ← Supabase local config
 ├── docs/
+│   ├── AGENT.md
 │   ├── ARCHITECTURE.md
+│   ├── COMPUTER.md
 │   ├── MARKET.md
 │   ├── MEMORY.md
 │   └── MISSION.md
@@ -793,7 +826,7 @@ amby/
 └── .env.example
 ```
 
----
+***
 
 ## CLI MVP: How It All Comes Together
 
@@ -836,35 +869,35 @@ You have 3 meetings tomorrow:
 Want me to prepare anything for these?
 ```
 
----
+***
 
 ## MVP Scope
 
 ### In Scope
 
-- CLI channel — interactive REPL for testing
-- Agent core — system prompt, tool loop, message handling
-- Memory — Phase 1 from MEMORY.md (store, retrieve, inject, dedupe)
-- Models — OpenAI Codex OAuth + Vercel AI SDK provider registry
-- Computer — Daytona sandbox create/start/stop/execute
-- DB — full schema, Drizzle migrations, Supabase local
-- Env — all env vars typed and validated
-- Auth — BetterAuth config defined (not serving HTTP yet)
-- Jobs — basic scheduling with in-process polling
-- Conversation persistence — all messages stored
+* CLI channel — interactive REPL for testing
+* Agent core — system prompt, tool loop, message handling
+* Memory — Phase 1 from MEMORY.md (store, retrieve, inject, dedupe)
+* Models — OpenAI Codex OAuth + Vercel AI SDK provider registry
+* Computer — Daytona sandbox create/start/stop/execute
+* DB — full schema, Drizzle migrations, Supabase local
+* Env — all env vars typed and validated
+* Auth — BetterAuth config defined (not serving HTTP yet)
+* Jobs — basic scheduling with in-process polling
+* Conversation persistence — all messages stored
 
 ### Out of Scope (Future)
 
-- Web, mobile, SMS, iMessage channels
-- Voice (TTS/STT via Cartesia + Whisper, LiveKit transport)
-- Tests
-- Production deployment
-- User dashboard / admin UI
-- Advanced memory (versioning, forgetting, compression — phases 2-3 of MEMORY.md)
-- Multi-user / multi-tenant
-- Rate limiting, billing, usage tracking
+* Web, mobile, SMS, iMessage channels
+* Voice (TTS/STT via Cartesia + Whisper, LiveKit transport)
+* Tests
+* Production deployment
+* User dashboard / admin UI
+* Advanced memory (versioning, forgetting, compression — phases 2-3 of MEMORY.md)
+* Multi-user / multi-tenant
+* Rate limiting, billing, usage tracking
 
----
+***
 
 ## Future Roadmap
 
@@ -874,7 +907,7 @@ Want me to prepare anything for these?
 **Web & mobile channels.** WebSocket-based real-time connection. Push notifications for proactive messages. Shared
 conversation history and memory across all devices. The channel abstraction makes adding these straightforward.
 
-**Production infra.** Supabase hosted. Proper worker processes for job execution. pg_cron + pg_net for webhook-based job
+**Production infra.** Supabase hosted. Proper worker processes for job execution. pg\_cron + pg\_net for webhook-based job
 triggers. BetterAuth serving HTTP for user sign-up/login. Deployment to a long-running cloud compute environment.
 
 **Trust features.** Clear audit trails for all agent actions. Permission-based action approval (the agent asks before

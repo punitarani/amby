@@ -39,6 +39,7 @@ export function createSubagentTools(
 			}),
 			execute: async ({ task, context }, { abortSignal }) => {
 				try {
+					const startTime = Date.now()
 					const metadata: AgentTraceMetadata = {
 						...requestTraceMetadata,
 						user_id: config.userId,
@@ -67,7 +68,32 @@ export function createSubagentTools(
 					const result = await subagent.generate({ prompt: userMessage, abortSignal })
 					const userMessages = extractToolUserMessages(result.toolResults)
 
-					return userMessages ? { summary: result.text, userMessages } : { summary: result.text }
+					const toolsUsed = (result.steps ?? []).flatMap((step) =>
+						step.toolCalls.map((tc) => tc.toolName),
+					)
+
+					const base: Record<string, unknown> = { summary: result.text }
+					if (toolsUsed.length > 0) base.toolsUsed = toolsUsed
+
+					// Attach full trace data for persistence by the orchestrator
+					base._trace = {
+						agentName: def.name,
+						steps: (result.steps ?? []).map((step) => ({
+							toolCalls: step.toolCalls.map((tc) => ({
+								toolCallId: tc.toolCallId,
+								toolName: tc.toolName,
+								input: tc.input,
+							})),
+							toolResults: step.toolResults.map((tr) => ({
+								toolCallId: tr.toolCallId,
+								toolName: tr.toolName,
+								output: tr.output,
+							})),
+						})),
+						durationMs: Date.now() - startTime,
+					}
+
+					return userMessages ? { ...base, userMessages } : base
 				} catch (error) {
 					return {
 						error: true,
