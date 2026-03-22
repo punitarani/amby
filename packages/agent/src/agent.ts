@@ -326,8 +326,11 @@ export const makeAgentServiceLive = (userId: string) =>
 						const inboundText = requestMessages.map((m) => m.content).join("\n\n")
 						const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
 
-						Effect.runFork(
-							synopsisPreviousThreadIfDormantSwitch(query, baseModel, conversationId, threadCtx),
+						yield* synopsisPreviousThreadIfDormantSwitch(
+							query,
+							baseModel,
+							conversationId,
+							threadCtx,
 						)
 
 						const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
@@ -449,14 +452,12 @@ export const makeAgentServiceLive = (userId: string) =>
 							})
 						}
 
-						Effect.runFork(
-							synopsisCurrentThreadIfOverflowsAfterSave(
-								query,
-								baseModel,
-								conversationId,
-								threadCtx,
-								requestMessages.length + 1,
-							),
+						yield* synopsisCurrentThreadIfOverflowsAfterSave(
+							query,
+							baseModel,
+							conversationId,
+							threadCtx,
+							requestMessages.length + 1,
 						)
 
 						return finalText
