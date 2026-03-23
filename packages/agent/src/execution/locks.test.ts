@@ -60,4 +60,31 @@ describe("execution locks", () => {
 		expect(ids).toContain("computer-a")
 		expect(ids).not.toContain("builder-b")
 	})
+
+	it("does not batch tasks whose dependencies failed", () => {
+		const pending = [
+			makeTask({
+				id: "builder-a",
+				specialist: "builder",
+				dependencies: ["research-a"],
+				resourceLocks: ["fs-write:/repo/app"],
+			}),
+		]
+		const completed = new Map([
+			[
+				"research-a",
+				{
+					taskId: "research-a",
+					rootTaskId: "research-a",
+					depth: 1,
+					specialist: "research" as const,
+					status: "failed" as const,
+					summary: "Research could not complete.",
+					traceRef: { traceId: "trace-research" },
+				},
+			],
+		])
+
+		expect(buildReadyBatch(pending, completed, [], 1)).toEqual([])
+	})
 })

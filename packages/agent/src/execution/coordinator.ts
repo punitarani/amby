@@ -23,6 +23,46 @@ type QueryFn = <T>(
 	fn: (db: import("@amby/db").Database) => Promise<T>,
 ) => Effect.Effect<T, import("@amby/db").DbError>
 
+function findBlockingDependency(
+	task: ExecutionTask,
+	completed: Map<string, ExecutionTaskResult>,
+): ExecutionTaskResult | undefined {
+	return task.dependencies
+		.map((dependencyId) => completed.get(dependencyId))
+		.find(
+			(result): result is ExecutionTaskResult =>
+				result !== undefined && (result.status === "failed" || result.status === "escalate"),
+		)
+}
+
+function buildBlockedDependencyResult(
+	task: ExecutionTask,
+	blockingDependency: ExecutionTaskResult,
+	rootTraceId: string,
+): ExecutionTaskResult {
+	const message = `Blocked by dependency ${blockingDependency.taskId}: ${blockingDependency.summary}`
+	return {
+		taskId: task.id,
+		rootTaskId: task.rootTaskId,
+		parentTaskId: task.parentTaskId,
+		depth: task.depth,
+		specialist: task.specialist,
+		status: "failed",
+		summary: message,
+		issues: [
+			{
+				code: "blocked_dependency",
+				message,
+				metadata: {
+					dependencyTaskId: blockingDependency.taskId,
+					dependencyStatus: blockingDependency.status,
+				},
+			},
+		],
+		traceRef: { traceId: rootTraceId },
+	}
+}
+
 function materializePlan(plan: ExecutionPlan): ExecutionTask[] {
 	const ids = plan.tasks.map(() => crypto.randomUUID())
 	return plan.tasks.map((task, index) => {
@@ -285,6 +325,24 @@ export async function executeRequestPlan(params: {
 	const completed = new Map<string, ExecutionTaskResult>()
 
 	while (pending.length > 0) {
+		let blockedDependencyFound = false
+		for (const task of [...pending]) {
+			const blockingDependency = findBlockingDependency(task, completed)
+			if (!blockingDependency) continue
+
+			completed.set(
+				task.id,
+				buildBlockedDependencyResult(task, blockingDependency, params.rootTrace.traceId),
+			)
+			const index = pending.findIndex((candidate) => candidate.id === task.id)
+			if (index >= 0) pending.splice(index, 1)
+			blockedDependencyFound = true
+		}
+
+		if (blockedDependencyFound) {
+			continue
+		}
+
 		const batch = buildReadyBatch(
 			pending,
 			completed,

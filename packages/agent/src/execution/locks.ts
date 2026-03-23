@@ -68,6 +68,10 @@ function taskConflicts(task: ExecutionTask, activeLocks: string[]): boolean {
 	)
 }
 
+function dependencyAllowsExecution(result: ExecutionTaskResult | undefined): boolean {
+	return result !== undefined && result.status !== "failed" && result.status !== "escalate"
+}
+
 export function buildReadyBatch(
 	pending: ExecutionTask[],
 	completed: Map<string, ExecutionTaskResult>,
@@ -77,8 +81,9 @@ export function buildReadyBatch(
 	const activeLocks = inFlight.flatMap((task) => task.resourceLocks)
 	const ready = pending.filter(
 		(task) =>
-			task.dependencies.every((dependencyId) => completed.has(dependencyId)) &&
-			!taskConflicts(task, activeLocks),
+			task.dependencies.every((dependencyId) =>
+				dependencyAllowsExecution(completed.get(dependencyId)),
+			) && !taskConflicts(task, activeLocks),
 	)
 
 	const batch: ExecutionTask[] = []
