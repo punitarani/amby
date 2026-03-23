@@ -5,7 +5,7 @@ DOCKER_REPO="punitarani/amby"
 IMAGE_TAG="computer"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION_FILE="${SCRIPT_DIR}/version.json"
-VERSION="${1:-$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "${VERSION_FILE}")}"
+VERSION="${1:-$(jq -r .version "${VERSION_FILE}")}"
 REGISTRY_TOKEN=""
 MANIFEST_ACCEPT_HEADER="application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json"
 
@@ -29,7 +29,7 @@ get_registry_token() {
 
 	REGISTRY_TOKEN="$(
 		curl -fsSL "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${DOCKER_REPO}:pull" |
-			python3 -c 'import json, sys; print(json.load(sys.stdin)["token"])'
+			jq -r .token
 	)"
 
 	if [[ -z "${REGISTRY_TOKEN}" ]]; then
