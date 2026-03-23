@@ -10,6 +10,13 @@ function isNotFoundError(cause: unknown): boolean {
 	return /not found/i.test(message)
 }
 
+function isAlreadyExistsError(cause: unknown): boolean {
+	if (cause instanceof DaytonaError && cause.statusCode === 409) return true
+
+	const message = cause instanceof Error ? cause.message : String(cause)
+	return /already exists|conflict/i.test(message)
+}
+
 const apiKey = process.env.DAYTONA_API_KEY?.trim()
 
 if (!apiKey) {
@@ -37,12 +44,17 @@ if (snapshotExists) {
 }
 
 console.log(`Creating Daytona snapshot '${COMPUTER_SNAPSHOT}' from '${COMPUTER_DOCKER_IMAGE}'...`)
-await daytona.snapshot.create(
-	{
-		name: COMPUTER_SNAPSHOT,
-		image: COMPUTER_DOCKER_IMAGE,
-		resources: SANDBOX_RESOURCES,
-	},
-	{ onLogs: (log: string) => process.stdout.write(log) },
-)
-console.log(`Done: snapshot '${COMPUTER_SNAPSHOT}' registered.`)
+try {
+	await daytona.snapshot.create(
+		{
+			name: COMPUTER_SNAPSHOT,
+			image: COMPUTER_DOCKER_IMAGE,
+			resources: SANDBOX_RESOURCES,
+		},
+		{ onLogs: (log: string) => process.stdout.write(log) },
+	)
+	console.log(`Done: snapshot '${COMPUTER_SNAPSHOT}' registered.`)
+} catch (cause) {
+	if (!isAlreadyExistsError(cause)) throw cause
+	console.log(`Snapshot '${COMPUTER_SNAPSHOT}' was created concurrently — skipping.`)
+}
