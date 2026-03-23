@@ -13,7 +13,7 @@ import {
 
 export type SandboxDbStatus = "creating" | "running" | "stopped" | "archived" | "error"
 
-/** Spec passed to `daytona.create` — shared by SandboxService and provision workflow */
+/** Snapshot-based spec passed to `daytona.create` — shared by SandboxService and provision workflow */
 export function buildSandboxCreateParams(userId: string, isDev: boolean) {
 	return {
 		name: sandboxName(userId, isDev),
