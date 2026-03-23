@@ -27,7 +27,7 @@ jobs:
             docker:
               - 'docker/computer/**'
             version:
-              - 'docker/computer/VERSION.json'
+              - 'docker/computer/version.json'
 
   build:
     name: Build (dry run)

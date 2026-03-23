@@ -4,7 +4,7 @@ set -euo pipefail
 DOCKER_REPO="punitarani/amby"
 IMAGE_TAG="computer"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION_FILE="${SCRIPT_DIR}/VERSION.json"
+VERSION_FILE="${SCRIPT_DIR}/version.json"
 VERSION="${1:-$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "${VERSION_FILE}")}"
 REGISTRY_TOKEN=""
 MANIFEST_ACCEPT_HEADER="application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json"
