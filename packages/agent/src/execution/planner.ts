@@ -146,6 +146,7 @@ function browserParallelPlan(request: string, urls: string[]): ExecutionPlan {
 
 function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 	const normalized = request.trim()
+	const normalizedLower = normalized.toLowerCase()
 	const urls = extractUrls(normalized)
 	const pathHints = extractPathHints(normalized)
 	const wantsBackground = contains(normalized, BACKGROUND_RE)
@@ -189,7 +190,7 @@ function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 	}
 
 	if (wantsSettings) {
-		const settingsTask: { kind: "settings"; task: SettingsTaskInput } = normalized.includes(
+		const settingsTask: { kind: "settings"; task: SettingsTaskInput } = normalizedLower.includes(
 			"timezone",
 		)
 			? {
@@ -199,7 +200,7 @@ function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 						timezone: normalized,
 					},
 				}
-			: normalized.includes("remind") || normalized.includes("schedule")
+			: normalizedLower.includes("remind") || normalizedLower.includes("schedule")
 				? {
 						kind: "settings" as const,
 						task: {
@@ -212,11 +213,11 @@ function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 						kind: "settings" as const,
 						task: {
 							kind: "codex_auth" as const,
-							action: (normalized.includes("status")
+							action: (normalizedLower.includes("status")
 								? "status"
-								: normalized.includes("api key")
+								: normalizedLower.includes("api key")
 									? "set_api_key"
-									: normalized.includes("clear")
+									: normalizedLower.includes("clear")
 										? "clear"
 										: "start_chatgpt") as CodexAuthAction,
 						},
