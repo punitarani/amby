@@ -7,8 +7,6 @@ import { AGENT_WORKDIR, COMMAND_EXEC_TIMEOUT } from "../config"
 import { SandboxError } from "../errors"
 import { ensureMainSandbox } from "./resolve-volume"
 
-export { sandboxImage } from "./sandbox-image"
-
 export const createDaytonaClient = (opts: { apiKey: string; apiUrl?: string; target?: string }) =>
 	new Daytona(opts)
 

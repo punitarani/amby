@@ -9,7 +9,8 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"build": "bun build ./src/index.ts --outdir dist --target bun"
+		"build": "bun build ./src/index.ts --outdir dist --target bun",
+		"create-snapshot": "bun run src/scripts/create-snapshot.ts"
 	},
 	"dependencies": {
 		"@amby/db": "workspace:*",
