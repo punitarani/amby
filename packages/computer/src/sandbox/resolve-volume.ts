@@ -1,5 +1,5 @@
 import type { Database } from "@amby/db"
-import { and, eq, schema } from "@amby/db"
+import { and, eq, ne, schema } from "@amby/db"
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
 import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
 import { Effect } from "effect"
@@ -98,7 +98,25 @@ export async function ensureVolume(
 	}
 }
 
-// ── Sandbox upsert (partial-unique-index aware) ─────────────────────────
+// ── Sandbox write helpers ────────────────────────────────────────────────
+
+/**
+ * Soft-delete the active main sandbox row for a user.
+ * Rows are never hard-deleted — status transitions to "deleted" instead.
+ * Only affects rows that are not already marked deleted.
+ */
+async function softDeleteMainSandboxRow(db: Database, userId: string) {
+	await db
+		.update(schema.sandboxes)
+		.set({ status: "deleted", updatedAt: new Date() })
+		.where(
+			and(
+				eq(schema.sandboxes.userId, userId),
+				eq(schema.sandboxes.role, "main"),
+				ne(schema.sandboxes.status, "deleted"),
+			),
+		)
+}
 
 /** Upsert the main sandbox row atomically. Works with the partial unique index on (userId, role='main'). */
 export async function upsertMainSandboxRow(
@@ -112,7 +130,13 @@ export async function upsertMainSandboxRow(
 		const existing = await tx
 			.select({ id: schema.sandboxes.id })
 			.from(schema.sandboxes)
-			.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
+			.where(
+				and(
+					eq(schema.sandboxes.userId, userId),
+					eq(schema.sandboxes.role, "main"),
+					ne(schema.sandboxes.status, "deleted"),
+				),
+			)
 			.limit(1)
 			.then((rows) => rows[0])
 
@@ -238,7 +262,13 @@ export const ensureMainSandbox = (
 				db
 					.select({ status: schema.sandboxes.status })
 					.from(schema.sandboxes)
-					.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
+					.where(
+						and(
+							eq(schema.sandboxes.userId, userId),
+							eq(schema.sandboxes.role, "main"),
+							ne(schema.sandboxes.status, "deleted"),
+						),
+					)
 					.limit(1)
 					.then((rows) => rows[0]),
 			catch: (cause) =>
@@ -257,16 +287,13 @@ export const ensureMainSandbox = (
 			)
 		}
 
-		// Clear stale main sandbox DB row if present
+		// Soft-delete stale main sandbox DB row if present
 		if (record) {
 			yield* Effect.tryPromise({
-				try: () =>
-					db
-						.delete(schema.sandboxes)
-						.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main"))),
+				try: () => softDeleteMainSandboxRow(db, userId),
 				catch: (cause) =>
 					new SandboxError({
-						message: `Failed to clear stale sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
+						message: `Failed to retire stale sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
 						cause,
 					}),
 			})
@@ -353,15 +380,12 @@ export const replaceSandbox = (
 			}),
 		)
 
-		// Delete main sandbox DB row (preserve secondary sandboxes)
+		// Soft-delete the failed main sandbox row before creating a replacement
 		yield* Effect.tryPromise({
-			try: () =>
-				db
-					.delete(schema.sandboxes)
-					.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main"))),
+			try: () => softDeleteMainSandboxRow(db, userId),
 			catch: (cause) =>
 				new SandboxError({
-					message: `Failed to clear sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
+					message: `Failed to retire failed sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
 					cause,
 				}),
 		})

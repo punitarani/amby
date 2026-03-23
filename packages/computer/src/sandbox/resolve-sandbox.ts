@@ -11,7 +11,7 @@ import {
 } from "../config"
 import { sandboxImage as defaultSandboxImage } from "./sandbox-image"
 
-export type SandboxDbStatus = "creating" | "running" | "stopped" | "archived" | "error"
+export type SandboxDbStatus = "creating" | "running" | "stopped" | "archived" | "error" | "deleted"
 
 /** Spec passed to `daytona.create` — shared by SandboxService and provision workflow */
 export function buildSandboxCreateParams(
