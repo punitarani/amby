@@ -20,6 +20,7 @@
 		"@cloudflare/workers-types": "^4.20241218.0"
 	},
 	"dependencies": {
+		"@cloudflare/playwright": "^1.1.2",
 		"@amby/agent": "workspace:*",
 		"@amby/auth": "workspace:*",
 		"@amby/browser": "workspace:*",

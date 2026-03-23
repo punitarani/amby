@@ -31,6 +31,7 @@
         "@amby/models": "workspace:*",
         "@chat-adapter/state-memory": "^4.20.2",
         "@chat-adapter/telegram": "^4.20.2",
+        "@cloudflare/playwright": "^1.1.2",
         "@sentry/cloudflare": "^10.44.0",
         "chat": "^4.20.2",
         "effect": "^3.19.19",
