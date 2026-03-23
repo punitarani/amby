@@ -1,10 +1,10 @@
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
 import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
+import { COMPUTER_SNAPSHOT } from "../computer-snapshot"
 import {
 	AGENT_USER,
 	AUTO_ARCHIVE_MINUTES,
 	AUTO_STOP_MINUTES,
-	COMPUTER_SNAPSHOT,
 	SANDBOX_RESOURCES,
 	SANDBOX_START_TIMEOUT,
 	sandboxLabels,

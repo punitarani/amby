@@ -68,10 +68,6 @@ export const CODEX_DEVICE_AUTH_URL = "https://auth.openai.com/codex/device"
 
 export const CUA_STALE_MINUTES = 15
 
-// ── Sandbox image ───────────────────────────────────────────────────────
-/** Daytona snapshot name for the computer sandbox. */
-export { COMPUTER_SNAPSHOT } from "./computer-snapshot"
-
 // ── Volume ─────────────────────────────────────────────────────────────
 
 export const volumeName = (userId: string, isDev: boolean) =>
