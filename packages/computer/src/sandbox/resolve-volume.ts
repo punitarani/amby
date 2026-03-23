@@ -218,6 +218,7 @@ export const ensureMainSandbox = (
 				new SandboxError({
 					message:
 						"Your computer environment is being set up — this usually takes a few minutes. Please try again shortly.",
+					transient: true,
 				}),
 			)
 		}
@@ -296,6 +297,7 @@ export const ensureMainSandbox = (
 				new SandboxError({
 					message:
 						"Your sandbox is being set up — this usually takes a few minutes. Please try again shortly.",
+					transient: true,
 				}),
 			)
 		}

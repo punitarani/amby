@@ -18,7 +18,7 @@ export function createComputerTools(sandbox: SandboxOps, userId: string) {
 	})
 
 	const withSandbox = <T>(fn: (instance: Sandbox) => Promise<T>) =>
-		runWithEnsuredSandbox(ensureSandbox, fn, { logPrefix: "Sandbox", channel: "computer" })
+		runWithEnsuredSandbox(ensureSandbox, fn)
 
 	const tools = {
 		execute_command: tool({
