@@ -21,7 +21,7 @@ jobs:
     name: Build, push & register snapshot
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    environment: docker-daytona
+    environment: github-actions
     steps:
       - uses: actions/checkout@v4
       - name: Log in to Docker Hub
