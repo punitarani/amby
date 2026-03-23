@@ -1,10 +1,12 @@
 import { Image } from "@daytonaio/sdk"
 import { AGENT_WORKDIR, DESKTOP_DIR, DOCUMENTS_DIR, DOWNLOADS_DIR } from "../config"
 
-// TODO: Once Daytona plan supports snapshot push, switch to:
-//   snapshot: `amby-computer:${version}` where version = docker/computer/VERSION
-// The Dockerfile at docker/computer/Dockerfile is the source of truth.
-// Build & push with: bun run computer:build && bun run computer:push
+// NOTE: sandboxImage is NOT used at runtime. Sandboxes are created from the
+// pre-built Daytona snapshot (see COMPUTER_SNAPSHOT in config.ts).
+// This object documents the image spec and serves as a fallback if snapshot is unavailable.
+// Source of truth: docker/computer/Dockerfile
+// Build & push: bun run computer:docker:build && bun run computer:docker:push
+// Snapshot registration: bun run computer:snapshot:create
 export const sandboxImage = Image.base("ubuntu:24.04")
 	.runCommands(
 		"apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +

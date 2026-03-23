@@ -4,25 +4,20 @@ import {
 	AGENT_USER,
 	AUTO_ARCHIVE_MINUTES,
 	AUTO_STOP_MINUTES,
+	COMPUTER_SNAPSHOT,
 	SANDBOX_RESOURCES,
 	SANDBOX_START_TIMEOUT,
 	sandboxLabels,
 	sandboxName,
 } from "../config"
-import { sandboxImage as defaultSandboxImage } from "./sandbox-image"
 
 export type SandboxDbStatus = "creating" | "running" | "stopped" | "archived" | "error"
 
 /** Spec passed to `daytona.create` — shared by SandboxService and provision workflow */
-export function buildSandboxCreateParams(
-	userId: string,
-	isDev: boolean,
-	image: typeof defaultSandboxImage = defaultSandboxImage,
-) {
-	const name = sandboxName(userId, isDev)
+export function buildSandboxCreateParams(userId: string, isDev: boolean) {
 	return {
-		name,
-		image,
+		name: sandboxName(userId, isDev),
+		snapshot: COMPUTER_SNAPSHOT,
 		resources: SANDBOX_RESOURCES,
 		autoStopInterval: AUTO_STOP_MINUTES,
 		autoArchiveInterval: AUTO_ARCHIVE_MINUTES,

@@ -60,6 +60,10 @@ export const CODEX_DEVICE_AUTH_URL = "https://auth.openai.com/codex/device"
 
 export const CUA_STALE_MINUTES = 15
 
+// ── Sandbox image ───────────────────────────────────────────────────────
+/** Daytona snapshot name for the computer sandbox. Keep in sync with docker/computer/VERSION. */
+export const COMPUTER_SNAPSHOT = "amby/computer:0.2"
+
 // ── Volume ─────────────────────────────────────────────────────────────
 
 export const VOLUME_MOUNT_PATH = AGENT_HOME
