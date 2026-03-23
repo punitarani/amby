@@ -5,7 +5,6 @@ import {
 	AGENT_USER,
 	AUTO_ARCHIVE_MINUTES,
 	AUTO_STOP_MINUTES,
-	SANDBOX_RESOURCES,
 	SANDBOX_START_TIMEOUT,
 	sandboxLabels,
 	sandboxName,
@@ -25,7 +24,6 @@ export function buildSandboxCreateParams(userId: string, isDev: boolean) {
 	return {
 		name: sandboxName(userId, isDev),
 		snapshot: COMPUTER_SNAPSHOT,
-		resources: SANDBOX_RESOURCES,
 		autoStopInterval: AUTO_STOP_MINUTES,
 		autoArchiveInterval: AUTO_ARCHIVE_MINUTES,
 		labels: sandboxLabels(userId, isDev),
