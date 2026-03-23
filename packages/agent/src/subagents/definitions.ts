@@ -96,14 +96,15 @@ You are an integration specialist. Your job is to handle connected-app work safe
 	{
 		name: "computer",
 		description:
-			"Interact with the desktop GUI — click, type, scroll, take screenshots. Use for visual tasks that require a screen.",
+			"Interact with the desktop GUI — click, type, scroll, take screenshots. Use for tasks that need a real screen, native dialogs, uploads/downloads, CAPTCHA/MFA, or other desktop-only behavior. Do not use for ordinary same-tab website work.",
 		systemPrompt: `${SUBAGENT_BASE}
 You are a desktop interaction specialist. Your job is to operate the computer's GUI.
 - Always call cua_start first to begin a session
 - Take screenshots frequently with cua_screenshot to see the current state
 - Use cua_click, cua_type, cua_key_press, cua_scroll for interaction
 - Call cua_end when your task is complete
-- Only one desktop session can be active at a time`,
+- Only one desktop session can be active at a time
+- If the task can be completed as ordinary same-tab browser work without desktop interaction, tell the orchestrator it should use the browser path instead`,
 		toolKeys: ["cua"],
 		maxSteps: 15,
 	},

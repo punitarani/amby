@@ -377,7 +377,7 @@ receives user messages and delegates work to specialized subagents, each impleme
 | `delegate_research`        | subagent   | Gather info, read files, search memories            |
 | `delegate_builder`         | subagent   | Create/modify files, run code, install packages     |
 | `delegate_planner`         | subagent   | Break down complex tasks (pure reasoning)           |
-| `delegate_computer`        | subagent   | GUI interaction via desktop (when CUA enabled)      |
+| `delegate_task`            | direct     | Route work to browser, computer, or sandbox targets |
 | `delegate_memory_manager`  | subagent   | Save and organize user memories                     |
 | `search_memories`          | direct     | Read-only memory search (for pre-delegation context)|
 | `schedule_job`             | direct     | Schedule a future task or reminder                  |

@@ -19,6 +19,7 @@
 		"@opentelemetry/exporter-trace-otlp-http": "^0.207.0",
 		"@opentelemetry/sdk-trace-base": "^2.6.0",
 		"@ai-sdk/provider": "^3.0.0",
+		"@amby/browser": "workspace:*",
 		"@amby/channels": "workspace:*",
 		"@amby/computer": "workspace:*",
 		"@amby/connectors": "workspace:*",

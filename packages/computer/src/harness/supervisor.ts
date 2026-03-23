@@ -164,7 +164,7 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 		readonly startTask: (params: {
 			userId: string
 			prompt: string
-			needsBrowser: boolean
+			needsBrowser?: boolean
 			conversationId?: string
 		}) => Effect.Effect<{ taskId: string; status: string }, SandboxError>
 		readonly probeTask: (
@@ -870,7 +870,7 @@ export const TaskSupervisorLive = Layer.scoped(
 									taskId,
 									prompt,
 									authMode,
-									needsBrowser,
+									needsBrowser: needsBrowser ?? false,
 									timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
 									conversationId: conversationId,
 									callbackUrl,

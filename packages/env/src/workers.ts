@@ -5,6 +5,8 @@ export interface WorkerBindings {
 	NODE_ENV?: string
 	API_URL?: string
 	APP_URL?: string
+	CLOUDFLARE_AI_GATEWAY_BASE_URL?: string
+	CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN?: string
 	OPENROUTER_API_KEY: string
 	OPENAI_API_KEY?: string
 	CARTESIA_API_KEY?: string
@@ -34,6 +36,11 @@ export interface WorkerBindings {
 	POSTHOG_KEY?: string
 	POSTHOG_HOST?: string
 	CF_VERSION_METADATA?: { id?: string }
+	BROWSER?: unknown
+	/** Workers AI binding — required for Stagehand browser agent (`@amby/browser/workers`). */
+	AI?: unknown
+	/** AI Gateway id for `workers-ai-provider`. */
+	CLOUDFLARE_AI_GATEWAY_ID?: string
 
 	// Cloudflare primitives — typed structurally for portability
 	TELEGRAM_QUEUE?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
@@ -52,6 +59,8 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		NODE_ENV: bindings.NODE_ENV ?? "production",
 		API_URL: bindings.API_URL ?? "https://api.hiamby.com",
 		APP_URL: bindings.APP_URL ?? "https://hiamby.com",
+		CLOUDFLARE_AI_GATEWAY_BASE_URL: bindings.CLOUDFLARE_AI_GATEWAY_BASE_URL ?? "",
+		CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: bindings.CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN ?? "",
 		OPENROUTER_API_KEY: bindings.OPENROUTER_API_KEY,
 		OPENAI_API_KEY: bindings.OPENAI_API_KEY ?? "",
 		CARTESIA_API_KEY: bindings.CARTESIA_API_KEY ?? "",

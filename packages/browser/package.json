@@ -1,0 +1,27 @@
+{
+	"name": "@amby/browser",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/shared.ts",
+		"./local": "./src/local.ts",
+		"./workers": "./src/workers.ts"
+	},
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/shared.ts ./src/local.ts --outdir dist --target bun && cp ./src/workers.ts ./dist/workers.ts"
+	},
+	"dependencies": {
+		"@amby/env": "workspace:*",
+		"@browserbasehq/stagehand": "2.5.x",
+		"@cloudflare/playwright": "^1.0.0",
+		"workers-ai-provider": "3.1.7"
+	},
+	"peerDependencies": {
+		"ai": "^6.0.116",
+		"effect": "^3.19.19",
+		"zod": "^3.24.0"
+	}
+}

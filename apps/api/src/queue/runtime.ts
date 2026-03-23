@@ -1,4 +1,5 @@
 import { AuthServiceLive } from "@amby/auth"
+import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { ConnectorsServiceLive } from "@amby/connectors"
 import { makeDbServiceFromHyperdrive } from "@amby/db"
@@ -22,6 +23,7 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		AuthServiceLive,
 		TelegramSenderLite,
 		ConnectorsServiceLive,
+		makeBrowserServiceFromBindings(bindings),
 	).pipe(
 		Layer.provideMerge(SandboxServiceLive),
 		Layer.provideMerge(makeDbServiceFromHyperdrive(connectionString)),

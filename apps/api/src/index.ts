@@ -1,4 +1,5 @@
 import { AuthServiceLive } from "@amby/auth"
+import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import {
 	buildSafeComposioRedirectUrl,
@@ -23,6 +24,7 @@ const SharedLive = Layer.mergeAll(
 	ModelServiceLive,
 	AuthServiceLive,
 	ConnectorsServiceLive,
+	BrowserServiceDisabledLive,
 ).pipe(
 	Layer.provideMerge(SandboxServiceLive),
 	Layer.provideMerge(DbServiceLive),
