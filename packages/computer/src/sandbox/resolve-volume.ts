@@ -6,7 +6,12 @@ import {
 	SANDBOX_CREATE_TIMEOUT,
 	SANDBOX_START_TIMEOUT,
 	sandboxName,
+	VOLUME_CODEX_HOME,
+	VOLUME_DESKTOP_DIR,
+	VOLUME_DOCUMENTS_DIR,
+	VOLUME_DOWNLOADS_DIR,
 	VOLUME_MOUNT_PATH,
+	VOLUME_TASK_BASE,
 	volumeName,
 } from "../config"
 import { SandboxError, VolumeError } from "../errors"
@@ -20,6 +25,15 @@ import {
 } from "./resolve-sandbox"
 
 type VolumeRow = typeof schema.userVolumes.$inferSelect
+
+const MOUNTED_HOME_DIRS = [
+	VOLUME_MOUNT_PATH,
+	VOLUME_DESKTOP_DIR,
+	VOLUME_DOCUMENTS_DIR,
+	VOLUME_DOWNLOADS_DIR,
+	VOLUME_CODEX_HOME,
+	VOLUME_TASK_BASE,
+]
 
 // ── Volume lifecycle ────────────────────────────────────────────────────
 
@@ -90,6 +104,18 @@ export async function ensureVolume(
 	}
 }
 
+export function sandboxHasExpectedVolume(sandbox: Sandbox, daytonaVolumeId: string): boolean {
+	return (
+		sandbox.volumes?.some(
+			(volume) => volume.volumeId === daytonaVolumeId && volume.mountPath === VOLUME_MOUNT_PATH,
+		) ?? false
+	)
+}
+
+export async function ensureMountedHomeLayout(sandbox: Sandbox): Promise<void> {
+	await sandbox.process.executeCommand(`mkdir -p ${MOUNTED_HOME_DIRS.join(" ")}`)
+}
+
 // ── Sandbox write helpers ────────────────────────────────────────────────
 
 /**
@@ -123,9 +149,17 @@ export async function upsertMainSandboxRow(
 	volumeId: string,
 ) {
 	await db.transaction(async (tx) => {
-		const existing = await tx
-			.select({ id: schema.sandboxes.id })
-			.from(schema.sandboxes)
+		const next = {
+			daytonaSandboxId,
+			status,
+			volumeId,
+			lastActivityAt: new Date(),
+			updatedAt: new Date(),
+		}
+
+		const updated = await tx
+			.update(schema.sandboxes)
+			.set(next)
 			.where(
 				and(
 					eq(schema.sandboxes.userId, userId),
@@ -133,21 +167,11 @@ export async function upsertMainSandboxRow(
 					ne(schema.sandboxes.status, "deleted"),
 				),
 			)
-			.limit(1)
-			.then((rows) => rows[0])
+			.returning({ id: schema.sandboxes.id })
 
-		if (existing) {
-			await tx
-				.update(schema.sandboxes)
-				.set({
-					daytonaSandboxId,
-					status,
-					volumeId,
-					lastActivityAt: new Date(),
-					updatedAt: new Date(),
-				})
-				.where(eq(schema.sandboxes.id, existing.id))
-		} else {
+		if (updated.length > 0) return
+
+		try {
 			await tx.insert(schema.sandboxes).values({
 				userId,
 				daytonaSandboxId,
@@ -155,6 +179,21 @@ export async function upsertMainSandboxRow(
 				role: "main",
 				volumeId,
 			})
+		} catch (cause) {
+			const recovered = await tx
+				.update(schema.sandboxes)
+				.set(next)
+				.where(
+					and(
+						eq(schema.sandboxes.userId, userId),
+						eq(schema.sandboxes.role, "main"),
+						ne(schema.sandboxes.status, "deleted"),
+					),
+				)
+				.returning({ id: schema.sandboxes.id })
+
+			if (recovered.length > 0) return
+			throw cause
 		}
 	})
 }
@@ -182,13 +221,7 @@ export interface EnsureMainSandboxParams {
 	cache: Map<string, Sandbox>
 }
 
-/**
- * Single ensure path: volume (DB read-only) → cache → get-by-name → create.
- *
- * Volumes are managed exclusively by SandboxProvisionWorkflow (triggered on /start).
- * This function only reads the volume row from the DB — it never calls the Daytona
- * volume API. If no ready volume exists, it fails with a user-friendly message.
- */
+/** Single ensure path: volume → cache → get-by-name → create. */
 export const ensureMainSandbox = (
 	params: EnsureMainSandboxParams,
 ): Effect.Effect<Sandbox, SandboxError> =>
@@ -196,31 +229,43 @@ export const ensureMainSandbox = (
 		const { daytona, db, userId, isDev, cache } = params
 		const name = sandboxName(userId, isDev)
 
-		// Step 1: require an existing ready volume row (created by the provision workflow).
-		// We never call the Daytona volume API here — that is the provision workflow's job.
 		const volumeRow = yield* Effect.tryPromise({
-			try: () =>
-				db
+			try: async () => {
+				const existing = await db
 					.select()
 					.from(schema.userVolumes)
 					.where(eq(schema.userVolumes.userId, userId))
 					.limit(1)
-					.then((rows) => rows[0] ?? null),
+					.then((rows) => rows[0] ?? null)
+				if (existing?.status === "ready") return existing
+				return await ensureVolume(daytona, db, userId, isDev)
+			},
 			catch: (cause) =>
 				new SandboxError({
-					message: `Failed to load volume record: ${cause instanceof Error ? cause.message : String(cause)}`,
+					message: `Failed to resolve volume record: ${cause instanceof Error ? cause.message : String(cause)}`,
 					cause,
 				}),
 		})
 
-		if (!volumeRow || volumeRow.status !== "ready") {
-			return yield* Effect.fail(
-				new SandboxError({
-					message:
-						"Your computer environment is being set up — this usually takes a few minutes. Please try again shortly.",
-					transient: true,
-				}),
-			)
+		const createSpec = {
+			...buildSandboxCreateParams(userId, isDev),
+			volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
+		}
+
+		const adoptSandbox = async (sandbox: Sandbox) => {
+			await startSandboxIfNeeded(sandbox)
+			await ensureMountedHomeLayout(sandbox)
+			cache.set(userId, sandbox)
+			await persistMainSandboxFromInstance(db, userId, sandbox, volumeRow.id, "running")
+			return sandbox
+		}
+
+		const createFreshSandbox = async () => {
+			const sandbox = await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
+			await ensureMountedHomeLayout(sandbox)
+			cache.set(userId, sandbox)
+			await persistMainSandboxFromInstance(db, userId, sandbox, volumeRow.id, "running")
+			return sandbox
 		}
 
 		// Step 2: try cache
@@ -230,9 +275,13 @@ export const ensureMainSandbox = (
 				Effect.tryPromise({
 					try: async () => {
 						await cached.refreshData()
-						if (cached.state === "started") return cached as Sandbox | null
+						if (cached.state === "started") {
+							await ensureMountedHomeLayout(cached)
+							return cached as Sandbox | null
+						}
 						if (cached.state === "stopped" || cached.state === "error") {
 							await cached.start(SANDBOX_START_TIMEOUT)
+							await ensureMountedHomeLayout(cached)
 							await persistMainSandboxFromInstance(db, userId, cached, volumeRow.id, "running")
 							return cached as Sandbox | null
 						}
@@ -247,7 +296,12 @@ export const ensureMainSandbox = (
 
 		// Step 3: try get-by-name from Daytona
 		const existing = yield* Effect.tryPromise({
-			try: () => tryGetSandboxByName(daytona, name),
+			try: async () => {
+				const sandbox = await tryGetSandboxByName(daytona, name)
+				if (!sandbox) return null
+				await sandbox.refreshData()
+				return sandbox
+			},
 			catch: (cause) =>
 				new SandboxError({
 					message: `Failed to resolve sandbox by name: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -255,19 +309,28 @@ export const ensureMainSandbox = (
 				}),
 		})
 		if (existing) {
-			yield* Effect.tryPromise({
-				try: async () => {
-					await startSandboxIfNeeded(existing)
-					cache.set(userId, existing)
-					await persistMainSandboxFromInstance(db, userId, existing, volumeRow.id, "running")
-				},
-				catch: (cause) =>
-					new SandboxError({
-						message: `Failed to start existing sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
-						cause,
-					}),
-			})
-			return existing
+			if (!sandboxHasExpectedVolume(existing, volumeRow.daytonaVolumeId)) {
+				yield* Effect.tryPromise({
+					try: async () => {
+						cache.delete(userId)
+						await existing.delete()
+					},
+					catch: (cause) =>
+						new SandboxError({
+							message: `Failed to replace legacy sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
+							cause,
+						}),
+				})
+			} else {
+				return yield* Effect.tryPromise({
+					try: () => adoptSandbox(existing),
+					catch: (cause) =>
+						new SandboxError({
+							message: `Failed to start existing sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
+							cause,
+						}),
+				})
+			}
 		}
 
 		// Step 4: check DB for "creating" row — bail with user message
@@ -296,7 +359,7 @@ export const ensureMainSandbox = (
 			yield* Effect.fail(
 				new SandboxError({
 					message:
-						"Your sandbox is being set up — this usually takes a few minutes. Please try again shortly.",
+						"Your computer environment is being set up — this usually takes a few minutes. Please try again shortly.",
 					transient: true,
 				}),
 			)
@@ -324,26 +387,25 @@ export const ensureMainSandbox = (
 				}),
 		})
 
-		const createSpec = {
-			...buildSandboxCreateParams(userId, isDev),
-			volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
-		}
-
 		const sandbox = yield* Effect.tryPromise({
 			try: async () => {
 				try {
-					const s = await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
-					cache.set(userId, s)
-					await persistMainSandboxFromInstance(db, userId, s, volumeRow.id, "running")
-					return s
+					return await createFreshSandbox()
 				} catch (cause) {
 					if (isDuplicateSandboxNameError(cause)) {
 						const recovered = await tryGetSandboxByName(daytona, name)
 						if (recovered) {
-							await startSandboxIfNeeded(recovered)
-							cache.set(userId, recovered)
-							await persistMainSandboxFromInstance(db, userId, recovered, volumeRow.id, "running")
-							return recovered
+							await recovered.refreshData()
+							if (!sandboxHasExpectedVolume(recovered, volumeRow.daytonaVolumeId)) {
+								await recovered.delete()
+								try {
+									return await createFreshSandbox()
+								} catch (replacementCause) {
+									await upsertMainSandboxRow(db, userId, "pending", "error", volumeRow.id)
+									throw replacementCause
+								}
+							}
+							return await adoptSandbox(recovered)
 						}
 					}
 					await upsertMainSandboxRow(db, userId, "pending", "error", volumeRow.id)

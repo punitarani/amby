@@ -1,5 +1,19 @@
 import { Image } from "@daytonaio/sdk"
-import { AGENT_WORKDIR, DESKTOP_DIR, DOCUMENTS_DIR, DOWNLOADS_DIR } from "../config"
+import {
+	AGENT_HOME,
+	AGENT_WORKDIR,
+	CODEX_HOME,
+	DESKTOP_DIR,
+	DOCUMENTS_DIR,
+	DOWNLOADS_DIR,
+	TASK_BASE,
+	VOLUME_CODEX_HOME,
+	VOLUME_DESKTOP_DIR,
+	VOLUME_DOCUMENTS_DIR,
+	VOLUME_DOWNLOADS_DIR,
+	VOLUME_MOUNT_PATH,
+	VOLUME_TASK_BASE,
+} from "../config"
 
 // TODO: Once Daytona plan supports snapshot push, switch to:
 //   snapshot: `amby-computer:${version}` where version = docker/computer/VERSION
@@ -36,7 +50,12 @@ export const sandboxImage = Image.base("ubuntu:24.04")
 	)
 	.runCommands(
 		"useradd -m -s /bin/bash -d /home/agent agent " +
-			`&& mkdir -p ${DESKTOP_DIR} ${DOCUMENTS_DIR} ${DOWNLOADS_DIR} /home/agent/.local/bin ` +
+			`&& mkdir -p ${AGENT_HOME} ${VOLUME_MOUNT_PATH} /home/agent/.local/bin ` +
+			`&& ln -sfn ${VOLUME_DESKTOP_DIR} ${DESKTOP_DIR} ` +
+			`&& ln -sfn ${VOLUME_DOCUMENTS_DIR} ${DOCUMENTS_DIR} ` +
+			`&& ln -sfn ${VOLUME_DOWNLOADS_DIR} ${DOWNLOADS_DIR} ` +
+			`&& ln -sfn ${VOLUME_CODEX_HOME} ${CODEX_HOME} ` +
+			`&& ln -sfn ${VOLUME_TASK_BASE} ${TASK_BASE} ` +
 			"&& chown -R agent:agent /home/agent",
 	)
 	.runCommands("chmod 755 /home/user")

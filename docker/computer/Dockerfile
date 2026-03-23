@@ -53,7 +53,12 @@ RUN useradd -m -s /bin/bash -d /home/user user \
 #   Access: everything user has + Desktop/Documents/Downloads, /opt/amby
 #   Can sudo as user (for browser/GUI tasks) and install packages as root
 RUN useradd -m -s /bin/bash -d /home/agent agent \
-	&& mkdir -p /home/agent/Desktop /home/agent/Documents /home/agent/Downloads /home/agent/.local/bin \
+	&& mkdir -p /home/agent /home/agent/.persist /home/agent/.local/bin \
+	&& ln -sfn /home/agent/.persist/Desktop /home/agent/Desktop \
+	&& ln -sfn /home/agent/.persist/Documents /home/agent/Documents \
+	&& ln -sfn /home/agent/.persist/Downloads /home/agent/Downloads \
+	&& ln -sfn /home/agent/.persist/.codex /home/agent/.codex \
+	&& ln -sfn /home/agent/.persist/.tasks /home/agent/.tasks \
 	&& chown -R agent:agent /home/agent
 
 # agent can read user's home (not write)
@@ -77,7 +82,7 @@ ENV LANG=en_US.UTF-8 \
 	HOME=/home/agent \
 	PATH="/home/agent/.local/bin:/usr/local/bin:${PATH}"
 
-WORKDIR /home/agent/Desktop
+WORKDIR /home/agent
 
 USER agent
 
