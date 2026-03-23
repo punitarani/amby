@@ -1,10 +1,9 @@
+# PR validation for docker/computer. Production build, push, and Daytona snapshot run in
+# .github/workflows/ci-cd.yml (computer-image job) before Cloudflare deploy.
+
 name: Computer Image
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docker/computer/**"
   pull_request:
     paths:
       - "docker/computer/**"
@@ -15,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       docker_changed: ${{ steps.filter.outputs.docker }}
-      version_changed: ${{ steps.filter.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,42 +24,13 @@ jobs:
           filters: |
             docker:
               - 'docker/computer/**'
-            version:
-              - 'docker/computer/version.json'
 
   build:
     name: Build (dry run)
     needs: changes
-    if: needs.changes.outputs.docker_changed == 'true' && (github.event_name == 'pull_request' || needs.changes.outputs.version_changed != 'true')
+    if: needs.changes.outputs.docker_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build Docker image
         run: ./docker/computer/build.sh
-
-  build-push-snapshot:
-    name: Build, push & register snapshot
-    needs: changes
-    if: github.event_name == 'push' && needs.changes.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
-    environment: github-actions
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.0"
-      - run: bun install --frozen-lockfile
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push
-        run: |
-          ./docker/computer/build.sh
-          ./docker/computer/push.sh
-      - name: Register Daytona snapshot
-        run: bun run computer:snapshot:create
-        env:
-          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
-          DAYTONA_API_URL: ${{ vars.DAYTONA_API_URL }}
