@@ -11,13 +11,26 @@ import {
 	tryGetSandboxByName,
 	upsertMainSandboxRow,
 	VOLUME_MOUNT_PATH,
+	waitForSandboxStarted,
 } from "@amby/computer/sandbox-config"
-import { and, DbService, eq, ne, schema } from "@amby/db"
+import { DbService } from "@amby/db"
+import type { WorkflowBinding, WorkflowInstanceStatus } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
 import { makeRuntimeForConsumer } from "../queue/runtime"
 import { setWorkerScope } from "../sentry"
+import type { VolumeProvisionParams, VolumeProvisionResult } from "./volume-provision"
+
+const WORKFLOW_POLL_INTERVAL_MS = 1_000
+const SANDBOX_READY_TIMEOUT_MS = 10 * 60 * 1000
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function describeWorkflowFailure(status: WorkflowInstanceStatus): string {
+	const reason = status.error?.message ?? status.error?.name
+	return reason ? `${status.status}: ${reason}` : status.status
+}
 
 export interface SandboxProvisionParams {
 	userId: string
@@ -35,9 +48,9 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 		})
 		scope.setUser({ id: userId })
 
-		const isDev = this.env.NODE_ENV !== "production"
-		const name = sandboxName(userId, isDev)
 		const env = this.env
+		const isDev = env.NODE_ENV !== "production"
+		const name = sandboxName(userId, isDev)
 
 		const makeDaytona = () =>
 			createDaytonaClient({
@@ -46,14 +59,10 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				target: env.DAYTONA_TARGET ?? "us",
 			})
 
-		/** Run an effect that needs DbService using a short-lived runtime. */
 		const withRuntime = async <T>(effect: Effect.Effect<T, unknown, DbService>) => {
 			const runtime = makeRuntimeForConsumer(env)
 			try {
 				return await runtime.runPromise(effect)
-			} catch (cause) {
-				const message = cause instanceof Error ? cause.message : String(cause)
-				throw new Error(message)
 			} finally {
 				await runtime.dispose()
 			}
@@ -61,14 +70,14 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 
 		const upsertMainSandbox = async (
 			daytonaSandboxId: string,
-			status: "creating" | "running" | "stopped" | "archived" | "error",
-			volId: string,
+			status: "volume_creating" | "creating" | "running" | "stopped" | "archived" | "error",
+			volumeId: string,
 		) => {
 			await withRuntime(
 				Effect.gen(function* () {
 					const { db } = yield* DbService
 					yield* Effect.tryPromise({
-						try: () => upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volId),
+						try: () => upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volumeId),
 						catch: (cause) =>
 							new Error(
 								`Failed to upsert sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -78,63 +87,105 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			)
 		}
 
-		const workflowStatus = (
-			sandbox: Parameters<typeof inferDbStatusFromSandbox>[0],
-		): Exclude<ReturnType<typeof inferDbStatusFromSandbox>, "deleted"> => {
-			const status = inferDbStatusFromSandbox(sandbox)
-			return status === "deleted" ? "error" : status
+		const waitForWorkflowOutput = async <Output>(
+			workflow: WorkflowBinding<VolumeProvisionParams>,
+			workflowId: string,
+		): Promise<Output> => {
+			const instance = await workflow.get(workflowId)
+
+			while (true) {
+				const status = await instance.status()
+
+				if (status.status === "complete") {
+					return status.output as Output
+				}
+
+				if (status.status === "errored" || status.status === "terminated") {
+					throw new Error(`Child workflow ${workflowId} failed: ${describeWorkflowFailure(status)}`)
+				}
+
+				await wait(WORKFLOW_POLL_INTERVAL_MS)
+			}
 		}
 
-		const loadMainSandboxStatus = async () =>
-			withRuntime(
-				Effect.gen(function* () {
-					const { db } = yield* DbService
-					return yield* Effect.tryPromise({
-						try: () =>
-							db
-								.select({ status: schema.sandboxes.status })
-								.from(schema.sandboxes)
-								.where(
-									and(
-										eq(schema.sandboxes.userId, userId),
-										eq(schema.sandboxes.role, "main"),
-										ne(schema.sandboxes.status, "deleted"),
-									),
-								)
-								.limit(1)
-								.then((rows) => rows[0] ?? null),
-						catch: (cause) =>
-							new Error(
-								`Failed to load sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,
-							),
-					})
-				}),
-			)
+		const deleteSandboxIfPresent = async (
+			sandbox: Awaited<ReturnType<typeof tryGetSandboxByName>>,
+		) => {
+			if (!sandbox) return
 
-		// Step 1: Ensure volume exists
-		const volumeRow = await step.do("ensure-volume", { timeout: "30 seconds" }, async () => {
-			const daytona = makeDaytona()
-			const row = await withRuntime(
-				Effect.gen(function* () {
-					const { db } = yield* DbService
-					return yield* Effect.tryPromise({
-						try: () => ensureVolume(daytona, db, userId, isDev),
-						catch: (cause) =>
-							new Error(
-								`Failed to ensure volume: ${cause instanceof Error ? cause.message : String(cause)}`,
-							),
-					})
-				}),
-			)
-			return { id: row.id, daytonaVolumeId: row.daytonaVolumeId }
-		})
+			try {
+				await sandbox.delete()
+			} catch (cause) {
+				if (
+					cause instanceof Error &&
+					(cause.message.includes("404") || cause.message.toLowerCase().includes("not found"))
+				) {
+					return
+				}
+				throw cause
+			}
+		}
 
-		// Step 2: Ensure sandbox exists with the expected volume mount
+		let volumeRow: VolumeProvisionResult = await step.do(
+			"ensure-volume-record",
+			{
+				timeout: "30 seconds",
+				retries: { limit: 2, delay: "2 seconds", backoff: "exponential" },
+			},
+			async () => {
+				const daytona = makeDaytona()
+				const row = await withRuntime(
+					Effect.gen(function* () {
+						const { db } = yield* DbService
+						return yield* Effect.tryPromise({
+							try: () => ensureVolume(daytona, db, userId, isDev),
+							catch: (cause) =>
+								new Error(
+									`Failed to ensure volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
+								),
+						})
+					}),
+				)
+				return { id: row.id, daytonaVolumeId: row.daytonaVolumeId, status: row.status }
+			},
+		)
+
+		if (volumeRow.status !== "ready") {
+			await upsertMainSandbox("pending", "volume_creating", volumeRow.id)
+			const volumeWorkflow = env.VOLUME_WORKFLOW
+			if (!volumeWorkflow) {
+				throw new Error("VOLUME_WORKFLOW binding is not configured.")
+			}
+
+			const volumeWorkflowId = await step.do("start-volume-workflow", async () => {
+				const instance = await volumeWorkflow.create({ params: { userId } })
+				return instance.id
+			})
+
+			volumeRow = await step.do(
+				"wait-volume-workflow",
+				{
+					timeout: "25 minutes",
+					retries: { limit: 1, delay: "5 seconds", backoff: "exponential" },
+				},
+				async () => {
+					const output = await waitForWorkflowOutput<VolumeProvisionResult>(
+						volumeWorkflow,
+						volumeWorkflowId,
+					)
+					if (output.status !== "ready") {
+						throw new Error(`Volume workflow completed with unexpected status ${output.status}.`)
+					}
+					return output
+				},
+			)
+		}
+
 		const sandboxState = await step.do(
 			"ensure-sandbox",
 			{
-				timeout: "5 minutes",
-				retries: { limit: 2, delay: "10 seconds", backoff: "exponential" },
+				timeout: "15 minutes",
+				retries: { limit: 2, delay: "5 seconds", backoff: "exponential" },
 			},
 			async () => {
 				const daytona = makeDaytona()
@@ -143,33 +194,47 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 					volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
 				}
 
-				const createFreshSandbox = async () => {
-					const sandbox = await daytona.create(createSpec, { timeout: 300 })
-					await upsertMainSandbox(sandbox.id, "running", volumeRow.id)
-					return { sandboxId: sandbox.id, created: true }
+				const ensureRunningSandbox = async (
+					sandbox: Awaited<ReturnType<typeof tryGetSandboxByName>>,
+					created: boolean,
+				) => {
+					if (!sandbox) {
+						throw new Error("Expected sandbox instance but none was found.")
+					}
+
+					const readySandbox = await waitForSandboxStarted(sandbox, {
+						timeoutMs: SANDBOX_READY_TIMEOUT_MS,
+						pollIntervalMs: WORKFLOW_POLL_INTERVAL_MS,
+					})
+					await ensureMountedHomeLayout(readySandbox)
+					await upsertMainSandbox(readySandbox.id, "running", volumeRow.id)
+					return { sandboxId: readySandbox.id, created }
 				}
 
 				const existing = await tryGetSandboxByName(daytona, name)
 				if (existing) {
 					await existing.refreshData()
-					if (sandboxHasExpectedVolume(existing, volumeRow.daytonaVolumeId)) {
-						await upsertMainSandbox(existing.id, workflowStatus(existing), volumeRow.id)
-						return { sandboxId: existing.id, created: false }
+
+					if (
+						!sandboxHasExpectedVolume(existing, volumeRow.daytonaVolumeId) ||
+						inferDbStatusFromSandbox(existing) === "error"
+					) {
+						console.warn("[SandboxProvision] Replacing stale sandbox", {
+							sandboxId: existing.id,
+							userId,
+						})
+						await deleteSandboxIfPresent(existing)
+					} else {
+						return await ensureRunningSandbox(existing, false)
 					}
-
-					console.warn("[SandboxProvision] Replacing legacy sandbox without expected volume", {
-						sandboxId: existing.id,
-						userId,
-					})
-					await existing.delete()
-				}
-
-				const record = await loadMainSandboxStatus()
-				if (record?.status === "creating") {
-					return { sandboxId: null, created: false }
 				}
 
 				await upsertMainSandbox("pending", "creating", volumeRow.id)
+
+				const createFreshSandbox = async () => {
+					const sandbox = await daytona.create(createSpec, { timeout: 300 })
+					return await ensureRunningSandbox(sandbox, true)
+				}
 
 				try {
 					return await createFreshSandbox()
@@ -178,13 +243,16 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 						const recovered = await tryGetSandboxByName(daytona, name)
 						if (recovered) {
 							await recovered.refreshData()
-							if (!sandboxHasExpectedVolume(recovered, volumeRow.daytonaVolumeId)) {
-								await recovered.delete()
+
+							if (
+								!sandboxHasExpectedVolume(recovered, volumeRow.daytonaVolumeId) ||
+								inferDbStatusFromSandbox(recovered) === "error"
+							) {
+								await deleteSandboxIfPresent(recovered)
 								return await createFreshSandbox()
 							}
 
-							await upsertMainSandbox(recovered.id, workflowStatus(recovered), volumeRow.id)
-							return { sandboxId: recovered.id, created: false }
+							return await ensureRunningSandbox(recovered, false)
 						}
 					}
 
@@ -194,43 +262,13 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			},
 		)
 
-		if (!sandboxState.sandboxId) {
-			Sentry.logger.info("Sandbox provisioning already in progress", {
-				sandbox_name: name,
-				user_id: userId,
-			})
-			return
-		}
-
-		if (sandboxState.created) {
-			// Step 3: Initialize the mounted home layout (idempotent)
-			await step.do("init-volume-dirs", { timeout: "30 seconds" }, async () => {
-				const daytona = makeDaytona()
-				const sandbox = await daytona.get(name)
-				await ensureMountedHomeLayout(sandbox)
-			})
-
-			// Step 4: Stop and archive so it starts fast later
-			await step.do(
-				"stop-and-archive",
-				{
-					timeout: "60 seconds",
-					retries: { limit: 2, delay: "5 seconds", backoff: "exponential" },
-				},
-				async () => {
-					const daytona = makeDaytona()
-					const sandbox = await daytona.get(name)
-					await sandbox.stop()
-					await sandbox.archive()
-					await upsertMainSandbox(sandbox.id, "archived", volumeRow.id)
-				},
-			)
-		}
-
 		Sentry.logger.info("Sandbox provisioned", {
+			workflow_instance_id: event.instanceId,
 			sandbox_name: name,
 			sandbox_id: sandboxState.sandboxId,
 			user_id: userId,
 		})
+
+		return sandboxState
 	}
 }

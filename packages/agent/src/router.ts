@@ -1,5 +1,5 @@
 import type { ThreadSource } from "@amby/db"
-import { and, asc, desc, eq, inArray, isNull, lte, or, schema, sql } from "@amby/db"
+import { and, asc, count, desc, eq, inArray, isNull, lte, or, schema } from "@amby/db"
 import type { LanguageModel } from "ai"
 import { generateObject } from "ai"
 import { Effect } from "effect"
@@ -412,7 +412,7 @@ export function resolveThread(
 
 			const countRows = yield* query((d) =>
 				d
-					.select({ c: sql<number>`count(*)::int` })
+					.select({ c: count() })
 					.from(schema.messages)
 					.where(messageThreadFilter(conversationId, threadId)),
 			)
@@ -543,7 +543,7 @@ export function resolveThread(
 				),
 				query((d) =>
 					d
-						.select({ c: sql<number>`count(*)::int` })
+						.select({ c: count() })
 						.from(schema.messages)
 						.where(
 							messageThreadFilter(
