@@ -365,7 +365,7 @@ export const traces = pgTable(
 		messageId: uuid("message_id"),
 		parentTraceId: uuid("parent_trace_id"),
 		rootTraceId: uuid("root_trace_id"),
-		agentName: text("agent_name").notNull(),
+		specialist: text("specialist").notNull(),
 		status: text().default("running").notNull(),
 		startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
 			.defaultNow()
