@@ -3,11 +3,9 @@ import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Daytona } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
-import { AGENT_WORKDIR, COMMAND_EXEC_TIMEOUT, sandboxName } from "../config"
+import { AGENT_WORKDIR, COMMAND_EXEC_TIMEOUT, sandboxWorkflowId } from "../config"
 import { SandboxError } from "../errors"
-import { ensureSandboxStarted, tryCacheSandbox } from "./resolve-sandbox"
-
-export { sandboxImage } from "./sandbox-image"
+import { ensureMainSandbox, kickOffSandboxProvisionIfNeeded } from "./resolve-volume"
 
 export const createDaytonaClient = (opts: { apiKey: string; apiUrl?: string; target?: string }) =>
 	new Daytona(opts)
@@ -63,24 +61,37 @@ export const SandboxServiceLive = Layer.effect(
 		})
 		const cache = new Map<string, Sandbox>()
 		const isDev = env.NODE_ENV !== "production"
+		const kickOffSandboxProvision = (userId: string) =>
+			Effect.tryPromise({
+				try: async () => {
+					const workflow = env.SANDBOX_WORKFLOW
+					if (!workflow) return
+					await kickOffSandboxProvisionIfNeeded(db, userId, () =>
+						workflow.create({ id: sandboxWorkflowId(userId), params: { userId } }),
+					)
+				},
+				catch: (cause) =>
+					new SandboxError({
+						message: `Failed to start sandbox provisioning workflow: ${cause instanceof Error ? cause.message : String(cause)}`,
+						cause,
+					}),
+			}).pipe(
+				Effect.catchAll((error) =>
+					Effect.sync(() => {
+						console.error("[sandbox] Failed to start provisioning workflow:", error.message)
+					}),
+				),
+			)
 
 		return {
 			enabled: true,
 
 			ensure: (userId) =>
-				Effect.gen(function* () {
-					const name = sandboxName(userId, isDev)
-					const fromCache = yield* tryCacheSandbox(cache, userId, db)
-					if (fromCache) return fromCache
-					return yield* ensureSandboxStarted({
-						daytona,
-						db,
-						userId,
-						name,
-						isDev,
-						cache,
-					})
-				}),
+				ensureMainSandbox({ daytona, db, userId, isDev, cache }).pipe(
+					Effect.tapError((error) =>
+						error.transient ? kickOffSandboxProvision(userId) : Effect.void,
+					),
+				),
 
 			exec: (sandbox, command, cwd?) =>
 				Effect.tryPromise({

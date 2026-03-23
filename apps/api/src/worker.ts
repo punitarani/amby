@@ -24,6 +24,7 @@ import { getOrCreateChat } from "./telegram/chat-sdk"
 import type { TelegramQueueMessage } from "./telegram/utils"
 import { AgentExecutionWorkflow as AgentExecutionWorkflowBase } from "./workflows/agent-execution"
 import { SandboxProvisionWorkflow as SandboxProvisionWorkflowBase } from "./workflows/sandbox-provision"
+import { VolumeProvisionWorkflow as VolumeProvisionWorkflowBase } from "./workflows/volume-provision"
 
 // Re-export instrumented Durable Object and Workflow classes so Cloudflare can discover them
 export const ConversationSession = Sentry.instrumentDurableObjectWithSentry(
@@ -37,6 +38,10 @@ export const AgentExecutionWorkflow = Sentry.instrumentWorkflowWithSentry(
 export const SandboxProvisionWorkflow = Sentry.instrumentWorkflowWithSentry(
 	getSentryOptionsOrFallback,
 	SandboxProvisionWorkflowBase,
+)
+export const VolumeProvisionWorkflow = Sentry.instrumentWorkflowWithSentry(
+	getSentryOptionsOrFallback,
+	VolumeProvisionWorkflowBase,
 )
 
 type Env = { Bindings: WorkerBindings; Variables: { posthogDistinctId?: string } }

@@ -4,6 +4,41 @@ export class EnvError extends Data.TaggedError("EnvError")<{
 	readonly message: string
 }> {}
 
+export interface WorkflowInstanceStatus {
+	readonly status:
+		| "queued"
+		| "running"
+		| "paused"
+		| "errored"
+		| "terminated"
+		| "complete"
+		| "waiting"
+		| "waitingForPause"
+		| "unknown"
+	readonly error?: {
+		readonly name: string
+		readonly message: string
+	}
+	readonly output?: unknown
+}
+
+export interface WorkflowInstanceHandle {
+	readonly id: string
+	status(): Promise<WorkflowInstanceStatus>
+	sendEvent(event: { type: string; payload?: unknown }): Promise<void>
+}
+
+export interface WorkflowBinding<Params = unknown> {
+	create(options?: { id?: string; params?: Params }): Promise<WorkflowInstanceHandle>
+	createBatch?(
+		batch: Array<{
+			id?: string
+			params?: Params
+		}>,
+	): Promise<WorkflowInstanceHandle[]>
+	get(id: string): Promise<WorkflowInstanceHandle>
+}
+
 export interface Env {
 	readonly NODE_ENV: string
 	readonly API_URL: string
@@ -32,6 +67,8 @@ export interface Env {
 	readonly BRAINTRUST_PROJECT_ID: string
 	readonly POSTHOG_KEY: string
 	readonly POSTHOG_HOST: string
+	readonly SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>
+	readonly VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
 }
 
 export const DEFAULT_TELEGRAM_BOT_USERNAME = "my_amby_bot"

@@ -9,13 +9,14 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"build": "bun build ./src/index.ts --outdir dist --target bun"
+		"build": "bun build ./src/index.ts --outdir dist --target bun",
+		"create-snapshot": "bun run src/scripts/create-snapshot.ts"
 	},
 	"dependencies": {
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/connectors": "workspace:*",
-		"@daytonaio/sdk": "^0.151.0"
+		"@daytonaio/sdk": "^0.153.0"
 	},
 	"peerDependencies": {
 		"ai": "^6.0.116",

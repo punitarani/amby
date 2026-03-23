@@ -26,7 +26,7 @@
 		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",
 		"@amby/models": "workspace:*",
-		"@daytonaio/sdk": "^0.151.0",
+		"@daytonaio/sdk": "^0.153.0",
 		"braintrust": "^3.4.0",
 		"cron-parser": "^5.5.0"
 	},

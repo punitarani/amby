@@ -1,3 +1,4 @@
+import { kickOffSandboxProvisionIfNeeded, sandboxWorkflowId } from "@amby/computer/sandbox-config"
 import {
 	ConnectorsService,
 	getIntegrationLabel,
@@ -191,17 +192,32 @@ const startTelegramSession = (
 ) =>
 	Effect.gen(function* () {
 		const env = yield* EnvService
+		const { db } = yield* DbService
 		const posthog = getPostHogClient(env.POSTHOG_KEY, env.POSTHOG_HOST)
 
 		yield* ensureTelegramConversation(userId, chatId)
 
-		if (options?.sandboxWorkflow) {
-			options.sandboxWorkflow
-				.create({
-					id: `sandbox-provision-${userId}`,
-					params: { userId },
-				})
-				.catch((err) => console.error("[Sandbox] Provision workflow:", err))
+		const sandboxWorkflow = options?.sandboxWorkflow
+		if (sandboxWorkflow) {
+			yield* Effect.tryPromise({
+				try: () =>
+					kickOffSandboxProvisionIfNeeded(db, userId, () =>
+						sandboxWorkflow.create({
+							id: sandboxWorkflowId(userId),
+							params: { userId },
+						}),
+					),
+				catch: (cause) =>
+					new Error(
+						`Failed to start sandbox provisioning workflow: ${cause instanceof Error ? cause.message : String(cause)}`,
+					),
+			}).pipe(
+				Effect.catchAll((error) =>
+					Effect.sync(() => {
+						console.error("[Sandbox] Provision workflow:", error)
+					}),
+				),
+			)
 		}
 
 		posthog.capture({
