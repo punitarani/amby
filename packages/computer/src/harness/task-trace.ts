@@ -22,31 +22,34 @@ export async function appendTaskTraceTerminalEvent(params: {
 }) {
 	if (!params.traceId) return
 
-	const lastRows = await params.db
-		.select({ seq: schema.traceEvents.seq })
-		.from(schema.traceEvents)
-		.where(eq(schema.traceEvents.traceId, params.traceId))
-		.orderBy(desc(schema.traceEvents.seq))
-		.limit(1)
+	const traceId = params.traceId
+	await params.db.transaction(async (tx) => {
+		const lastRows = await tx
+			.select({ seq: schema.traceEvents.seq })
+			.from(schema.traceEvents)
+			.where(eq(schema.traceEvents.traceId, traceId))
+			.orderBy(desc(schema.traceEvents.seq))
+			.limit(1)
 
-	const nextSeq = (lastRows[0]?.seq ?? -1) + 1
-	await params.db.insert(schema.traceEvents).values({
-		traceId: params.traceId,
-		seq: nextSeq,
-		kind: toTraceEventKind(params.status),
-		payload: {
-			taskId: params.taskId,
-			status: params.status,
-			message: params.message ?? null,
-			exitCode: params.exitCode ?? null,
-			reason: params.reason ?? null,
-		},
-	})
-	await params.db
-		.update(schema.traces)
-		.set({
-			status: toTraceTerminalStatus(params.status),
-			completedAt: new Date(),
+		const nextSeq = (lastRows[0]?.seq ?? -1) + 1
+		await tx.insert(schema.traceEvents).values({
+			traceId,
+			seq: nextSeq,
+			kind: toTraceEventKind(params.status),
+			payload: {
+				taskId: params.taskId,
+				status: params.status,
+				message: params.message ?? null,
+				exitCode: params.exitCode ?? null,
+				reason: params.reason ?? null,
+			},
 		})
-		.where(eq(schema.traces.id, params.traceId))
+		await tx
+			.update(schema.traces)
+			.set({
+				status: toTraceTerminalStatus(params.status),
+				completedAt: new Date(),
+			})
+			.where(eq(schema.traces.id, traceId))
+	})
 }

@@ -48,21 +48,27 @@ type CreateTraceParams = {
 }
 
 function makeTraceWriter(query: QueryFn, traceId: string): TraceWriter {
-	let seq = 0
-
 	const insertEvents = (
 		events: Array<{ kind: TraceEventKind; payload: Record<string, unknown> }>,
 	) =>
-		query((db) =>
-			db.insert(schema.traceEvents).values(
+		query(async (db) => {
+			const lastRows = await db
+				.select({ seq: schema.traceEvents.seq })
+				.from(schema.traceEvents)
+				.where(eq(schema.traceEvents.traceId, traceId))
+				.orderBy(desc(schema.traceEvents.seq))
+				.limit(1)
+
+			let nextSeq = (lastRows[0]?.seq ?? -1) + 1
+			await db.insert(schema.traceEvents).values(
 				events.map((event) => ({
 					traceId,
-					seq: seq++,
+					seq: nextSeq++,
 					kind: event.kind,
 					payload: event.payload,
 				})),
-			),
-		).pipe(Effect.asVoid)
+			)
+		}).pipe(Effect.asVoid)
 
 	return {
 		traceId,
@@ -205,18 +211,20 @@ export function appendTraceLifecycleEvent(
 	payload: Record<string, unknown>,
 ): Effect.Effect<void, DbError> {
 	return query(async (db) => {
-		const existing = await db
-			.select({ seq: schema.traceEvents.seq })
-			.from(schema.traceEvents)
-			.where(eq(schema.traceEvents.traceId, traceId))
-			.orderBy(desc(schema.traceEvents.seq))
-			.limit(1)
-		const nextSeq = (existing[0]?.seq ?? -1) + 1
-		await db.insert(schema.traceEvents).values({
-			traceId,
-			seq: nextSeq,
-			kind,
-			payload,
+		await db.transaction(async (tx) => {
+			const existing = await tx
+				.select({ seq: schema.traceEvents.seq })
+				.from(schema.traceEvents)
+				.where(eq(schema.traceEvents.traceId, traceId))
+				.orderBy(desc(schema.traceEvents.seq))
+				.limit(1)
+			const nextSeq = (existing[0]?.seq ?? -1) + 1
+			await tx.insert(schema.traceEvents).values({
+				traceId,
+				seq: nextSeq,
+				kind,
+				payload,
+			})
 		})
 	})
 }
