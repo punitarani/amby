@@ -95,6 +95,14 @@ async function getOrCreateVolume(daytona: Daytona, name: string): Promise<Dayton
 	return await daytona.volume.create(name)
 }
 
+/** Get or (re)create a volume, replacing any in error/deleted state. */
+async function resolveHealthyVolume(daytona: Daytona, name: string): Promise<DaytonaVolume> {
+	const existing = await tryGetVolumeByName(daytona, name)
+	if (existing && existing.state !== "error" && existing.state !== "deleted") return existing
+	if (existing) await safeDeleteVolume(daytona, existing)
+	return await daytona.volume.create(name)
+}
+
 async function upsertVolumeRow(
 	db: Database,
 	userId: string,
@@ -150,20 +158,8 @@ export async function ensureProvisionableVolume(
 	userId: string,
 	isDev: boolean,
 ): Promise<VolumeRow> {
-	const name = volumeName(userId, isDev)
-
 	try {
-		let volume = await tryGetVolumeByName(daytona, name)
-
-		if (volume && (volume.state === "error" || volume.state === "deleted")) {
-			await safeDeleteVolume(daytona, volume)
-			volume = null
-		}
-
-		if (!volume) {
-			volume = await daytona.volume.create(name)
-		}
-
+		const volume = await resolveHealthyVolume(daytona, volumeName(userId, isDev))
 		return await upsertVolumeRow(db, userId, volume.id, mapVolumeStateToDbStatus(volume.state))
 	} catch (cause) {
 		throw new VolumeError({
@@ -183,18 +179,28 @@ export async function waitForVolumeReady(
 	const timeoutMs = options?.timeoutMs ?? DEFAULT_VOLUME_READY_TIMEOUT_MS
 	const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_VOLUME_POLL_INTERVAL_MS
 	const deadline = Date.now() + timeoutMs
-	let lastRow: VolumeRow | null = null
+	const name = volumeName(userId, isDev)
+	const seen = { state: "" }
 
 	while (Date.now() < deadline) {
-		const row = await ensureProvisionableVolume(daytona, db, userId, isDev)
-		lastRow = row
+		const volume = await resolveHealthyVolume(daytona, name)
+		const status = mapVolumeStateToDbStatus(volume.state)
 
-		if (isVolumeReady(row.status)) return row
+		if (status === "ready") {
+			return await upsertVolumeRow(db, userId, volume.id, "ready")
+		}
+
+		// Only write to DB when the Daytona state changes
+		if (volume.state !== seen.state) {
+			seen.state = volume.state
+			await upsertVolumeRow(db, userId, volume.id, status)
+		}
+
 		await wait(pollIntervalMs)
 	}
 
 	throw new VolumeError({
-		message: `Timed out waiting for volume readiness for user ${userId}. Last known status: ${lastRow?.status ?? "unknown"}.`,
+		message: `Timed out waiting for volume readiness for user ${userId}. Last known status: ${seen.state || "unknown"}.`,
 	})
 }
 
