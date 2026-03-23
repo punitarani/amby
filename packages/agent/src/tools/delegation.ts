@@ -80,9 +80,13 @@ export function buildDelegateTaskDescription(options: {
 		parts.push(
 			"Use target='sandbox' for long-running autonomous background Codex tasks like extended research, file generation, or multi-step workflows.",
 		)
-		if (!options.browserEnabled) {
+		if (options.browserEnabled) {
 			parts.push(
-				"When direct browser delegation is unavailable, sandbox tasks can still enable Playwright browser automation with needsBrowser=true.",
+				"When target='browser' is available, use it for headless website work — do not use target='sandbox' with needsBrowser=true for that (sandbox always requires Codex auth).",
+			)
+		} else {
+			parts.push(
+				"When direct browser delegation is unavailable, sandbox tasks can still enable Playwright browser automation inside Codex with needsBrowser=true.",
 			)
 		}
 	}
@@ -131,7 +135,7 @@ export function createTaskDelegationTools(
 						.optional()
 						.default(false)
 						.describe(
-							"Only for target='sandbox': set true to provision Playwright browser automation when direct browser delegation is unavailable in this runtime",
+							"Only for target='sandbox': request Playwright inside the Codex sandbox (requires Codex auth). If target='browser' is available, use that for website work instead of sandbox+needsBrowser.",
 						),
 				})
 				.strict(),
@@ -141,12 +145,8 @@ export function createTaskDelegationTools(
 			) => {
 				const fullTask = context ? `${task}\n\nAdditional context: ${context}` : task
 
-				if (target === "browser") {
-					if (!browser.enabled) {
-						return failure("browser", "Browser delegation is not available in this runtime.")
-					}
-
-					return await Effect.runPromise(
+				const runHeadlessBrowserTask = () =>
+					Effect.runPromise(
 						browser.runTask({ task: fullTask, startUrl }).pipe(
 							Effect.map((result) => ({
 								target: "browser" as const,
@@ -162,6 +162,13 @@ export function createTaskDelegationTools(
 							),
 						),
 					)
+
+				if (target === "browser") {
+					if (!browser.enabled) {
+						return failure("browser", "Browser delegation is not available in this runtime.")
+					}
+
+					return await runHeadlessBrowserTask()
 				}
 
 				if (target === "computer") {
@@ -193,6 +200,13 @@ export function createTaskDelegationTools(
 						"sandbox",
 						"Background sandbox delegation is not available in this runtime.",
 					)
+				}
+
+				// Sandbox + needsBrowser is documented as a fallback when headless browser delegation
+				// is unavailable; it still runs through Codex and requires auth. If browser is enabled,
+				// run the headless path so website work does not fail with "Codex not configured".
+				if ((needsBrowser ?? false) && browser.enabled) {
+					return await runHeadlessBrowserTask()
 				}
 
 				const result = await Effect.runPromise(

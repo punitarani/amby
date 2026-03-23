@@ -188,9 +188,13 @@ function buildTaskDelegationSection(capabilities: PromptCapabilities): string {
 			"  - Use get_task_artifacts to list sandbox-task outputs and preview result.md",
 			"  - For long sandbox tasks, return to the user after delegating; they can also check back with get_task on subsequent turns",
 		)
-		if (!capabilities.browserEnabled) {
+		if (capabilities.browserEnabled) {
 			lines.push(
-				"  - When direct browser delegation is unavailable in this runtime, set needsBrowser=true on sandbox tasks to enable Playwright browser automation",
+				'  - Sandbox tasks require Codex to be configured; do not use target="sandbox" with needsBrowser=true for ordinary website work when target="browser" is available',
+			)
+		} else {
+			lines.push(
+				"  - When direct browser delegation is unavailable in this runtime, set needsBrowser=true on sandbox tasks to enable Playwright browser automation inside Codex",
 			)
 		}
 	}
@@ -224,7 +228,7 @@ function buildOrchestrationRules(capabilities: PromptCapabilities): string {
 			'- Prefer delegate_task with target="browser" over target="computer" for ordinary website work that fits in one tab and does not need the OS desktop',
 			'- If a browser task hits popups, new tabs, native dialogs, file pickers, downloads/uploads, CAPTCHA, MFA, or other desktop-only behavior, switch to delegate_task with target="computer"',
 		)
-	} else if (capabilities.sandboxEnabled) {
+	} else if (capabilities.sandboxEnabled && !capabilities.browserEnabled) {
 		lines.push(
 			'- If direct browser delegation is unavailable, use delegate_task with target="sandbox" and needsBrowser=true for website work instead of sending it to the computer path by default',
 		)
