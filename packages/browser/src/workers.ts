@@ -1,12 +1,14 @@
-import { createOpenAI } from "@ai-sdk/openai"
 import type { WorkerBindings } from "@amby/env/workers"
-import { type AISdkClient, Stagehand } from "@browserbasehq/stagehand"
+import { AISdkClient, Stagehand } from "@browserbasehq/stagehand"
 import type { BrowserWorker } from "@cloudflare/playwright"
 import { Effect, Layer } from "effect"
+import { createWorkersAI } from "workers-ai-provider"
 import { BrowserError, BrowserService, type BrowserTaskResult } from "./shared"
 
-const DEFAULT_BROWSER_STAGEHAND_MODEL = "google/gemini-3-flash-preview"
-const DEFAULT_BROWSER_MAX_STEPS = 20
+/** Workers AI model via Cloudflare AI Gateway */
+export const STAGEHAND_MODEL = "@cf/moonshotai/kimi-k2.5"
+
+const DEFAULT_BROWSER_MAX_STEPS = 100
 
 const BROWSER_AGENT_INSTRUCTIONS = [
 	"You are a browser-only agent.",
@@ -18,68 +20,59 @@ const BROWSER_AGENT_INSTRUCTIONS = [
 
 type BrowserWorkerBindings = Pick<
 	WorkerBindings,
-	| "BROWSER"
-	| "BROWSER_AI_GATEWAY_BASE_URL"
-	| "BROWSER_AI_GATEWAY_AUTH_TOKEN"
-	| "BROWSER_STAGEHAND_MODEL"
-	| "NODE_ENV"
+	"BROWSER" | "AI" | "CLOUDFLARE_AI_GATEWAY_ID" | "NODE_ENV"
 >
 
 export interface BrowserWorkerSettings {
 	enabled: boolean
-	baseURL: string
-	authToken: string
+	llmClient: AISdkClient
+	/** AI Gateway id from `CLOUDFLARE_AI_GATEWAY_ID`. */
+	aiGatewayId: string
 	model: string
 	browserBinding: unknown
 	verbose: 0 | 1
 }
 
-function normalizeNonEmpty(value: string | undefined): string {
+function trim(value: string | undefined): string {
 	return value?.trim() ?? ""
 }
 
-function withoutTrailingSlash(value: string): string {
-	return value.replace(/\/+$/, "")
+function createStagehandLlmClient(
+	ai: NonNullable<WorkerBindings["AI"]>,
+	aiGatewayId: string,
+): AISdkClient {
+	const workersai = createWorkersAI({
+		binding: ai,
+		gateway: { id: aiGatewayId },
+	} as Parameters<typeof createWorkersAI>[0])
+	// workers-ai-provider v3 emits AI SDK v3 models; Stagehand 2.5 typings target older LanguageModel shapes.
+	return new AISdkClient({
+		model: workersai(STAGEHAND_MODEL) as unknown as ConstructorParameters<
+			typeof AISdkClient
+		>[0]["model"],
+	})
 }
 
-export function resolveBrowserWorkerSettings(
+function browserWorkerSettingsFromBindings(
 	bindings: BrowserWorkerBindings,
-): BrowserWorkerSettings {
-	const baseURL = withoutTrailingSlash(normalizeNonEmpty(bindings.BROWSER_AI_GATEWAY_BASE_URL))
-	const authToken = normalizeNonEmpty(bindings.BROWSER_AI_GATEWAY_AUTH_TOKEN)
-	const model =
-		normalizeNonEmpty(bindings.BROWSER_STAGEHAND_MODEL) || DEFAULT_BROWSER_STAGEHAND_MODEL
+): BrowserWorkerSettings | null {
+	const ai = bindings.AI
 	const browserBinding = bindings.BROWSER
-	const verbose = normalizeNonEmpty(bindings.NODE_ENV) === "development" ? 1 : 0
+	const aiGatewayId = trim(bindings.CLOUDFLARE_AI_GATEWAY_ID)
+	const verbose = trim(bindings.NODE_ENV) === "development" ? 1 : 0
+
+	if (!browserBinding || !ai || !aiGatewayId) {
+		return null
+	}
 
 	return {
-		enabled: Boolean(browserBinding && baseURL),
-		baseURL,
-		authToken,
-		model,
+		enabled: true,
+		llmClient: createStagehandLlmClient(ai, aiGatewayId),
+		aiGatewayId,
+		model: STAGEHAND_MODEL,
 		browserBinding,
 		verbose,
 	}
-}
-
-async function createAISdkClient(
-	settings: BrowserWorkerSettings,
-): Promise<InstanceType<typeof AISdkClient>> {
-	const openai = createOpenAI({
-		baseURL: settings.baseURL,
-		compatibility: "compatible",
-		name: "openrouter-gateway",
-		headers: settings.authToken
-			? {
-					"cf-aig-authorization": settings.authToken,
-				}
-			: undefined,
-	})
-
-	const { AISdkClient } = await import("@browserbasehq/stagehand")
-	return new AISdkClient({
-		model: openai.chat(settings.model),
-	})
 }
 
 async function runBrowserTask(
@@ -91,23 +84,30 @@ async function runBrowserTask(
 		throw new BrowserError({ message: "Browser Rendering binding is not configured." })
 	}
 
-	if (!settings.baseURL) {
-		throw new BrowserError({ message: "Browser AI Gateway base URL is not configured." })
+	if (settings.verbose) {
+		console.info(
+			`[BrowserService] LLM: Workers AI ${settings.model} via AI Gateway "${settings.aiGatewayId}" (workers-ai-provider + AISdkClient)`,
+		)
 	}
 
-	const llmClient = await createAISdkClient(settings)
 	const { endpointURLString } = await import("@cloudflare/playwright")
 	const stagehand = new Stagehand({
 		env: "LOCAL",
-		verbose: 1,
-		llmClient,
+		useAPI: false,
+		verbose: settings.verbose ? 2 : 1,
+		modelName: settings.model,
+		llmClient: settings.llmClient,
 		localBrowserLaunchOptions: {
 			cdpUrl: endpointURLString(settings.browserBinding as BrowserWorker),
 		},
 	})
 
+	let initialized = false
 	try {
-		const rawUrl = normalizeNonEmpty(startUrl)
+		await stagehand.init()
+		initialized = true
+
+		const rawUrl = trim(startUrl)
 		if (rawUrl) {
 			if (!/^https?:\/\//i.test(rawUrl)) {
 				throw new BrowserError({
@@ -136,14 +136,29 @@ async function runBrowserTask(
 			title: title?.trim() || null,
 		}
 	} finally {
-		await stagehand.close().catch((err) => {
-			console.warn("[BrowserService] stagehand.close() failed:", err)
-		})
+		if (initialized) {
+			await stagehand.close().catch((err) => {
+				console.warn("[BrowserService] stagehand.close() failed:", err)
+			})
+		}
 	}
 }
 
 export const makeBrowserServiceFromBindings = (bindings: BrowserWorkerBindings) => {
-	const settings = resolveBrowserWorkerSettings(bindings)
+	const settings = browserWorkerSettingsFromBindings(bindings)
+
+	if (!settings) {
+		return Layer.succeed(BrowserService, {
+			enabled: false,
+			runTask: () =>
+				Effect.fail(
+					new BrowserError({
+						message:
+							'Browser LLM requires BROWSER, Workers AI ([ai] binding = "AI"), and CLOUDFLARE_AI_GATEWAY_ID (AI Gateway slug).',
+					}),
+				),
+		})
+	}
 
 	return Layer.succeed(BrowserService, {
 		enabled: settings.enabled,

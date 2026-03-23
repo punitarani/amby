@@ -242,6 +242,37 @@ function buildOrchestrationRules(capabilities: PromptCapabilities): string {
 	return `### Orchestration Rules\n${lines.join("\n")}`
 }
 
+/** Stops vague "something blocked me" roleplay when the real issue is capability limits or errors. */
+function buildHonestLimitsGuidance(capabilities: PromptCapabilities): string {
+	const lines = [
+		"### Honest limits (internal)",
+		'- If you cannot do something because this deployment does not support it, say that plainly in your own words — e.g. you cannot open live webpages from this chat, or desktop control is not available here. Do not invent mysterious blocks, glitches, or "something not letting you through."',
+		'- Do not imply you are forbidden from a generic "tool" or that an unnamed system is blocking you when the real issue is unavailability here or a failed attempt — give a short, direct explanation instead.',
+		"- When delegation returns an error summary, translate it into a natural one-liner; do not add fake drama.",
+	]
+
+	if (capabilities.browserEnabled) {
+		lines.push(
+			'- When the user asks to read or open a normal webpage in one tab, use delegate_task with target="browser" (pass startUrl when you know the URL). Do not refuse or apologize vaguely without trying.',
+		)
+	} else {
+		lines.push(
+			"- Headless single-tab browsing is not available in this deployment (delegate_task has no browser target).",
+		)
+		if (capabilities.sandboxEnabled) {
+			lines.push(
+				'- Website work that needs a real browser may still use delegate_task with target="sandbox" and needsBrowser=true (Codex sandbox + Playwright). If that is not appropriate or will not work, say clearly that you cannot open live sites from here.',
+			)
+		} else {
+			lines.push(
+				"- There is no sandbox browser fallback in this deployment — tell the user you cannot load live sites from this chat.",
+			)
+		}
+	}
+
+	return lines.join("\n")
+}
+
 export function buildSystemPrompt(
 	dateTime: string,
 	timezone: string,
@@ -260,6 +291,7 @@ ${[
 	buildTaskDelegationSection(capabilities),
 	buildCodexAuthSection(capabilities),
 	buildOrchestrationRules(capabilities),
+	buildHonestLimitsGuidance(capabilities),
 ]
 	.filter(Boolean)
 	.join("\n\n")}

@@ -165,7 +165,10 @@ export function createTaskDelegationTools(
 
 				if (target === "browser") {
 					if (!browser.enabled) {
-						return failure("browser", "Browser delegation is not available in this runtime.")
+						return failure(
+							"browser",
+							'Headless browsing is not configured in this environment. Tell the user clearly — this chat cannot open live sites that way. Do not invent vague "blocked" or "tool" excuses.',
+						)
 					}
 
 					return await runHeadlessBrowserTask()
@@ -173,7 +176,10 @@ export function createTaskDelegationTools(
 
 				if (target === "computer") {
 					if (!computer.enabled) {
-						return failure("computer", "Computer delegation is not available in this runtime.")
+						return failure(
+							"computer",
+							"Desktop / computer control is not available in this environment. Say so plainly to the user.",
+						)
 					}
 
 					try {
@@ -198,7 +204,7 @@ export function createTaskDelegationTools(
 				if (!sandboxEnabled) {
 					return failure(
 						"sandbox",
-						"Background sandbox delegation is not available in this runtime.",
+						"Background sandbox tasks are not available in this environment. Say that clearly to the user.",
 					)
 				}
 

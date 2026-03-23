@@ -48,6 +48,10 @@ binding = "CF_VERSION_METADATA"
 binding = "BROWSER"
 remote = true
 
+[ai]
+binding = "AI"
+remote = true
+
 # Hyperdrive connection pooling
 [[hyperdrive]]
 binding = "HYPERDRIVE"

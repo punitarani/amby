@@ -17,4 +17,28 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain('delegate_task with target="sandbox" and needsBrowser=true')
 		expect(prompt).toContain("set needsBrowser=true on sandbox tasks")
 	})
+
+	it("requires plain language when browsing is unavailable — no vague blocked-tool excuses", () => {
+		const prompt = buildSystemPrompt("Sun", "UTC", {
+			browserEnabled: false,
+			computerEnabled: false,
+			integrationEnabled: false,
+			sandboxEnabled: true,
+		})
+
+		expect(prompt).toContain("### Honest limits (internal)")
+		expect(prompt).toContain("Do not invent mysterious blocks")
+	})
+
+	it("instructs to use headless browser when enabled", () => {
+		const prompt = buildSystemPrompt("Sun", "UTC", {
+			browserEnabled: true,
+			computerEnabled: false,
+			integrationEnabled: false,
+			sandboxEnabled: true,
+		})
+
+		expect(prompt).toContain('target="browser"')
+		expect(prompt).toContain("Do not refuse or apologize vaguely without trying")
+	})
 })

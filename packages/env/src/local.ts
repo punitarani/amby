@@ -5,17 +5,14 @@ const EnvConfig = Config.all({
 	NODE_ENV: Config.string("NODE_ENV").pipe(Config.withDefault("development")),
 	API_URL: Config.string("API_URL").pipe(Config.withDefault("http://localhost:3001")),
 	APP_URL: Config.string("APP_URL").pipe(Config.withDefault("http://localhost:3000")),
-	OPENROUTER_API_KEY: Config.redacted("OPENROUTER_API_KEY"),
-	OPENAI_API_KEY: Config.redacted("OPENAI_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
-	BROWSER_AI_GATEWAY_BASE_URL: Config.string("BROWSER_AI_GATEWAY_BASE_URL").pipe(
+	CLOUDFLARE_AI_GATEWAY_BASE_URL: Config.string("CLOUDFLARE_AI_GATEWAY_BASE_URL").pipe(
 		Config.withDefault(""),
 	),
-	BROWSER_AI_GATEWAY_AUTH_TOKEN: Config.redacted("BROWSER_AI_GATEWAY_AUTH_TOKEN").pipe(
+	CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: Config.redacted("CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN").pipe(
 		Config.withDefault(Redacted.make("")),
 	),
-	BROWSER_STAGEHAND_MODEL: Config.string("BROWSER_STAGEHAND_MODEL").pipe(
-		Config.withDefault("google/gemini-3-flash-preview"),
-	),
+	OPENROUTER_API_KEY: Config.redacted("OPENROUTER_API_KEY"),
+	OPENAI_API_KEY: Config.redacted("OPENAI_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 	CARTESIA_API_KEY: Config.redacted("CARTESIA_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 	DAYTONA_API_KEY: Config.redacted("DAYTONA_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 	DAYTONA_API_URL: Config.string("DAYTONA_API_URL").pipe(
@@ -70,11 +67,10 @@ export const EnvServiceLive = Layer.effect(
 			NODE_ENV: raw.NODE_ENV,
 			API_URL: raw.API_URL,
 			APP_URL: raw.APP_URL,
+			CLOUDFLARE_AI_GATEWAY_BASE_URL: raw.CLOUDFLARE_AI_GATEWAY_BASE_URL,
+			CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: Redacted.value(raw.CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN),
 			OPENROUTER_API_KEY: Redacted.value(raw.OPENROUTER_API_KEY),
 			OPENAI_API_KEY: Redacted.value(raw.OPENAI_API_KEY),
-			BROWSER_AI_GATEWAY_BASE_URL: raw.BROWSER_AI_GATEWAY_BASE_URL,
-			BROWSER_AI_GATEWAY_AUTH_TOKEN: Redacted.value(raw.BROWSER_AI_GATEWAY_AUTH_TOKEN),
-			BROWSER_STAGEHAND_MODEL: raw.BROWSER_STAGEHAND_MODEL,
 			CARTESIA_API_KEY: Redacted.value(raw.CARTESIA_API_KEY),
 			DAYTONA_API_KEY: Redacted.value(raw.DAYTONA_API_KEY),
 			DAYTONA_API_URL: raw.DAYTONA_API_URL,

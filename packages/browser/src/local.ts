@@ -6,7 +6,8 @@ export const BrowserServiceDisabledLive = Layer.succeed(BrowserService, {
 	runTask: () =>
 		Effect.fail(
 			new BrowserError({
-				message: "Browser delegation is not available in this runtime.",
+				message:
+					"Headless browsing is not available in this runtime (browser not configured). Tell the user plainly — do not invent vague blocks.",
 			}),
 		),
 })

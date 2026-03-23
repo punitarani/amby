@@ -43,11 +43,10 @@ export interface Env {
 	readonly NODE_ENV: string
 	readonly API_URL: string
 	readonly APP_URL: string
+	readonly CLOUDFLARE_AI_GATEWAY_BASE_URL: string
+	readonly CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: string
 	readonly OPENROUTER_API_KEY: string
 	readonly OPENAI_API_KEY: string
-	readonly BROWSER_AI_GATEWAY_BASE_URL: string
-	readonly BROWSER_AI_GATEWAY_AUTH_TOKEN: string
-	readonly BROWSER_STAGEHAND_MODEL: string
 	readonly CARTESIA_API_KEY: string
 	readonly DAYTONA_API_KEY: string
 	readonly DAYTONA_API_URL: string

@@ -2,7 +2,7 @@
 
 This document describes the sandbox compute layer (`@amby/computer`) and the task delegation system that lets Amby's agent spawn autonomous background workers.
 
----
+***
 
 ## Overview
 
@@ -12,9 +12,9 @@ On top of this, the **task delegation system** lets the agent spawn Codex CLI pr
 
 The user interacts with one agent. Under the hood, work is split across three execution paths:
 
-- `delegate_task target="browser"` for worker-only, headless, single-tab website work via Stagehand on Cloudflare Browser Rendering
-- `delegate_task target="computer"` for Daytona CUA when a task needs the actual desktop
-- `delegate_task target="sandbox"` for long-running autonomous sandbox work via Codex sessions
+* `delegate_task target="browser"` for worker-only, headless, single-tab website work via Stagehand on Cloudflare Browser Rendering
+* `delegate_task target="computer"` for Daytona CUA when a task needs the actual desktop
+* `delegate_task target="sandbox"` for long-running autonomous sandbox work via Codex sessions
 
 **Future**: additional sandboxes sharing the same volume (N sandboxes : 1 volume : 1 user).
 
@@ -55,7 +55,7 @@ User ──> Channel ──> AgentService.handleMessage()
                                        └──────────────────────────────────────────┘
 ```
 
----
+***
 
 ## Key Decisions
 
@@ -72,7 +72,7 @@ User ──> Channel ──> AgentService.handleMessage()
 | Heartbeat | **Required** | Daytona auto-stop kills processes after 15 min. `refreshActivity()` every 60s keeps sandbox alive. |
 | Ordinary website automation | **Direct browser target when available** | Same-tab headless browsing prefers `delegate_task target="browser"`. When that target is unavailable (for example in local Bun runtimes), sandbox tasks can fall back to `needsBrowser: true`. |
 
----
+***
 
 ## Module Layout
 
@@ -118,7 +118,7 @@ codex-auth.ts             # Codex auth status + setup tools
 tasks.ts                  # tasks table
 ```
 
----
+***
 
 ## Task Lifecycle
 
@@ -155,7 +155,7 @@ stateDiagram-v2
 | `lost` | Supervisor restarted but session/sandbox gone |
 | `awaiting_auth` | Waiting for user auth (future ChatGPT account mode) |
 
----
+***
 
 ## Architecture Detail
 
@@ -179,14 +179,15 @@ interface TaskProvider {
 2. `git init` in workspace (Codex requires a repo)
 3. Write `.codex/config.toml` with optional Codex notify hooks and Playwright MCP when `needsBrowser: true`
 4. Write `AGENTS.md` with output instructions
-5. Write `prompt.txt` (prompt) and `.env` (API key + CODEX_HOME)
+5. Write `prompt.txt` (prompt) and `.env` (API key + CODEX\_HOME)
 6. Write `run.sh` wrapper that sources `.env` with `set -a` and runs `codex exec --full-auto --output-last-message -o ../artifacts/result.md "$prompt" 2>../artifacts/stderr.log`
 7. Return command: `cd {taskDir} && sh run.sh`
 
 **Result collection** (`collectResult`):
-- Reads `artifacts/result.md` for output
-- Reads `artifacts/stderr.log` for diagnostics
-- Returns `{ output, summary }` (summary is first 500 chars)
+
+* Reads `artifacts/result.md` for output
+* Reads `artifacts/stderr.log` for diagnostics
+* Returns `{ output, summary }` (summary is first 500 chars)
 
 ### CodexInstaller
 
@@ -200,6 +201,7 @@ interface TaskProvider {
 **Dependencies:** `SandboxService`, `DbService`, `EnvService`
 
 **`startTask()`:**
+
 1. Resolve auth (OAuth token or API key)
 2. Ensure sandbox via `SandboxService.ensure(userId)`
 3. Ensure Codex installed via `CodexInstaller`
@@ -212,11 +214,13 @@ interface TaskProvider {
 10. Return `{ taskId, status: "running" }`
 
 **`getTask(taskId, waitSeconds?)`:**
-- If `waitSeconds` > 0: poll DB every 2s up to `min(waitSeconds, 15)` seconds
-- Otherwise: immediate DB lookup
-- Returns task record or null
+
+* If `waitSeconds` > 0: poll DB every 2s up to `min(waitSeconds, 15)` seconds
+* Otherwise: immediate DB lookup
+* Returns task record or null
 
 **Heartbeat loop** (every 60s for all active tasks):
+
 1. `sandbox.refreshActivity()` — prevents Daytona auto-stop
 2. `getSessionCommand()` — check if command completed
 3. Update `heartbeatAt` in DB
@@ -224,12 +228,13 @@ interface TaskProvider {
 5. If timed out → `timeoutTask()` (kill session, update DB)
 
 **Recovery on startup:**
-- Query DB for `status: "running"` tasks
-- Try to reconnect to sandbox + session
-- If reachable → re-register in active map
-- If gone → mark as `lost`
 
----
+* Query DB for `status: "running"` tasks
+* Try to reconnect to sandbox + session
+* If reachable → re-register in active map
+* If gone → mark as `lost`
+
+***
 
 ## Agent Tools
 
@@ -247,9 +252,9 @@ Output:
 
 Target selection:
 
-- `browser`: same-tab headless website work through Stagehand on Cloudflare Browser Rendering
-- `computer`: Daytona CUA for screen-dependent flows, native dialogs, uploads/downloads, CAPTCHA, MFA, popups, or multi-tab handling
-- `sandbox`: long-running autonomous background Codex work
+* `browser`: same-tab headless website work through Stagehand on Cloudflare Browser Rendering
+* `computer`: Daytona CUA for screen-dependent flows, native dialogs, uploads/downloads, CAPTCHA, MFA, popups, or multi-tab handling
+* `sandbox`: long-running autonomous background Codex work
 
 `needsBrowser` applies only to `target="sandbox"` and is meant as a fallback when direct browser delegation is unavailable in the current runtime.
 
@@ -264,7 +269,7 @@ Output: { taskId, status, outputSummary, error, exitCode, startedAt, completedAt
 
 `get_task`, `probe_task`, and `get_task_artifacts` apply only to `delegate_task target="sandbox"` tasks.
 
----
+***
 
 ## DB Schema: `tasks`
 
@@ -293,32 +298,32 @@ Output: { taskId, status, outputSummary, error, exitCode, startedAt, completedAt
 
 **What is NOT stored:** MCP config (lives in `.codex/config.toml`), logs (in `artifacts/stderr.log`), full result (in `artifacts/result.md`).
 
----
+***
 
 ## Auth Flow
 
 Codex auth now follows the official Codex CLI model instead of a custom OAuth implementation:
 
-- **ChatGPT login**: Start `codex login --device-auth` inside the sandbox and relay the verification URL + one-time code to the user. Codex writes the resulting session to `CODEX_HOME/auth.json`.
-- **API key**: Write the official API-key auth cache shape to `CODEX_HOME/auth.json` and record only non-secret metadata in the DB.
-- **Persistence**: Store auth state and pending device-login metadata in `user_volumes.auth_config` (survives sandbox replacement), while the actual credentials stay in the sandbox filesystem via the mounted volume.
-- **Fallback**: If device auth is unavailable, import a trusted `~/.codex/auth.json` from another machine rather than implementing a custom OAuth callback flow.
+* **ChatGPT login**: Start `codex login --device-auth` inside the sandbox and relay the verification URL + one-time code to the user. Codex writes the resulting session to `CODEX_HOME/auth.json`.
+* **API key**: Write the official API-key auth cache shape to `CODEX_HOME/auth.json` and record only non-secret metadata in the DB.
+* **Persistence**: Store auth state and pending device-login metadata in `user_volumes.auth_config` (survives sandbox replacement), while the actual credentials stay in the sandbox filesystem via the mounted volume.
+* **Fallback**: If device auth is unavailable, import a trusted `~/.codex/auth.json` from another machine rather than implementing a custom OAuth callback flow.
 
----
+***
 
 ## Browser Delegation
 
 Single-tab browser work now runs outside the sandbox task system.
 
-- `@amby/browser` provides a `BrowserService` with `runTask({ task, startUrl? })`
-- Worker runtimes back that service with Cloudflare Browser Rendering and Stagehand
-- Stagehand uses an OpenAI-compatible AI Gateway endpoint, with `google/gemini-3-flash-preview` as the default model unless overridden
-- Local Bun runtimes expose a disabled browser service, so `delegate_task target="browser"` is unavailable there
-- In those runtimes, sandbox tasks can still opt into Playwright by using `delegate_task target="sandbox"` with `needsBrowser: true`
+* `@amby/browser` provides a `BrowserService` with `runTask({ task, startUrl? })`
+* Worker runtimes back that service with Cloudflare Browser Rendering and Stagehand
+* Configure `CLOUDFLARE_AI_GATEWAY_BASE_URL` and an API key for Stagehand’s OpenAI-compatible client: prefer `OPENROUTER_API_KEY`, else `CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN` (same Bearer that works for gateway `curl`), else `OPENAI_API_KEY`. Use the [AI Gateway OpenRouter base URL](https://developers.cloudflare.com/ai-gateway/usage/providers/openrouter/) ending in `.../openrouter` (Cloudflare’s OpenAI SDK example); `@amby/browser` strips accidental `.../openrouter/v1` or `.../chat/completions` so the client posts to `{baseURL}/chat/completions`. Default model in code is `openai/gpt-5-mini`. Call `await stagehand.init()` before browser use (handled in `@amby/browser`)
+* Local Bun runtimes expose a disabled browser service, so `delegate_task target="browser"` is unavailable there
+* In those runtimes, sandbox tasks can still opt into Playwright inside Codex by using `delegate_task target="sandbox"` with `needsBrowser: true`
 
 This keeps ordinary website automation fast and direct when the browser target exists, while preserving a sandbox fallback in runtimes that do not expose it.
 
----
+***
 
 ## Layer Composition
 
@@ -338,7 +343,7 @@ AgentService, JobRunnerService
           └── EnvServiceLive
 ```
 
----
+***
 
 ## Sandbox Filesystem Layout
 
@@ -363,19 +368,21 @@ AgentService, JobRunnerService
   harnesses.json                   # Installer cache manifest (survives sandbox stop/start)
 ```
 
----
+***
 
 ## Future
 
 ### v1.5
-- `cancel_task` tool
-- Streaming progress via `getSessionCommandLogs`
-- `list_task_artifacts` tool
-- ChatGPT account auth flow (`awaiting_auth` + device code handoff)
+
+* `cancel_task` tool
+* Streaming progress via `getSessionCommandLogs`
+* `list_task_artifacts` tool
+* ChatGPT account auth flow (`awaiting_auth` + device code handoff)
 
 ### v2
-- `ClaudeCodeProvider` (Claude Code CLI or Agent SDK)
-- Provider registry with selection logic
-- Per-task sandbox option
-- Task chaining (output of one feeds into another)
-- Artifact download to local machine
+
+* `ClaudeCodeProvider` (Claude Code CLI or Agent SDK)
+* Provider registry with selection logic
+* Per-task sandbox option
+* Task chaining (output of one feeds into another)
+* Artifact download to local machine

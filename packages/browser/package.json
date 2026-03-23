@@ -14,10 +14,10 @@
 		"build": "bun build ./src/shared.ts ./src/local.ts --outdir dist --target bun && cp ./src/workers.ts ./dist/workers.ts"
 	},
 	"dependencies": {
-		"@ai-sdk/openai": "^1.3.0",
 		"@amby/env": "workspace:*",
 		"@browserbasehq/stagehand": "2.5.x",
-		"@cloudflare/playwright": "^1.0.0"
+		"@cloudflare/playwright": "^1.0.0",
+		"workers-ai-provider": "3.1.7"
 	},
 	"peerDependencies": {
 		"ai": "^6.0.116",
