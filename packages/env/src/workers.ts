@@ -69,8 +69,7 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		OPENAI_API_KEY: bindings.OPENAI_API_KEY ?? "",
 		BROWSER_AI_GATEWAY_BASE_URL: bindings.BROWSER_AI_GATEWAY_BASE_URL ?? "",
 		BROWSER_AI_GATEWAY_AUTH_TOKEN: bindings.BROWSER_AI_GATEWAY_AUTH_TOKEN ?? "",
-		BROWSER_STAGEHAND_MODEL:
-			bindings.BROWSER_STAGEHAND_MODEL ?? "google/gemini-3-flash-preview",
+		BROWSER_STAGEHAND_MODEL: bindings.BROWSER_STAGEHAND_MODEL ?? "google/gemini-3-flash-preview",
 		CARTESIA_API_KEY: bindings.CARTESIA_API_KEY ?? "",
 		DAYTONA_API_KEY: bindings.DAYTONA_API_KEY ?? "",
 		DAYTONA_API_URL: bindings.DAYTONA_API_URL ?? "https://app.daytona.io/api",

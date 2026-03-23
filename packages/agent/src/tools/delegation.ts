@@ -1,4 +1,4 @@
-import { BrowserService } from "@amby/browser"
+import type { BrowserService } from "@amby/browser"
 import type { TaskSupervisor } from "@amby/computer"
 import { tool } from "ai"
 import type { Context } from "effect"
@@ -47,16 +47,13 @@ export function getAvailableTaskTargets(options: {
 
 function buildTargetDescription(targets: ReadonlyArray<TaskTarget>): string {
 	return targets
-		.map((target) => {
-			switch (target) {
-				case "browser":
-					return "browser = single-tab headless website work"
-				case "computer":
-					return "computer = Daytona desktop control"
-				case "sandbox":
-					return "sandbox = long-running background Codex task"
-			}
-		})
+		.map((target) =>
+			target === "browser"
+				? "browser = single-tab headless website work"
+				: target === "computer"
+					? "computer = Daytona desktop control"
+					: "sandbox = long-running background Codex task",
+		)
 		.join(", ")
 }
 
@@ -120,9 +117,7 @@ export function createTaskDelegationTools(
 			inputSchema: z
 				.object({
 					task: z.string().describe("Detailed task description for the selected execution target"),
-					target: z
-						.enum(availableTargets)
-						.describe(buildTargetDescription(availableTargets)),
+					target: z.enum(availableTargets).describe(buildTargetDescription(availableTargets)),
 					context: z
 						.string()
 						.optional()
@@ -140,7 +135,10 @@ export function createTaskDelegationTools(
 						),
 				})
 				.strict(),
-			execute: async ({ task, target, context, startUrl, needsBrowser }, { abortSignal, toolCallId }) => {
+			execute: async (
+				{ task, target, context, startUrl, needsBrowser },
+				{ abortSignal, toolCallId },
+			) => {
 				const fullTask = context ? `${task}\n\nAdditional context: ${context}` : task
 
 				if (target === "browser") {
@@ -191,7 +189,10 @@ export function createTaskDelegationTools(
 				}
 
 				if (!sandboxEnabled) {
-					return failure("sandbox", "Background sandbox delegation is not available in this runtime.")
+					return failure(
+						"sandbox",
+						"Background sandbox delegation is not available in this runtime.",
+					)
 				}
 
 				const result = await Effect.runPromise(
@@ -209,7 +210,6 @@ export function createTaskDelegationTools(
 				}
 			},
 		}),
-
 	}
 
 	if (!sandboxEnabled) {
@@ -225,9 +225,7 @@ export function createTaskDelegationTools(
 				"Optionally wait briefly for completion with waitSeconds (max 15s). " +
 				"Use this only for tasks started with delegate_task target='sandbox'. Returns lastHeartbeat and lastEventSeq when available.",
 			inputSchema: z.object({
-				taskId: z
-					.string()
-					.describe("Task ID from delegate_task when target was 'sandbox'"),
+				taskId: z.string().describe("Task ID from delegate_task when target was 'sandbox'"),
 				waitSeconds: z
 					.number()
 					.optional()
@@ -256,9 +254,7 @@ export function createTaskDelegationTools(
 				"Force a reconciliation of a delegated task with the sandbox: checks Daytona session state and status.json. " +
 				"Use only for delegate_task target='sandbox' when a task seems stuck in running; not for routine polling.",
 			inputSchema: z.object({
-				taskId: z
-					.string()
-					.describe("Task ID from delegate_task when target was 'sandbox'"),
+				taskId: z.string().describe("Task ID from delegate_task when target was 'sandbox'"),
 			}),
 			execute: async ({ taskId }) => {
 				const task = await Effect.runPromise(supervisor.probeTask(taskId, userId))
@@ -282,9 +278,7 @@ export function createTaskDelegationTools(
 			description:
 				"List artifact files for a delegate_task target='sandbox' task and optionally preview result.md (first 2000 chars).",
 			inputSchema: z.object({
-				taskId: z
-					.string()
-					.describe("Task ID from delegate_task when target was 'sandbox'"),
+				taskId: z.string().describe("Task ID from delegate_task when target was 'sandbox'"),
 			}),
 			execute: async ({ taskId }) => {
 				const result = await Effect.runPromise(supervisor.getTaskArtifacts(taskId, userId))

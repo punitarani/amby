@@ -1,5 +1,5 @@
-import type { Platform } from "@amby/channels"
 import { BrowserService } from "@amby/browser"
+import type { Platform } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
 import { ConnectorsService, createConnectorManagementTools } from "@amby/connectors"
 import { DbService, eq, schema } from "@amby/db"
@@ -226,9 +226,10 @@ export const makeAgentServiceLive = (userId: string) =>
 					const codexAuthTools = sandbox.enabled
 						? createCodexAuthTools(taskSupervisor, userId)
 						: undefined
-					const cuaTools = agentConfig.cuaEnabled && sandbox.enabled
-						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
-						: undefined
+					const cuaTools =
+						agentConfig.cuaEnabled && sandbox.enabled
+							? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
+							: undefined
 					const connectorManagementTools = connectors.isEnabled()
 						? createConnectorManagementTools(connectors, userId)
 						: undefined

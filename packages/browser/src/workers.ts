@@ -1,6 +1,6 @@
 import { createOpenAI } from "@ai-sdk/openai"
-import { type AISdkClient, Stagehand } from "@browserbasehq/stagehand"
 import type { WorkerBindings } from "@amby/env/workers"
+import { type AISdkClient, Stagehand } from "@browserbasehq/stagehand"
 import { Effect, Layer } from "effect"
 import { BrowserError, BrowserService, type BrowserTaskResult } from "./shared"
 
@@ -44,7 +44,8 @@ export function resolveBrowserWorkerSettings(
 ): BrowserWorkerSettings {
 	const baseURL = withoutTrailingSlash(normalizeNonEmpty(bindings.BROWSER_AI_GATEWAY_BASE_URL))
 	const authToken = normalizeNonEmpty(bindings.BROWSER_AI_GATEWAY_AUTH_TOKEN)
-	const model = normalizeNonEmpty(bindings.BROWSER_STAGEHAND_MODEL) || DEFAULT_BROWSER_STAGEHAND_MODEL
+	const model =
+		normalizeNonEmpty(bindings.BROWSER_STAGEHAND_MODEL) || DEFAULT_BROWSER_STAGEHAND_MODEL
 	const browserBinding = bindings.BROWSER
 
 	return {
@@ -144,9 +145,7 @@ export const makeBrowserServiceFromBindings = (bindings: BrowserWorkerBindings) 
 						? cause
 						: new BrowserError({
 								message:
-									cause instanceof Error
-										? cause.message
-										: "Browser task failed unexpectedly.",
+									cause instanceof Error ? cause.message : "Browser task failed unexpectedly.",
 								cause,
 							}),
 			}),

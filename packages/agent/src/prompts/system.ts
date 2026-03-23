@@ -100,7 +100,7 @@ function buildAvailableAgents(capabilities: PromptCapabilities): string {
 
 	if (capabilities.browserEnabled || capabilities.computerEnabled || capabilities.sandboxEnabled) {
 		lines.push(
-			"- **delegate_task** — Unified task delegation. Use target=\"browser\" for single-tab headless website work, target=\"computer\" for Daytona desktop interaction, and target=\"sandbox\" for long-running autonomous background Codex tasks.",
+			'- **delegate_task** — Unified task delegation. Use target="browser" for single-tab headless website work, target="computer" for Daytona desktop interaction, and target="sandbox" for long-running autonomous background Codex tasks.',
 		)
 	}
 
@@ -127,23 +127,23 @@ function buildWhenToDelegate(capabilities: PromptCapabilities): string {
 	if (capabilities.browserEnabled || capabilities.computerEnabled || capabilities.sandboxEnabled) {
 		if (capabilities.browserEnabled) {
 			lines.push(
-				"- Need normal same-tab website work that can run headlessly without the desktop → delegate_task with target=\"browser\"",
+				'- Need normal same-tab website work that can run headlessly without the desktop → delegate_task with target="browser"',
 			)
 		} else if (capabilities.sandboxEnabled) {
 			lines.push(
-				"- Need website work in a runtime without direct browser support → delegate_task with target=\"sandbox\" and needsBrowser=true",
+				'- Need website work in a runtime without direct browser support → delegate_task with target="sandbox" and needsBrowser=true',
 			)
 		}
 
 		if (capabilities.computerEnabled) {
 			lines.push(
-				"- Need a real screen, native dialogs, file pickers, CAPTCHA/MFA, uploads/downloads, popups, multi-tab handling, or non-web UI → delegate_task with target=\"computer\"",
+				'- Need a real screen, native dialogs, file pickers, CAPTCHA/MFA, uploads/downloads, popups, multi-tab handling, or non-web UI → delegate_task with target="computer"',
 			)
 		}
 
 		if (capabilities.sandboxEnabled) {
 			lines.push(
-				"- Need a long-running autonomous background Codex task → delegate_task with target=\"sandbox\"",
+				'- Need a long-running autonomous background Codex task → delegate_task with target="sandbox"',
 			)
 		}
 	}
@@ -157,7 +157,11 @@ function buildWhenToDelegate(capabilities: PromptCapabilities): string {
 }
 
 function buildTaskDelegationSection(capabilities: PromptCapabilities): string {
-	if (!capabilities.browserEnabled && !capabilities.computerEnabled && !capabilities.sandboxEnabled) {
+	if (
+		!capabilities.browserEnabled &&
+		!capabilities.computerEnabled &&
+		!capabilities.sandboxEnabled
+	) {
 		return ""
 	}
 
@@ -186,7 +190,7 @@ function buildTaskDelegationSection(capabilities: PromptCapabilities): string {
 		)
 		if (!capabilities.browserEnabled) {
 			lines.push(
-				'  - When direct browser delegation is unavailable in this runtime, set needsBrowser=true on sandbox tasks to enable Playwright browser automation',
+				"  - When direct browser delegation is unavailable in this runtime, set needsBrowser=true on sandbox tasks to enable Playwright browser automation",
 			)
 		}
 	}
@@ -248,7 +252,11 @@ ${buildAvailableAgents(capabilities)}
 
 ${buildWhenToDelegate(capabilities)}
 
-${[buildTaskDelegationSection(capabilities), buildCodexAuthSection(capabilities), buildOrchestrationRules(capabilities)]
+${[
+	buildTaskDelegationSection(capabilities),
+	buildCodexAuthSection(capabilities),
+	buildOrchestrationRules(capabilities),
+]
 	.filter(Boolean)
 	.join("\n\n")}
 

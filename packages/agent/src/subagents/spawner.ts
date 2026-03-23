@@ -7,7 +7,7 @@ import {
 	type RequestTraceMetadata,
 } from "../telemetry"
 import { extractToolUserMessages } from "../utils/extract-tool-user-messages"
-import { type SubagentDef, SUBAGENT_DEFS } from "./definitions"
+import { SUBAGENT_DEFS, type SubagentDef } from "./definitions"
 import { resolveTools, type ToolGroups } from "./tool-groups"
 
 export type SubagentTrace = {

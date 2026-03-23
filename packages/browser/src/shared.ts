@@ -1,4 +1,4 @@
-import { Context, Data, Effect } from "effect"
+import { Context, Data, type Effect } from "effect"
 
 export interface BrowserTaskInput {
 	task: string
@@ -21,8 +21,6 @@ export class BrowserService extends Context.Tag("BrowserService")<
 	BrowserService,
 	{
 		readonly enabled: boolean
-		readonly runTask: (
-			input: BrowserTaskInput,
-		) => Effect.Effect<BrowserTaskResult, BrowserError>
+		readonly runTask: (input: BrowserTaskInput) => Effect.Effect<BrowserTaskResult, BrowserError>
 	}
 >() {}
