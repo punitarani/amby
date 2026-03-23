@@ -114,13 +114,14 @@ async function runBrowserTask(
 	}
 
 	const llmClient = await createAISdkClient(settings)
+	const llmClient = await createAISdkClient(settings)
 	const { endpointURLString } = await import("@cloudflare/playwright")
 	const stagehand = new Stagehand({
 		env: "LOCAL",
-		verbose: process.env.NODE_ENV === "development" ? 1 : 0,
+		verbose: 1,
 		llmClient,
 		localBrowserLaunchOptions: {
-			cdpUrl: endpointURLString(settings.browserBinding as never),
+			cdpUrl: endpointURLString(settings.browserBinding as any),
 		},
 	})
 
