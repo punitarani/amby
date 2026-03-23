@@ -413,6 +413,16 @@ export const makeAgentServiceLive = (userId: string) =>
 								})
 								.strict(),
 							async execute({ request, context }) {
+								if (state.execution) {
+									return {
+										mode: state.execution.mode,
+										status: "failed" as const,
+										tasks: [],
+										backgroundTasks: [],
+										summary:
+											"Execution already completed in this turn. Use query_execution to inspect results.",
+									}
+								}
 								const composed = context?.trim()
 									? `${request}\n\nAdditional context:\n${context}`
 									: request
@@ -626,13 +636,9 @@ export const makeAgentServiceLive = (userId: string) =>
 						Effect.gen(function* () {
 							const trace = rootTraceRef
 							if (trace) {
-								yield* Effect.tryPromise(() =>
-									Effect.runPromise(
-										trace.complete("failed", {
-											error: toErrorMessage(error),
-										}),
-									),
-								).pipe(Effect.catchAll(() => Effect.void))
+								yield* trace
+									.complete("failed", { error: toErrorMessage(error) })
+									.pipe(Effect.catchAll(() => Effect.void))
 							}
 							if (error instanceof AgentError) return yield* Effect.fail(error)
 							return yield* Effect.fail(
@@ -711,13 +717,17 @@ export const makeAgentServiceLive = (userId: string) =>
 					),
 
 				shutdown: () =>
-					taskSupervisor
-						.shutdown()
-						.pipe(
-							Effect.mapError(
-								(cause) => new AgentError({ message: "Failed to shut down agent", cause }),
-							),
+					Effect.gen(function* () {
+						const instance = computer.getSandbox()
+						if (instance) {
+							yield* sandbox.stop(instance).pipe(Effect.catchAll(() => Effect.void))
+						}
+						yield* taskSupervisor.shutdown()
+					}).pipe(
+						Effect.mapError(
+							(cause) => new AgentError({ message: "Failed to shut down agent", cause }),
 						),
+					),
 			}
 		}),
 	)
