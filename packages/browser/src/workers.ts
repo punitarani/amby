@@ -152,7 +152,9 @@ async function runBrowserTask(
 		}
 	} finally {
 		await stagehand.close().catch((error) => {
-			console.warn("[BrowserService] stagehand.close() failed:", error)
+	} finally {
+		await stagehand.close().catch((err) => {
+			console.warn("[BrowserService] stagehand.close() failed:", err)
 		})
 	}
 }
