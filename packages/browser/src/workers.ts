@@ -1,6 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai"
 import type { WorkerBindings } from "@amby/env/workers"
 import { type AISdkClient, Stagehand } from "@browserbasehq/stagehand"
+import type { BrowserWorker } from "@cloudflare/playwright"
 import { Effect, Layer } from "effect"
 import { BrowserError, BrowserService, type BrowserTaskResult } from "./shared"
 
@@ -21,6 +22,7 @@ type BrowserWorkerBindings = Pick<
 	| "BROWSER_AI_GATEWAY_BASE_URL"
 	| "BROWSER_AI_GATEWAY_AUTH_TOKEN"
 	| "BROWSER_STAGEHAND_MODEL"
+	| "NODE_ENV"
 >
 
 export interface BrowserWorkerSettings {
@@ -29,6 +31,7 @@ export interface BrowserWorkerSettings {
 	authToken: string
 	model: string
 	browserBinding: unknown
+	verbose: 0 | 1
 }
 
 function normalizeNonEmpty(value: string | undefined): string {
@@ -39,6 +42,24 @@ function withoutTrailingSlash(value: string): string {
 	return value.replace(/\/+$/, "")
 }
 
+function parseHttpUrl(value: string): string {
+	let url: URL
+
+	try {
+		url = new URL(value)
+	} catch {
+		throw new BrowserError({ message: `Invalid startUrl: ${value}` })
+	}
+
+	if (url.protocol !== "http:" && url.protocol !== "https:") {
+		throw new BrowserError({
+			message: `Invalid startUrl scheme (only http/https allowed): ${value}`,
+		})
+	}
+
+	return url.toString()
+}
+
 export function resolveBrowserWorkerSettings(
 	bindings: BrowserWorkerBindings,
 ): BrowserWorkerSettings {
@@ -47,6 +68,7 @@ export function resolveBrowserWorkerSettings(
 	const model =
 		normalizeNonEmpty(bindings.BROWSER_STAGEHAND_MODEL) || DEFAULT_BROWSER_STAGEHAND_MODEL
 	const browserBinding = bindings.BROWSER
+	const verbose = normalizeNonEmpty(bindings.NODE_ENV) === "development" ? 1 : 0
 
 	return {
 		enabled: Boolean(browserBinding && baseURL),
@@ -54,6 +76,7 @@ export function resolveBrowserWorkerSettings(
 		authToken,
 		model,
 		browserBinding,
+		verbose,
 	}
 }
 
@@ -94,19 +117,19 @@ async function runBrowserTask(
 	const { endpointURLString } = await import("@cloudflare/playwright")
 	const stagehand = new Stagehand({
 		env: "LOCAL",
-		verbose: 1,
+		verbose: settings.verbose,
 		llmClient,
 		localBrowserLaunchOptions: {
-			cdpUrl: endpointURLString(settings.browserBinding as never),
+			cdpUrl: endpointURLString(settings.browserBinding as BrowserWorker),
 		},
 	})
 
 	try {
 		await stagehand.init()
 
-		const initialUrl = normalizeNonEmpty(startUrl)
-		if (initialUrl) {
-			await stagehand.page.goto(initialUrl)
+		const rawUrl = normalizeNonEmpty(startUrl)
+		if (rawUrl) {
+			await stagehand.page.goto(parseHttpUrl(rawUrl))
 		}
 
 		const agent = stagehand.agent({
@@ -128,7 +151,9 @@ async function runBrowserTask(
 			title: title?.trim() || null,
 		}
 	} finally {
-		await stagehand.close().catch(() => {})
+		await stagehand.close().catch((error) => {
+			console.warn("[BrowserService] stagehand.close() failed:", error)
+		})
 	}
 }
 
