@@ -126,11 +126,12 @@ async function runBrowserTask(
 	})
 
 	try {
-		await stagehand.init()
-
 		const rawUrl = normalizeNonEmpty(startUrl)
 		if (rawUrl) {
-			await stagehand.page.goto(parseHttpUrl(rawUrl))
+			if (!/^https?:\/\//i.test(rawUrl)) {
+				throw new BrowserError({ message: `Invalid startUrl scheme (only http/https allowed): ${rawUrl}` })
+			}
+			await stagehand.page.goto(rawUrl)
 		}
 
 		const agent = stagehand.agent({
