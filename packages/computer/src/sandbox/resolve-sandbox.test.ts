@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { COMPUTER_SNAPSHOT } from "../computer-snapshot"
-import { AGENT_USER, SANDBOX_RESOURCES } from "../config"
+import { AGENT_USER } from "../config"
 import { buildSandboxCreateParams } from "./resolve-sandbox"
 
 describe("buildSandboxCreateParams", () => {
@@ -9,7 +9,7 @@ describe("buildSandboxCreateParams", () => {
 
 		expect(params.snapshot).toBe(COMPUTER_SNAPSHOT)
 		expect(params.user).toBe(AGENT_USER)
-		expect(params.resources).toEqual(SANDBOX_RESOURCES)
+		expect("resources" in params).toBe(false)
 		expect("image" in params).toBe(false)
 	})
 })
