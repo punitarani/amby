@@ -117,10 +117,10 @@ async function runBrowserTask(
 	const { endpointURLString } = await import("@cloudflare/playwright")
 	const stagehand = new Stagehand({
 		env: "LOCAL",
-		verbose: settings.verbose,
+		verbose: process.env.NODE_ENV === "development" ? 1 : 0,
 		llmClient,
 		localBrowserLaunchOptions: {
-			cdpUrl: endpointURLString(settings.browserBinding as BrowserWorker),
+			cdpUrl: endpointURLString(settings.browserBinding as never),
 		},
 	})
 
