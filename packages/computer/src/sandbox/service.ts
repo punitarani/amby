@@ -64,9 +64,10 @@ export const SandboxServiceLive = Layer.effect(
 		const kickOffSandboxProvision = (userId: string) =>
 			Effect.tryPromise({
 				try: async () => {
-					if (!env.SANDBOX_WORKFLOW) return
+					const workflow = env.SANDBOX_WORKFLOW
+					if (!workflow) return
 					await kickOffSandboxProvisionIfNeeded(db, userId, () =>
-						env.SANDBOX_WORKFLOW!.create({ params: { userId } }),
+						workflow.create({ params: { userId } }),
 					)
 				},
 				catch: (cause) =>

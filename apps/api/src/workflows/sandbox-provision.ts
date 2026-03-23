@@ -80,7 +80,8 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				Effect.gen(function* () {
 					const { db } = yield* DbService
 					yield* Effect.tryPromise({
-						try: () => upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volumeId, snapshot),
+						try: () =>
+							upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volumeId, snapshot),
 						catch: (cause) =>
 							new Error(
 								`Failed to upsert sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,

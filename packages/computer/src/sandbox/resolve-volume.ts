@@ -3,6 +3,7 @@ import { and, eq, ne, schema } from "@amby/db"
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
 import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
 import { Effect } from "effect"
+import { COMPUTER_SNAPSHOT } from "../computer-snapshot"
 import {
 	sandboxName,
 	VOLUME_CODEX_HOME,
@@ -13,7 +14,6 @@ import {
 	VOLUME_TASK_BASE,
 	volumeName,
 } from "../config"
-import { COMPUTER_SNAPSHOT } from "../computer-snapshot"
 import { SandboxError, VolumeError } from "../errors"
 import {
 	inferDbStatusFromSandbox,
@@ -296,7 +296,14 @@ export const ensureMainSandbox = (
 			})
 			await ensureMountedHomeLayout(readySandbox)
 			cache.set(userId, readySandbox)
-			await persistMainSandboxFromInstance(db, userId, readySandbox, volumeRow.id, "running", COMPUTER_SNAPSHOT)
+			await persistMainSandboxFromInstance(
+				db,
+				userId,
+				readySandbox,
+				volumeRow.id,
+				"running",
+				COMPUTER_SNAPSHOT,
+			)
 			return readySandbox
 		}
 
