@@ -4,8 +4,8 @@ set -euo pipefail
 DOCKER_REPO="punitarani/amby"
 IMAGE_TAG="computer"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION_FILE="${SCRIPT_DIR}/VERSION"
-VERSION="${1:-$(cat "${VERSION_FILE}")}"
+VERSION_FILE="${SCRIPT_DIR}/VERSION.json"
+VERSION="${1:-$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "${VERSION_FILE}")}"
 
 if [[ -z "${VERSION}" ]]; then
 	echo "Error: failed to read computer image version from ${VERSION_FILE}" >&2

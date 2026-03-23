@@ -8,11 +8,10 @@ import {
 } from "./computer-snapshot"
 
 describe("computer snapshot metadata", () => {
-	it("derives snapshot and docker image names from docker/computer/VERSION", () => {
-		const versionFromFile = readFileSync(
-			join(import.meta.dir, "../../../docker/computer/VERSION"),
-			"utf-8",
-		).trim()
+	it("derives snapshot and docker image names from docker/computer/VERSION.json", () => {
+		const versionFromFile = JSON.parse(
+			readFileSync(join(import.meta.dir, "../../../docker/computer/VERSION.json"), "utf-8"),
+		).version
 
 		expect(COMPUTER_IMAGE_VERSION).toMatch(/^\d+\.\d+$/)
 		expect(versionFromFile).toBe(COMPUTER_IMAGE_VERSION)
