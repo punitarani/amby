@@ -18,6 +18,7 @@ import type { ToolGroups } from "./registry"
 import { runBackgroundSpecialist } from "./runners/background"
 import { runBrowserSpecialist } from "./runners/browser"
 import { runToolloopSpecialist } from "./runners/toolloop"
+import { persistTaskCompleted, persistTaskCreated } from "./task-persistence"
 
 type QueryFn = <T>(
 	fn: (db: import("@amby/db").Database) => Promise<T>,
@@ -150,6 +151,15 @@ async function runTaskWithTrace(params: {
 		}),
 	)
 
+	if (params.task.runnerKind !== "background_handoff") {
+		await persistTaskCreated(params.query, params.task, {
+			userId: params.config.request.userId,
+			conversationId: params.config.request.conversationId,
+			threadId: params.config.request.threadId,
+			traceId: trace.traceId,
+		})
+	}
+
 	try {
 		const runResult =
 			params.task.runnerKind === "browser_service"
@@ -207,6 +217,7 @@ async function runTaskWithTrace(params: {
 				}),
 			),
 		)
+		await persistTaskCompleted(params.query, params.task.id, runResult.result)
 		return runResult.result
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error)
@@ -236,6 +247,9 @@ async function runTaskWithTrace(params: {
 				}),
 			),
 		)
+		if (params.task.runnerKind !== "background_handoff") {
+			await persistTaskCompleted(params.query, params.task.id, failedResult)
+		}
 		return failedResult
 	}
 }
