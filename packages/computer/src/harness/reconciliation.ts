@@ -4,6 +4,7 @@ import type { Sandbox } from "@daytonaio/sdk"
 import { STALE_HEARTBEAT_MS, TASK_BASE } from "../config"
 import { CodexProvider } from "./codex-provider"
 import { parseReplyTarget } from "./reply-target"
+import { collectTaskExecutionData } from "./task-execution-data"
 import { isTerminal, TERMINAL_STATUSES } from "./task-state"
 
 type TaskRow = typeof schema.tasks.$inferSelect
@@ -104,7 +105,12 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 				return
 			}
 
-			const result = await provider.collectResult(sandbox, provider.getArtifactRoot(task.id))
+			const result = await collectTaskExecutionData({
+				sandbox,
+				provider,
+				taskId: task.id,
+				artifactRoot: provider.getArtifactRoot(task.id),
+			})
 			const nextStatus: TaskStatus = cmd.exitCode === 0 ? "succeeded" : "failed"
 			const probeNow = new Date()
 			const updated = await db
@@ -113,6 +119,8 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 					status: nextStatus,
 					exitCode: cmd.exitCode,
 					outputSummary: result.summary.slice(0, 2000),
+					output: result.output ? { result: result.output } : null,
+					artifacts: result.artifacts,
 					completedAt: probeNow,
 					heartbeatAt: probeNow,
 					updatedAt: probeNow,
@@ -137,7 +145,12 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 			trustStatusJson &&
 			(statusJson?.status === "succeeded" || statusJson?.status === "failed")
 		) {
-			const result = await provider.collectResult(sandbox, provider.getArtifactRoot(task.id))
+			const result = await collectTaskExecutionData({
+				sandbox,
+				provider,
+				taskId: task.id,
+				artifactRoot: provider.getArtifactRoot(task.id),
+			})
 			const success = statusJson.status === "succeeded"
 			const nextStatus: TaskStatus = success ? "succeeded" : "failed"
 			const sjNow = new Date()
@@ -147,6 +160,8 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 					status: nextStatus,
 					exitCode: statusJson.exitCode ?? (success ? 0 : 1),
 					outputSummary: result.summary.slice(0, 2000),
+					output: result.output ? { result: result.output } : null,
+					artifacts: result.artifacts,
 					completedAt: sjNow,
 					heartbeatAt: sjNow,
 					updatedAt: sjNow,

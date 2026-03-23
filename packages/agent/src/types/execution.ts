@@ -107,6 +107,7 @@ export type QueryExecutionResult = {
 		specialist: SpecialistKind | null
 		status: TaskStatus
 		summary: string | null
+		output?: JsonValue
 		traceId: string | null
 		startedAt: string | null
 		completedAt: string | null

@@ -121,6 +121,25 @@ function buildSendMessageTool(onReply?: ReplyFn) {
 	})
 }
 
+function summarizeExecutionOutput(output: unknown): string {
+	if (output === undefined || output === null) return ""
+	if (typeof output === "string") return output.trim().slice(0, 400)
+	if (
+		typeof output === "object" &&
+		output !== null &&
+		"result" in output &&
+		typeof output.result === "string"
+	) {
+		return output.result.trim().slice(0, 400)
+	}
+
+	try {
+		return JSON.stringify(output).slice(0, 400)
+	} catch {
+		return ""
+	}
+}
+
 function buildExecutionToolSummary(
 	result:
 		| QueryExecutionResult
@@ -133,10 +152,17 @@ function buildExecutionToolSummary(
 	if ("executions" in result) {
 		if (result.executions.length === 0) return "No matching background executions found."
 		return result.executions
-			.map(
-				(execution) =>
-					`${execution.taskId}: ${execution.status}${execution.summary ? ` — ${execution.summary}` : ""}`,
-			)
+			.map((execution) => {
+				const preview = summarizeExecutionOutput(execution.output)
+				const artifacts = execution.artifacts?.length
+					? ` Files: ${execution.artifacts
+							.map((artifact) => artifact.title ?? artifact.uri ?? artifact.kind)
+							.join(", ")}.`
+					: ""
+				return `${execution.taskId}: ${execution.status}${execution.summary ? ` — ${execution.summary}` : ""}${
+					preview ? `\nOutput preview: ${preview}` : ""
+				}${artifacts}`
+			})
 			.join("\n")
 	}
 

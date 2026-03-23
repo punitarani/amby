@@ -33,6 +33,7 @@ import { mintCallbackSecret } from "./callback"
 import { CodexInstaller } from "./codex-installer"
 import { CodexProvider } from "./codex-provider"
 import { probeSingleTask } from "./reconciliation"
+import { collectTaskExecutionData, previewTaskOutput } from "./task-execution-data"
 import { isTerminal, TERMINAL_STATUSES } from "./task-state"
 
 type TaskRecord = typeof schema.tasks.$inferSelect
@@ -193,6 +194,13 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 			userId: string,
 			waitSeconds?: number,
 		) => Effect.Effect<TaskRecord | null, SandboxError>
+		readonly getTaskExecutionData: (
+			taskId: string,
+			userId: string,
+		) => Effect.Effect<
+			{ output: string; summary: string; artifacts: Array<Record<string, unknown>> } | null,
+			SandboxError
+		>
 		readonly shutdown: () => Effect.Effect<void>
 	}
 >() {}
@@ -408,9 +416,23 @@ export const TaskSupervisorLive = Layer.scoped(
 				return
 			}
 
-			let result = { output: "", summary: "Task completed" }
+			let result = {
+				output: "",
+				summary: "Task completed",
+				artifacts: [] as Array<Record<string, unknown>>,
+			}
 			try {
-				result = await provider.collectResult(task.sandbox, provider.getArtifactRoot(task.taskId))
+				const executionData = await collectTaskExecutionData({
+					sandbox: task.sandbox,
+					provider,
+					taskId: task.taskId,
+					artifactRoot: provider.getArtifactRoot(task.taskId),
+				})
+				result = {
+					output: executionData.output,
+					summary: executionData.summary,
+					artifacts: executionData.artifacts,
+				}
 			} catch {
 				// Best effort only.
 			}
@@ -420,6 +442,8 @@ export const TaskSupervisorLive = Layer.scoped(
 				.set({
 					status: exitCode === 0 ? "succeeded" : "failed",
 					outputSummary: result.summary.slice(0, 2000),
+					output: result.output ? { result: result.output } : null,
+					artifacts: result.artifacts,
 					exitCode,
 					completedAt: new Date(),
 					updatedAt: new Date(),
@@ -1135,42 +1159,62 @@ export const TaskSupervisorLive = Layer.scoped(
 
 			getTaskArtifacts: (taskId, userId) =>
 				Effect.gen(function* () {
-					const taskRows = yield* query((d) =>
-						d
+					const executionData = yield* Effect.tryPromise({
+						try: async () => {
+							const taskRows = await db
+								.select()
+								.from(schema.tasks)
+								.where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
+								.limit(1)
+							const task = taskRows[0]
+							if (!task) return null
+
+							const sandbox = await Effect.runPromise(sandboxService.ensure(userId))
+							return await collectTaskExecutionData({
+								sandbox,
+								provider,
+								taskId,
+								artifactRoot: task.artifactRoot ?? provider.getArtifactRoot(taskId),
+							})
+						},
+						catch: (error) =>
+							new SandboxError({
+								message: `get_task_artifacts: ${error instanceof Error ? error.message : String(error)}`,
+								cause: error,
+							}),
+					})
+					if (!executionData) return null
+					return {
+						files: executionData.files,
+						resultPreview: previewTaskOutput(executionData.output),
+					}
+				}),
+
+			getTaskExecutionData: (taskId, userId) =>
+				Effect.tryPromise({
+					try: async () => {
+						const taskRows = await db
 							.select()
 							.from(schema.tasks)
 							.where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
-							.limit(1),
-					).pipe(
-						Effect.mapError(
-							(error) =>
-								new SandboxError({
-									message: `get_task_artifacts: ${error instanceof Error ? error.message : String(error)}`,
-									cause: error,
-								}),
-						),
-					)
-					const task = taskRows[0]
-					if (!task) return null
-					const root = task.artifactRoot ?? provider.getArtifactRoot(taskId)
-					const sandbox = yield* sandboxService.ensure(userId)
-					const listed = yield* sandboxService.exec(
-						sandbox,
-						`find "${root}" -maxdepth 1 -type f -printf "%f\\t%s\\n" 2>/dev/null || true`,
-					)
-					const files: { name: string; size: number }[] = []
-					for (const line of listed.stdout.split("\n")) {
-						if (!line.includes("\t")) continue
-						const [name, sizeStr] = line.split("\t")
-						if (!name) continue
-						const size = Number(sizeStr)
-						if (Number.isFinite(size)) files.push({ name, size })
-					}
-					const resultPreview = yield* sandboxService.readFile(sandbox, `${root}/result.md`).pipe(
-						Effect.map((c) => c.slice(0, 2000)),
-						Effect.catchAll(() => Effect.succeed(undefined as string | undefined)),
-					)
-					return { files, resultPreview }
+							.limit(1)
+						const task = taskRows[0]
+						if (!task) return null
+
+						const sandbox = await Effect.runPromise(sandboxService.ensure(userId))
+						const executionData = await collectTaskExecutionData({
+							sandbox,
+							provider,
+							taskId,
+							artifactRoot: task.artifactRoot ?? provider.getArtifactRoot(taskId),
+						})
+						return {
+							output: executionData.output,
+							summary: executionData.summary,
+							artifacts: executionData.artifacts,
+						}
+					},
+					catch: sandboxErrorFromDefect,
 				}),
 
 			shutdown: () =>

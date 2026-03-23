@@ -4,6 +4,7 @@ import {
 	isLegalTransition,
 	isTerminal,
 	isTimestampValid,
+	TaskSupervisor,
 	verifyHmacSignature,
 } from "@amby/computer"
 import type { TaskEventKind, TaskEventSource, TaskStatus } from "@amby/db"
@@ -84,6 +85,7 @@ async function appendLinkedTraceEvent(params: {
 export const handleTaskEventPost = (request: Request) =>
 	Effect.gen(function* () {
 		const { db } = yield* DbService
+		const taskSupervisor = yield* TaskSupervisor
 
 		const rawBody = yield* Effect.tryPromise({
 			try: () => request.text(),
@@ -230,10 +232,20 @@ export const handleTaskEventPost = (request: Request) =>
 			}
 
 			if (statusOk && (body.eventType === "task.completed" || body.eventType === "task.failed")) {
+				const executionData = yield* taskSupervisor
+					.getTaskExecutionData(task.id, task.userId)
+					.pipe(Effect.catchAll(() => Effect.succeed(null)))
 				patch.completedAt = occurredAt
 				patch.exitCode = body.exitCode ?? (body.eventType === "task.completed" ? 0 : 1)
 				patch.callbackSecretHash = null
-				if (body.message) {
+				if (executionData) {
+					patch.output = executionData.output ? { result: executionData.output } : null
+					patch.artifacts = executionData.artifacts
+					patch.outputSummary = executionData.summary.slice(0, 2000)
+					if (body.eventType === "task.failed") {
+						patch.error = executionData.summary.slice(0, 4000)
+					}
+				} else if (body.message) {
 					patch.outputSummary = body.message.slice(0, 2000)
 					if (body.eventType === "task.failed") {
 						patch.error = body.message.slice(0, 4000)

@@ -3,6 +3,7 @@ import type { Database } from "@amby/db"
 import { and, desc, eq, inArray, schema } from "@amby/db"
 import { Effect } from "effect"
 import type { QueryExecutionInput, QueryExecutionResult } from "../types/execution"
+import type { JsonValue } from "../types/persistence"
 
 type QueryFn = <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, import("@amby/db").DbError>
 
@@ -22,6 +23,7 @@ function mapTaskRow(task: typeof schema.tasks.$inferSelect) {
 		specialist: task.specialist ?? null,
 		status: task.status,
 		summary: task.outputSummary,
+		output: task.output as JsonValue | undefined,
 		traceId: task.traceId ?? null,
 		startedAt: task.startedAt?.toISOString() ?? null,
 		completedAt: task.completedAt?.toISOString() ?? null,
