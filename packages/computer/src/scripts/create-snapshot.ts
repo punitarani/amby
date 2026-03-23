@@ -1,33 +1,48 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
-import { Daytona } from "@daytonaio/sdk"
+import { Daytona, DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
+import { COMPUTER_DOCKER_IMAGE, COMPUTER_SNAPSHOT } from "../computer-snapshot"
 import { SANDBOX_RESOURCES } from "../config"
 
-const version = readFileSync(
-	join(import.meta.dir, "../../../../docker/computer/VERSION"),
-	"utf-8",
-).trim()
+function isNotFoundError(cause: unknown): boolean {
+	if (cause instanceof DaytonaNotFoundError) return true
+	if (cause instanceof DaytonaError && cause.statusCode === 404) return true
 
-const snapshotName = `amby/computer:${version}`
-const dockerImage = `docker.io/punitarani/amby:computer-${version}`
+	const message = cause instanceof Error ? cause.message : String(cause)
+	return /not found/i.test(message)
+}
+
+const apiKey = process.env.DAYTONA_API_KEY?.trim()
+
+if (!apiKey) {
+	console.error("DAYTONA_API_KEY is required to register the computer snapshot.")
+	process.exit(1)
+}
 
 const daytona = new Daytona({
-	apiKey: process.env.DAYTONA_API_KEY ?? "",
+	apiKey,
 	apiUrl: process.env.DAYTONA_API_URL ?? "https://app.daytona.io/api",
 })
 
 // Check if snapshot already exists (idempotent)
+let snapshotExists = false
 try {
-	await daytona.snapshot.get(snapshotName)
-	console.log(`Snapshot '${snapshotName}' already exists — skipping creation.`)
-	process.exit(0)
-} catch {
-	// Not found — proceed to create
+	await daytona.snapshot.get(COMPUTER_SNAPSHOT)
+	snapshotExists = true
+} catch (cause) {
+	if (!isNotFoundError(cause)) throw cause
 }
 
-console.log(`Creating Daytona snapshot '${snapshotName}' from '${dockerImage}'...`)
+if (snapshotExists) {
+	console.log(`Snapshot '${COMPUTER_SNAPSHOT}' already exists — skipping creation.`)
+	process.exit(0)
+}
+
+console.log(`Creating Daytona snapshot '${COMPUTER_SNAPSHOT}' from '${COMPUTER_DOCKER_IMAGE}'...`)
 await daytona.snapshot.create(
-	{ name: snapshotName, image: dockerImage, resources: SANDBOX_RESOURCES },
+	{
+		name: COMPUTER_SNAPSHOT,
+		image: COMPUTER_DOCKER_IMAGE,
+		resources: SANDBOX_RESOURCES,
+	},
 	{ onLogs: (log: string) => process.stdout.write(log) },
 )
-console.log(`Done: snapshot '${snapshotName}' registered.`)
+console.log(`Done: snapshot '${COMPUTER_SNAPSHOT}' registered.`)

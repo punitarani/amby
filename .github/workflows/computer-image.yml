@@ -3,14 +3,36 @@ name: Computer Image
 on:
   push:
     branches: [main]
-    paths: ["docker/computer/**"]
+    paths:
+      - "docker/computer/**"
   pull_request:
-    paths: ["docker/computer/**"]
+    paths:
+      - "docker/computer/**"
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      docker_changed: ${{ steps.filter.outputs.docker }}
+      version_changed: ${{ steps.filter.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docker:
+              - 'docker/computer/**'
+            version:
+              - 'docker/computer/VERSION'
+
   build:
     name: Build (dry run)
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: needs.changes.outputs.docker_changed == 'true' && (github.event_name == 'pull_request' || needs.changes.outputs.version_changed != 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,11 +41,16 @@ jobs:
 
   build-push-snapshot:
     name: Build, push & register snapshot
-    if: github.event_name == 'push'
+    needs: changes
+    if: github.event_name == 'push' && needs.changes.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     environment: github-actions
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.0"
+      - run: bun install --frozen-lockfile
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -33,10 +60,6 @@ jobs:
         run: |
           ./docker/computer/build.sh
           ./docker/computer/push.sh
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.0"
-      - run: bun install --frozen-lockfile
       - name: Register Daytona snapshot
         run: bun run computer:snapshot:create
         env:
