@@ -1,5 +1,6 @@
 import { type LanguageModel, Output, stepCountIs, ToolLoopAgent, type ToolSet } from "ai"
 import { Effect } from "effect"
+import { type AgentTraceMetadata, createTelemetrySettings } from "../../telemetry"
 import type { AgentRunConfig } from "../../types/agent"
 import type {
 	ExecutionTask,
@@ -100,6 +101,19 @@ export async function runToolloopSpecialist(params: {
 }> {
 	const definition = getSpecialistDefinition(params.task.specialist)
 	const tools = resolveVisibleTools(definition, params.config, params.toolGroups)
+	const telemetry = createTelemetrySettings({
+		functionId: `amby.specialist.${params.task.specialist}`,
+		metadata: {
+			request_id: params.config.request.requestId,
+			conversation_id: params.config.request.conversationId,
+			request_mode: params.config.request.mode,
+			user_id: params.config.request.userId,
+			model_id: definition.selectModel(params.config) ?? params.config.modelPolicy.defaultModelId,
+			agent_role: "specialist",
+			specialist_name: params.task.specialist,
+			task_id: params.task.id,
+		} as AgentTraceMetadata,
+	})
 	const agent = new ToolLoopAgent({
 		id: `specialist.${params.task.specialist}`,
 		model: params.getModel(definition.selectModel(params.config)),
@@ -110,6 +124,7 @@ export async function runToolloopSpecialist(params: {
 			name: `${params.task.specialist}_result`,
 		}),
 		stopWhen: stepCountIs(definition.maxSteps(params.config)),
+		experimental_telemetry: telemetry,
 		experimental_onStepStart: async (event) => {
 			await Effect.runPromise(
 				params.trace.append("model_request", {

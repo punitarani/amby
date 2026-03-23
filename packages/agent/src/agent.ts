@@ -20,6 +20,13 @@ import {
 	synopsisCurrentThreadIfOverflowsAfterSave,
 	synopsisPreviousThreadIfDormantSwitch,
 } from "./synopsis"
+import {
+	type AgentTraceMetadata,
+	createTelemetrySettings,
+	initializeTelemetry,
+	shutdownTelemetry,
+	withTelemetryFlush,
+} from "./telemetry"
 import { createCodexAuthTools } from "./tools/codex-auth"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
 import type { AgentRunConfig, AgentRunResult, StreamPart } from "./types/agent"
@@ -272,6 +279,10 @@ export const makeAgentServiceLive = (userId: string) =>
 			const taskSupervisor = yield* TaskSupervisor
 			const connectors = yield* ConnectorsService
 			const env = yield* EnvService
+			initializeTelemetry({
+				apiKey: env.BRAINTRUST_API_KEY,
+				projectId: env.BRAINTRUST_PROJECT_ID,
+			})
 			const baseModel = models.getModel()
 
 			const computer = createComputerTools(sandbox, userId)
@@ -503,6 +514,20 @@ export const makeAgentServiceLive = (userId: string) =>
 						tools: conversationTools,
 						stopWhen: stepCountIs(config.budgets.maxConversationSteps),
 						prepareStep: buildConversationPrepareStep(),
+						experimental_telemetry: createTelemetrySettings({
+							functionId:
+								config.request.mode === "stream-message"
+									? "amby.conversation.stream"
+									: "amby.conversation.generate",
+							metadata: {
+								request_id: config.request.requestId,
+								conversation_id: config.request.conversationId,
+								request_mode: config.request.mode,
+								user_id: userId,
+								model_id: models.defaultModelId,
+								agent_role: "conversation",
+							} as AgentTraceMetadata,
+						}),
 						experimental_onStepStart: async (event) => {
 							await Effect.runPromise(
 								rootTrace.append("model_request", {
@@ -654,32 +679,38 @@ export const makeAgentServiceLive = (userId: string) =>
 
 			return {
 				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>
-					runRequest({
-						conversationId,
-						mode: "message",
-						requestMessages: [{ role: "user", content }],
-						metadata,
-						onReply,
-						onTextDelta,
-					}),
+					withTelemetryFlush(
+						runRequest({
+							conversationId,
+							mode: "message",
+							requestMessages: [{ role: "user", content }],
+							metadata,
+							onReply,
+							onTextDelta,
+						}),
+					),
 
 				handleBatchedMessages: (conversationId, messages, metadata, onReply, onTextDelta) =>
-					runRequest({
-						conversationId,
-						mode: "batched-message",
-						requestMessages: messages.map((content) => ({ role: "user" as const, content })),
-						metadata,
-						onReply,
-						onTextDelta,
-					}),
+					withTelemetryFlush(
+						runRequest({
+							conversationId,
+							mode: "batched-message",
+							requestMessages: messages.map((content) => ({ role: "user" as const, content })),
+							metadata,
+							onReply,
+							onTextDelta,
+						}),
+					),
 
 				streamMessage: (conversationId, content, onPart) =>
-					runRequest({
-						conversationId,
-						mode: "stream-message",
-						requestMessages: [{ role: "user", content }],
-						onPart,
-					}),
+					withTelemetryFlush(
+						runRequest({
+							conversationId,
+							mode: "stream-message",
+							requestMessages: [{ role: "user", content }],
+							onPart,
+						}),
+					),
 
 				ensureConversation: (platform, externalConversationKey, workspaceKey) =>
 					query((database) =>
@@ -723,6 +754,9 @@ export const makeAgentServiceLive = (userId: string) =>
 							yield* sandbox.stop(instance).pipe(Effect.catchAll(() => Effect.void))
 						}
 						yield* taskSupervisor.shutdown()
+						yield* Effect.tryPromise(() => shutdownTelemetry()).pipe(
+							Effect.catchAll(() => Effect.void),
+						)
 					}).pipe(
 						Effect.mapError(
 							(cause) => new AgentError({ message: "Failed to shut down agent", cause }),
