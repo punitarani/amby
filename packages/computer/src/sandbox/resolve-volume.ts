@@ -43,17 +43,10 @@ const MOUNTED_HOME_DIRS = [
 	VOLUME_TASK_BASE,
 ]
 
-function mapVolumeStateToDbStatus(state: string): VolumeRow["status"] {
+export function mapVolumeStateToDbStatus(state: string): VolumeRow["status"] {
 	if (state === "ready") return "ready"
-	if (
-		state === "creating" ||
-		state === "pending_create" ||
-		state === "deleting" ||
-		state === "pending_delete"
-	) {
-		return "creating"
-	}
-	if (state === "deleted") return "deleted"
+	if (state === "creating" || state === "pending_create") return "creating"
+	if (state === "deleted" || state === "deleting" || state === "pending_delete") return "deleted"
 	return "error"
 }
 
@@ -95,15 +88,17 @@ async function getOrCreateVolume(daytona: Daytona, name: string): Promise<Dayton
 	return await daytona.volume.create(name)
 }
 
-/** Get or (re)create a volume, replacing any in error/deleted state. */
-async function resolveHealthyVolume(daytona: Daytona, name: string): Promise<DaytonaVolume> {
+const VOLUME_UNUSABLE_STATES = new Set(["error", "deleted", "deleting", "pending_delete"])
+
+/** Get or (re)create a volume, replacing any in an unusable state. */
+export async function resolveHealthyVolume(daytona: Daytona, name: string): Promise<DaytonaVolume> {
 	const existing = await tryGetVolumeByName(daytona, name)
-	if (existing && existing.state !== "error" && existing.state !== "deleted") return existing
+	if (existing && !VOLUME_UNUSABLE_STATES.has(existing.state)) return existing
 	if (existing) await safeDeleteVolume(daytona, existing)
 	return await daytona.volume.create(name)
 }
 
-async function upsertVolumeRow(
+export async function upsertVolumeRow(
 	db: Database,
 	userId: string,
 	daytonaVolumeId: string,

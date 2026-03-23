@@ -44,7 +44,7 @@ export interface WorkerBindings {
 	}
 	AGENT_WORKFLOW?: WorkflowBinding<unknown>
 	SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>
-	VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string }>
+	VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
 }
 
 export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>

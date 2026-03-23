@@ -13,26 +13,16 @@ import {
 	upsertMainSandboxRow,
 	VOLUME_MOUNT_PATH,
 	volumeWorkflowId,
-	wait,
-	waitForSandboxStarted,
 } from "@amby/computer/sandbox-config"
 import { DbService } from "@amby/db"
-import type { WorkflowBinding, WorkflowInstanceStatus } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
 import { makeRuntimeForConsumer } from "../queue/runtime"
 import { setWorkerScope } from "../sentry"
-import type { VolumeProvisionParams, VolumeProvisionResult } from "./volume-provision"
+import { VOLUME_READY_EVENT, type VolumeProvisionResult } from "./volume-provision"
 
-const WORKFLOW_POLL_INTERVAL_MS = 1_000
-const SANDBOX_READY_TIMEOUT_MS = 10 * 60 * 1000
-const WORKFLOW_CHILD_TIMEOUT_MS = 25 * 60 * 1000
-
-function describeWorkflowFailure(status: WorkflowInstanceStatus): string {
-	const reason = status.error?.message ?? status.error?.name
-	return reason ? `${status.status}: ${reason}` : status.status
-}
+const MAX_SANDBOX_POLLS = 200 // 200 × 3s = 10 minutes
 
 export interface SandboxProvisionParams {
 	userId: string
@@ -91,31 +81,6 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			)
 		}
 
-		const waitForWorkflowOutput = async <Output>(
-			workflow: WorkflowBinding<VolumeProvisionParams>,
-			instanceId: string,
-			deadlineMs: number = WORKFLOW_CHILD_TIMEOUT_MS,
-		): Promise<Output> => {
-			const instance = await workflow.get(instanceId)
-			const deadline = Date.now() + deadlineMs
-
-			while (Date.now() < deadline) {
-				const status = await instance.status()
-
-				if (status.status === "complete") {
-					return status.output as Output
-				}
-
-				if (status.status === "errored" || status.status === "terminated") {
-					throw new Error(`Child workflow ${instanceId} failed: ${describeWorkflowFailure(status)}`)
-				}
-
-				await wait(WORKFLOW_POLL_INTERVAL_MS)
-			}
-
-			throw new Error(`Child workflow ${instanceId} timed out after ${deadlineMs}ms`)
-		}
-
 		const deleteSandboxIfPresent = async (
 			sandbox: Awaited<ReturnType<typeof tryGetSandboxByName>>,
 		) => {
@@ -165,37 +130,29 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				throw new Error("VOLUME_WORKFLOW binding is not configured.")
 			}
 
-			const volWfInstanceId = await step.do("start-volume-workflow", async () => {
-				const instance = await volumeWorkflow.create({
+			await step.do("start-volume-workflow", async () => {
+				await volumeWorkflow.create({
 					id: volumeWorkflowId(userId),
-					params: { userId },
+					params: { userId, parentWorkflowId: event.instanceId },
 				})
-				return instance.id
 			})
 
-			volumeRow = await step.do(
-				"wait-volume-workflow",
-				{
-					timeout: "25 minutes",
-					retries: { limit: 1, delay: "5 seconds", backoff: "exponential" },
-				},
-				async () => {
-					const output = await waitForWorkflowOutput<VolumeProvisionResult>(
-						volumeWorkflow,
-						volWfInstanceId,
-					)
-					if (output.status !== "ready") {
-						throw new Error(`Volume workflow completed with unexpected status ${output.status}.`)
-					}
-					return output
-				},
-			)
+			const volumeEvent = await step.waitForEvent<VolumeProvisionResult>("wait-volume-workflow", {
+				type: VOLUME_READY_EVENT,
+				timeout: "25 minutes",
+			})
+			volumeRow = volumeEvent.payload
+
+			if (volumeRow.status !== "ready") {
+				throw new Error(`Volume workflow completed with unexpected status ${volumeRow.status}.`)
+			}
 		}
 
-		const sandboxState = await step.do(
+		// Phase 1: Find or create the sandbox
+		const sandboxInfo = await step.do(
 			"ensure-sandbox",
 			{
-				timeout: "15 minutes",
+				timeout: "10 minutes",
 				retries: { limit: 2, delay: "5 seconds", backoff: "exponential" },
 			},
 			async () => {
@@ -203,23 +160,6 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				const createSpec = {
 					...buildSandboxCreateParams(userId, isDev),
 					volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
-				}
-
-				const ensureRunningSandbox = async (
-					sandbox: Awaited<ReturnType<typeof tryGetSandboxByName>>,
-					created: boolean,
-				) => {
-					if (!sandbox) {
-						throw new Error("Expected sandbox instance but none was found.")
-					}
-
-					const readySandbox = await waitForSandboxStarted(sandbox, {
-						timeoutMs: SANDBOX_READY_TIMEOUT_MS,
-						pollIntervalMs: WORKFLOW_POLL_INTERVAL_MS,
-					})
-					await ensureMountedHomeLayout(readySandbox)
-					await upsertMainSandbox(readySandbox.id, "running", volumeRow.id, COMPUTER_SNAPSHOT)
-					return { sandboxId: readySandbox.id, created }
 				}
 
 				const existing = await tryGetSandboxByName(daytona, name)
@@ -236,15 +176,15 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 						})
 						await deleteSandboxIfPresent(existing)
 					} else {
-						return await ensureRunningSandbox(existing, false)
+						return { sandboxName: name, created: false }
 					}
 				}
 
 				await upsertMainSandbox(null, "creating", volumeRow.id, COMPUTER_SNAPSHOT)
 
 				try {
-					const sandbox = await daytona.create(createSpec, { timeout: 300 })
-					return await ensureRunningSandbox(sandbox, true)
+					await daytona.create(createSpec, { timeout: 300 })
+					return { sandboxName: name, created: true }
 				} catch (cause) {
 					if (isDuplicateSandboxNameError(cause)) {
 						const recovered = await tryGetSandboxByName(daytona, name)
@@ -256,18 +196,81 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 								inferDbStatusFromSandbox(recovered) === "error"
 							) {
 								await deleteSandboxIfPresent(recovered)
-								// Single retry — no recursion
-								const sandbox = await daytona.create(createSpec, { timeout: 300 })
-								return await ensureRunningSandbox(sandbox, true)
+								await daytona.create(createSpec, { timeout: 300 })
+								return { sandboxName: name, created: true }
 							}
 
-							return await ensureRunningSandbox(recovered, false)
+							return { sandboxName: name, created: false }
 						}
 					}
 
 					await upsertMainSandbox(null, "error", volumeRow.id)
 					throw cause
 				}
+			},
+		)
+
+		// Phase 2: Poll for sandbox readiness using step-level loop
+		for (let i = 0; i < MAX_SANDBOX_POLLS; i++) {
+			if (i > 0) {
+				await step.sleep(`sandbox-wait-${i}`, "3 seconds")
+			}
+
+			const state = await step.do(
+				`check-sandbox-${i}`,
+				{
+					timeout: "30 seconds",
+					retries: { limit: 2, delay: "2 seconds", backoff: "exponential" },
+				},
+				async () => {
+					const daytona = makeDaytona()
+					const sandbox = await tryGetSandboxByName(daytona, sandboxInfo.sandboxName)
+					if (!sandbox) {
+						throw new Error("Sandbox not found after creation.")
+					}
+
+					await sandbox.refreshData()
+
+					if (sandbox.state === "started") return "started" as const
+					if (sandbox.state === "stopped" || sandbox.state === "archived") {
+						await sandbox.start()
+						return "starting" as const
+					}
+					if (sandbox.state === "error" || sandbox.state === "build_failed") {
+						return "error" as const
+					}
+					return "pending" as const
+				},
+			)
+
+			if (state === "started") break
+			if (state === "error") {
+				throw new Error("Sandbox entered error state while waiting to start.")
+			}
+
+			if (i === MAX_SANDBOX_POLLS - 1) {
+				throw new Error("Timed out waiting for sandbox to reach started state.")
+			}
+		}
+
+		// Phase 3: Set up sandbox and persist state
+		const sandboxState = await step.do(
+			"setup-sandbox",
+			{
+				timeout: "2 minutes",
+				retries: { limit: 2, delay: "5 seconds", backoff: "exponential" },
+			},
+			async () => {
+				const daytona = makeDaytona()
+				const sandbox = await tryGetSandboxByName(daytona, sandboxInfo.sandboxName)
+				if (!sandbox) {
+					throw new Error("Sandbox not found during setup.")
+				}
+
+				await sandbox.refreshData()
+				await ensureMountedHomeLayout(sandbox)
+				await upsertMainSandbox(sandbox.id, "running", volumeRow.id, COMPUTER_SNAPSHOT)
+				return { sandboxId: sandbox.id, created: sandboxInfo.created }
 			},
 		)
 

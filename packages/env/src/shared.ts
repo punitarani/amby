@@ -25,7 +25,7 @@ export interface WorkflowInstanceStatus {
 export interface WorkflowInstanceHandle {
 	readonly id: string
 	status(): Promise<WorkflowInstanceStatus>
-	sendEvent(event: unknown): Promise<void>
+	sendEvent(event: { type: string; payload?: unknown }): Promise<void>
 }
 
 export interface WorkflowBinding<Params = unknown> {
@@ -68,7 +68,7 @@ export interface Env {
 	readonly POSTHOG_KEY: string
 	readonly POSTHOG_HOST: string
 	readonly SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>
-	readonly VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string }>
+	readonly VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
 }
 
 export const DEFAULT_TELEGRAM_BOT_USERNAME = "my_amby_bot"

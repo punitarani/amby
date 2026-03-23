@@ -2,7 +2,10 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloud
 import {
 	createDaytonaClient,
 	ensureProvisionableVolume,
-	waitForVolumeReady,
+	mapVolumeStateToDbStatus,
+	resolveHealthyVolume,
+	upsertVolumeRow,
+	volumeName,
 } from "@amby/computer/sandbox-config"
 import { DbService } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
@@ -11,11 +14,13 @@ import { Effect } from "effect"
 import { makeRuntimeForConsumer } from "../queue/runtime"
 import { setWorkerScope } from "../sentry"
 
-const VOLUME_READY_TIMEOUT_MS = 20 * 60 * 1000
-const VOLUME_POLL_INTERVAL_MS = 1_000
+const MAX_VOLUME_POLLS = 240 // 240 × 5s = 20 minutes
+
+export const VOLUME_READY_EVENT = "volume-provision-complete"
 
 export interface VolumeProvisionParams {
 	userId: string
+	parentWorkflowId?: string
 }
 
 export interface VolumeProvisionResult {
@@ -29,7 +34,7 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 	VolumeProvisionParams
 > {
 	async run(event: WorkflowEvent<VolumeProvisionParams>, step: WorkflowStep) {
-		const { userId } = event.payload
+		const { userId, parentWorkflowId } = event.payload
 		const scope = setWorkerScope("workflow.volume_provision", {
 			workflow_instance_id: event.instanceId,
 			user_id: userId,
@@ -80,31 +85,70 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 		)
 
 		if (volumeRow.status !== "ready") {
-			volumeRow = await step.do(
-				"wait-volume-ready",
+			const name = volumeName(userId, isDev)
+
+			for (let i = 0; i < MAX_VOLUME_POLLS; i++) {
+				if (i > 0) {
+					await step.sleep(`volume-wait-${i}`, "5 seconds")
+				}
+
+				volumeRow = await step.do(
+					`check-volume-${i}`,
+					{
+						timeout: "30 seconds",
+						retries: { limit: 2, delay: "2 seconds", backoff: "exponential" },
+					},
+					async () => {
+						const daytona = makeDaytona()
+						const volume = await resolveHealthyVolume(daytona, name)
+						const status = mapVolumeStateToDbStatus(volume.state)
+
+						const row = await withRuntime(
+							Effect.gen(function* () {
+								const { db } = yield* DbService
+								return yield* Effect.tryPromise({
+									try: () => upsertVolumeRow(db, userId, volume.id, status),
+									catch: (cause) =>
+										new Error(
+											`Failed to upsert volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
+										),
+								})
+							}),
+						)
+
+						return { id: row.id, daytonaVolumeId: row.daytonaVolumeId, status: row.status }
+					},
+				)
+
+				if (volumeRow.status === "ready") break
+				if (volumeRow.status === "error" || volumeRow.status === "deleted") {
+					throw new Error(`Volume entered ${volumeRow.status} state during provisioning.`)
+				}
+			}
+
+			if (volumeRow.status !== "ready") {
+				throw new Error("Timed out waiting for volume readiness.")
+			}
+		}
+
+		const sandboxWorkflow = env.SANDBOX_WORKFLOW
+		if (parentWorkflowId && sandboxWorkflow) {
+			await step.do(
+				"notify-parent",
 				{
-					timeout: "25 minutes",
-					retries: { limit: 1, delay: "5 seconds", backoff: "exponential" },
+					timeout: "10 seconds",
+					retries: { limit: 3, delay: "2 seconds", backoff: "exponential" },
 				},
 				async () => {
-					const daytona = makeDaytona()
-					const row = await withRuntime(
-						Effect.gen(function* () {
-							const { db } = yield* DbService
-							return yield* Effect.tryPromise({
-								try: () =>
-									waitForVolumeReady(daytona, db, userId, isDev, {
-										timeoutMs: VOLUME_READY_TIMEOUT_MS,
-										pollIntervalMs: VOLUME_POLL_INTERVAL_MS,
-									}),
-								catch: (cause) =>
-									new Error(
-										`Failed while waiting for volume readiness: ${cause instanceof Error ? cause.message : String(cause)}`,
-									),
-							})
-						}),
-					)
-					return { id: row.id, daytonaVolumeId: row.daytonaVolumeId, status: row.status }
+					const parent = await sandboxWorkflow.get(parentWorkflowId)
+					await parent.sendEvent({
+						type: VOLUME_READY_EVENT,
+						payload: {
+							id: volumeRow.id,
+							daytonaVolumeId: volumeRow.daytonaVolumeId,
+							status: volumeRow.status,
+						},
+					})
 				},
 			)
 		}
