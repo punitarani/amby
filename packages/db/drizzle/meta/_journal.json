@@ -57,6 +57,13 @@
 			"when": 1774200620022,
 			"tag": "0007_conversation_redesign",
 			"breakpoints": true
+		},
+		{
+			"idx": 8,
+			"version": "7",
+			"when": 1774876800000,
+			"tag": "0008_volume_first_sandbox",
+			"breakpoints": true
 		}
 	]
 }

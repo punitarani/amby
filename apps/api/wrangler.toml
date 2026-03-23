@@ -91,6 +91,11 @@ name = "sandbox-provision"
 binding = "SANDBOX_WORKFLOW"
 class_name = "SandboxProvisionWorkflow"
 
+[[workflows]]
+name = "volume-provision"
+binding = "VOLUME_WORKFLOW"
+class_name = "VolumeProvisionWorkflow"
+
 # Task reconciliation + Telegram completion notifications
 [triggers]
 crons = ["*/5 * * * *"]

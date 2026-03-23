@@ -70,7 +70,7 @@ export function createCuaTools(
 	})
 
 	const withSandbox = <T>(fn: (instance: Sandbox) => Promise<T>) =>
-		runWithEnsuredSandbox(ensureSandbox, fn, { logPrefix: "CUA", channel: "cua" })
+		runWithEnsuredSandbox(ensureSandbox, fn)
 
 	const tools = {
 		cua_start: tool({

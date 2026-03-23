@@ -1,5 +1,5 @@
 import { Layer } from "effect"
-import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService } from "./shared"
+import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService, type WorkflowBinding } from "./shared"
 
 export interface WorkerBindings {
 	NODE_ENV?: string
@@ -46,18 +46,9 @@ export interface WorkerBindings {
 		idFromName(name: string): { toString(): string }
 		get(id: { toString(): string }): { ingestMessage(msg: unknown): Promise<void> }
 	}
-	AGENT_WORKFLOW?: {
-		create(options: { id?: string; params?: unknown }): Promise<{ id: string }>
-		get(
-			id: string,
-		): Promise<{ status(): Promise<unknown>; sendEvent(event: unknown): Promise<void> }>
-	}
-	SANDBOX_WORKFLOW?: {
-		create(options: { id?: string; params?: { userId: string } }): Promise<{ id: string }>
-		get(
-			id: string,
-		): Promise<{ status(): Promise<unknown>; sendEvent(event: unknown): Promise<void> }>
-	}
+	AGENT_WORKFLOW?: WorkflowBinding<unknown>
+	SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>
+	VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
 }
 
 export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
@@ -92,4 +83,6 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		BRAINTRUST_PROJECT_ID: bindings.BRAINTRUST_PROJECT_ID ?? "",
 		POSTHOG_KEY: bindings.POSTHOG_KEY ?? "",
 		POSTHOG_HOST: bindings.POSTHOG_HOST ?? "https://us.i.posthog.com",
+		SANDBOX_WORKFLOW: bindings.SANDBOX_WORKFLOW,
+		VOLUME_WORKFLOW: bindings.VOLUME_WORKFLOW,
 	})
