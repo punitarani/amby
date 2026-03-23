@@ -144,7 +144,7 @@ function browserParallelPlan(request: string, urls: string[]): ExecutionPlan {
 	}
 }
 
-function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
+export function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 	const normalized = request.trim()
 	const normalizedLower = normalized.toLowerCase()
 	const urls = extractUrls(normalized)
@@ -410,7 +410,7 @@ function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 	}
 }
 
-function shouldUseModelPlanner(request: string, heuristicPlan: ExecutionPlan) {
+export function shouldUseModelPlanner(request: string, heuristicPlan: ExecutionPlan) {
 	if (heuristicPlan.strategy === "direct") return false
 	if (heuristicPlan.tasks.length >= 3) return true
 	return /\b(plan|carefully|step by step|then|after that|sequence)\b/i.test(request)
