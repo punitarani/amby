@@ -1,11 +1,11 @@
-import { and, DbService, eq, ne, schema } from "@amby/db"
+import { DbService } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Daytona } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
 import { AGENT_WORKDIR, COMMAND_EXEC_TIMEOUT } from "../config"
 import { SandboxError } from "../errors"
-import { ensureMainSandbox } from "./resolve-volume"
+import { ensureMainSandbox, kickOffSandboxProvisionIfNeeded } from "./resolve-volume"
 
 export const createDaytonaClient = (opts: { apiKey: string; apiUrl?: string; target?: string }) =>
 	new Daytona(opts)
@@ -61,38 +61,13 @@ export const SandboxServiceLive = Layer.effect(
 		})
 		const cache = new Map<string, Sandbox>()
 		const isDev = env.NODE_ENV !== "production"
-		const PROVISION_WORKFLOW_THROTTLE_MS = 15_000
 		const kickOffSandboxProvision = (userId: string) =>
 			Effect.tryPromise({
 				try: async () => {
 					if (!env.SANDBOX_WORKFLOW) return
-
-					const row = await db
-						.select({
-							status: schema.sandboxes.status,
-							updatedAt: schema.sandboxes.updatedAt,
-						})
-						.from(schema.sandboxes)
-						.where(
-							and(
-								eq(schema.sandboxes.userId, userId),
-								eq(schema.sandboxes.role, "main"),
-								ne(schema.sandboxes.status, "deleted"),
-							),
-						)
-						.limit(1)
-						.then((rows) => rows[0] ?? null)
-
-					if (
-						row &&
-						(row.status === "volume_creating" || row.status === "creating") &&
-						row.updatedAt instanceof Date &&
-						Date.now() - row.updatedAt.getTime() < PROVISION_WORKFLOW_THROTTLE_MS
-					) {
-						return
-					}
-
-					await env.SANDBOX_WORKFLOW.create({ params: { userId } })
+					await kickOffSandboxProvisionIfNeeded(db, userId, () =>
+						env.SANDBOX_WORKFLOW!.create({ params: { userId } }),
+					)
 				},
 				catch: (cause) =>
 					new SandboxError({

@@ -36,6 +36,7 @@ export const sandboxes = pgTable(
 			>()
 			.notNull()
 			.default("volume_creating"),
+		snapshot: text("snapshot"),
 		lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

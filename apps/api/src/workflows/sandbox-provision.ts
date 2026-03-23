@@ -1,6 +1,7 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import {
 	buildSandboxCreateParams,
+	COMPUTER_SNAPSHOT,
 	createDaytonaClient,
 	ensureMountedHomeLayout,
 	ensureVolume,
@@ -24,6 +25,7 @@ import type { VolumeProvisionParams, VolumeProvisionResult } from "./volume-prov
 
 const WORKFLOW_POLL_INTERVAL_MS = 1_000
 const SANDBOX_READY_TIMEOUT_MS = 10 * 60 * 1000
+const WORKFLOW_CHILD_TIMEOUT_MS = 25 * 60 * 1000
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -72,12 +74,13 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			daytonaSandboxId: string,
 			status: "volume_creating" | "creating" | "running" | "stopped" | "archived" | "error",
 			volumeId: string,
+			snapshot?: string | null,
 		) => {
 			await withRuntime(
 				Effect.gen(function* () {
 					const { db } = yield* DbService
 					yield* Effect.tryPromise({
-						try: () => upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volumeId),
+						try: () => upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volumeId, snapshot),
 						catch: (cause) =>
 							new Error(
 								`Failed to upsert sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -90,10 +93,12 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 		const waitForWorkflowOutput = async <Output>(
 			workflow: WorkflowBinding<VolumeProvisionParams>,
 			workflowId: string,
+			deadlineMs: number = WORKFLOW_CHILD_TIMEOUT_MS,
 		): Promise<Output> => {
 			const instance = await workflow.get(workflowId)
+			const deadline = Date.now() + deadlineMs
 
-			while (true) {
+			while (Date.now() < deadline) {
 				const status = await instance.status()
 
 				if (status.status === "complete") {
@@ -106,6 +111,8 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 
 				await wait(WORKFLOW_POLL_INTERVAL_MS)
 			}
+
+			throw new Error(`Child workflow ${workflowId} timed out after ${deadlineMs}ms`)
 		}
 
 		const deleteSandboxIfPresent = async (
@@ -207,7 +214,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 						pollIntervalMs: WORKFLOW_POLL_INTERVAL_MS,
 					})
 					await ensureMountedHomeLayout(readySandbox)
-					await upsertMainSandbox(readySandbox.id, "running", volumeRow.id)
+					await upsertMainSandbox(readySandbox.id, "running", volumeRow.id, COMPUTER_SNAPSHOT)
 					return { sandboxId: readySandbox.id, created }
 				}
 
@@ -229,7 +236,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 					}
 				}
 
-				await upsertMainSandbox("pending", "creating", volumeRow.id)
+				await upsertMainSandbox("pending", "creating", volumeRow.id, COMPUTER_SNAPSHOT)
 
 				const createFreshSandbox = async () => {
 					const sandbox = await daytona.create(createSpec, { timeout: 300 })

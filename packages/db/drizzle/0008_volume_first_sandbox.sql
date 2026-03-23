@@ -16,18 +16,27 @@ ALTER TABLE "user_volumes" ADD CONSTRAINT "user_volumes_user_id_users_id_fk" FOR
 ALTER TABLE "user_volumes" ALTER COLUMN "status" SET DEFAULT 'creating';
 
 --> statement-breakpoint
--- 2. Clean slate — volumes are required for all sandboxes going forward
-TRUNCATE "sandboxes";
-
---> statement-breakpoint
--- 3. Add new columns (table is empty after TRUNCATE, so NOT NULL is safe without a default)
-ALTER TABLE "sandboxes" ADD COLUMN "volume_id" uuid NOT NULL;
+-- 2. Add new columns (volume_id starts nullable so we can back-fill before enforcing NOT NULL)
+ALTER TABLE "sandboxes" ADD COLUMN "volume_id" uuid;
 --> statement-breakpoint
 ALTER TABLE "sandboxes" ADD COLUMN "role" text DEFAULT 'main' NOT NULL;
+--> statement-breakpoint
+ALTER TABLE "sandboxes" ADD COLUMN "snapshot" text;
 --> statement-breakpoint
 ALTER TABLE "sandboxes" ADD COLUMN "updated_at" timestamp with time zone DEFAULT now() NOT NULL;
 --> statement-breakpoint
 ALTER TABLE "sandboxes" ALTER COLUMN "status" SET DEFAULT 'volume_creating';
+
+--> statement-breakpoint
+-- 3. Back-fill volume_id from user_volumes, then remove rows that have no volume
+UPDATE "sandboxes" s
+   SET "volume_id" = uv."id"
+  FROM "user_volumes" uv
+ WHERE uv."user_id" = s."user_id";
+--> statement-breakpoint
+DELETE FROM "sandboxes" WHERE "volume_id" IS NULL;
+--> statement-breakpoint
+ALTER TABLE "sandboxes" ALTER COLUMN "volume_id" SET NOT NULL;
 
 --> statement-breakpoint
 -- 4. FK with RESTRICT: volume_id is NOT NULL so SET NULL is invalid;

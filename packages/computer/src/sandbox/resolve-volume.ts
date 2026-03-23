@@ -13,6 +13,7 @@ import {
 	VOLUME_TASK_BASE,
 	volumeName,
 } from "../config"
+import { COMPUTER_SNAPSHOT } from "../computer-snapshot"
 import { SandboxError, VolumeError } from "../errors"
 import {
 	inferDbStatusFromSandbox,
@@ -216,6 +217,7 @@ export async function upsertMainSandboxRow(
 	daytonaSandboxId: string,
 	status: SandboxDbStatus,
 	volumeId: string,
+	snapshot?: string | null,
 ) {
 	const now = new Date()
 
@@ -227,6 +229,7 @@ export async function upsertMainSandboxRow(
 			volumeId,
 			role: "main",
 			status,
+			snapshot,
 			lastActivityAt: now,
 			updatedAt: now,
 		})
@@ -237,6 +240,7 @@ export async function upsertMainSandboxRow(
 				daytonaSandboxId,
 				volumeId,
 				status,
+				snapshot,
 				lastActivityAt: now,
 				updatedAt: now,
 			},
@@ -249,6 +253,7 @@ async function persistMainSandboxFromInstance(
 	sandbox: Sandbox,
 	volumeId: string,
 	status?: SandboxDbStatus,
+	snapshot?: string | null,
 ) {
 	await sandbox.refreshData()
 	await upsertMainSandboxRow(
@@ -257,6 +262,7 @@ async function persistMainSandboxFromInstance(
 		sandbox.id,
 		status ?? inferDbStatusFromSandbox(sandbox),
 		volumeId,
+		snapshot,
 	)
 }
 
@@ -290,7 +296,7 @@ export const ensureMainSandbox = (
 			})
 			await ensureMountedHomeLayout(readySandbox)
 			cache.set(userId, readySandbox)
-			await persistMainSandboxFromInstance(db, userId, readySandbox, volumeRow.id, "running")
+			await persistMainSandboxFromInstance(db, userId, readySandbox, volumeRow.id, "running", COMPUTER_SNAPSHOT)
 			return readySandbox
 		}
 
@@ -368,6 +374,41 @@ export const ensureMainSandbox = (
 			}),
 		)
 	})
+
+export const PROVISION_WORKFLOW_THROTTLE_MS = 15_000
+
+export async function kickOffSandboxProvisionIfNeeded(
+	db: Database,
+	userId: string,
+	createWorkflow: () => Promise<unknown>,
+): Promise<void> {
+	const row = await db
+		.select({
+			status: schema.sandboxes.status,
+			updatedAt: schema.sandboxes.updatedAt,
+		})
+		.from(schema.sandboxes)
+		.where(
+			and(
+				eq(schema.sandboxes.userId, userId),
+				eq(schema.sandboxes.role, "main"),
+				ne(schema.sandboxes.status, "deleted"),
+			),
+		)
+		.limit(1)
+		.then((rows) => rows[0] ?? null)
+
+	if (
+		row &&
+		(row.status === "volume_creating" || row.status === "creating") &&
+		row.updatedAt instanceof Date &&
+		Date.now() - row.updatedAt.getTime() < PROVISION_WORKFLOW_THROTTLE_MS
+	) {
+		return
+	}
+
+	await createWorkflow()
+}
 
 export async function getMainVolumeRow(db: Database, userId: string): Promise<VolumeRow | null> {
 	return (

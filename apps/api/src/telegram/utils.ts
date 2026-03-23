@@ -4,7 +4,8 @@ import {
 	getIntegrationSuccessMessage,
 	parseIntegrationStartPayload,
 } from "@amby/connectors"
-import { and, DbService, eq, ne, schema } from "@amby/db"
+import { kickOffSandboxProvisionIfNeeded } from "@amby/computer/sandbox-config"
+import { and, DbService, eq, schema } from "@amby/db"
 import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import { Effect } from "effect"
@@ -193,52 +194,27 @@ const startTelegramSession = (
 		const env = yield* EnvService
 		const { db } = yield* DbService
 		const posthog = getPostHogClient(env.POSTHOG_KEY, env.POSTHOG_HOST)
-		const PROVISION_WORKFLOW_THROTTLE_MS = 15_000
 
 		yield* ensureTelegramConversation(userId, chatId)
 
 		const sandboxWorkflow = options?.sandboxWorkflow
 		if (sandboxWorkflow) {
-			const row = yield* Effect.tryPromise(() =>
-				db
-					.select({
-						status: schema.sandboxes.status,
-						updatedAt: schema.sandboxes.updatedAt,
-					})
-					.from(schema.sandboxes)
-					.where(
-						and(
-							eq(schema.sandboxes.userId, userId),
-							eq(schema.sandboxes.role, "main"),
-							ne(schema.sandboxes.status, "deleted"),
-						),
-					)
-					.limit(1)
-					.then((rows) => rows[0] ?? null),
-			)
-
-			if (
-				!(
-					row &&
-					(row.status === "volume_creating" || row.status === "creating") &&
-					row.updatedAt instanceof Date &&
-					Date.now() - row.updatedAt.getTime() < PROVISION_WORKFLOW_THROTTLE_MS
-				)
-			) {
-				yield* Effect.tryPromise({
-					try: () => sandboxWorkflow.create({ params: { userId } }),
-					catch: (cause) =>
-						new Error(
-							`Failed to start sandbox provisioning workflow: ${cause instanceof Error ? cause.message : String(cause)}`,
-						),
-				}).pipe(
-					Effect.catchAll((error) =>
-						Effect.sync(() => {
-							console.error("[Sandbox] Provision workflow:", error)
-						}),
+			yield* Effect.tryPromise({
+				try: () =>
+					kickOffSandboxProvisionIfNeeded(db, userId, () =>
+						sandboxWorkflow.create({ params: { userId } }),
 					),
-				)
-			}
+				catch: (cause) =>
+					new Error(
+						`Failed to start sandbox provisioning workflow: ${cause instanceof Error ? cause.message : String(cause)}`,
+					),
+			}).pipe(
+				Effect.catchAll((error) =>
+					Effect.sync(() => {
+						console.error("[Sandbox] Provision workflow:", error)
+					}),
+				),
+			)
 		}
 
 		posthog.capture({
