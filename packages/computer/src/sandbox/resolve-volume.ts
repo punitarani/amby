@@ -1,5 +1,5 @@
 import type { Database } from "@amby/db"
-import { and, eq, ne, schema } from "@amby/db"
+import { and, eq, lte, ne, schema } from "@amby/db"
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
 import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
 import { Effect } from "effect"
@@ -13,6 +13,7 @@ import {
 	VOLUME_MOUNT_PATH,
 	VOLUME_TASK_BASE,
 	volumeName,
+	wait,
 } from "../config"
 import { SandboxError, VolumeError } from "../errors"
 import {
@@ -41,8 +42,6 @@ const MOUNTED_HOME_DIRS = [
 	VOLUME_CODEX_HOME,
 	VOLUME_TASK_BASE,
 ]
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 function mapVolumeStateToDbStatus(state: string): VolumeRow["status"] {
 	if (state === "ready") return "ready"
@@ -384,16 +383,50 @@ export const ensureMainSandbox = (
 
 export const PROVISION_WORKFLOW_THROTTLE_MS = 15_000
 
+/**
+ * Start a sandbox-provision workflow if one isn't already running for this user.
+ *
+ * Deduplication uses an atomic UPDATE-as-lock: only the request that successfully
+ * bumps `updatedAt` past the throttle window proceeds to create a workflow.
+ * First-time users (no sandbox row yet) bypass the lock — the workflow itself
+ * handles the race via idempotent upserts.
+ */
 export async function kickOffSandboxProvisionIfNeeded(
 	db: Database,
 	userId: string,
 	createWorkflow: () => Promise<unknown>,
 ): Promise<void> {
-	const row = await db
-		.select({
-			status: schema.sandboxes.status,
-			updatedAt: schema.sandboxes.updatedAt,
-		})
+	const now = new Date()
+	const throttleCutoff = new Date(now.getTime() - PROVISION_WORKFLOW_THROTTLE_MS)
+
+	// Atomically claim the provisioning slot by bumping updatedAt.
+	// Succeeds only if the sandbox needs provisioning AND no other request
+	// claimed the slot within the throttle window.
+	const claimed = await db
+		.update(schema.sandboxes)
+		.set({ updatedAt: now })
+		.where(
+			and(
+				eq(schema.sandboxes.userId, userId),
+				eq(schema.sandboxes.role, "main"),
+				ne(schema.sandboxes.status, "deleted"),
+				ne(schema.sandboxes.status, "running"),
+				ne(schema.sandboxes.status, "stopped"),
+				ne(schema.sandboxes.status, "archived"),
+				lte(schema.sandboxes.updatedAt, throttleCutoff),
+			),
+		)
+		.returning({ id: schema.sandboxes.id })
+
+	if (claimed.length > 0) {
+		await createWorkflow()
+		return
+	}
+
+	// No row was updated — either the sandbox is healthy, throttle hasn't
+	// expired, or no row exists yet. Only proceed for first-time users.
+	const exists = await db
+		.select({ id: schema.sandboxes.id })
 		.from(schema.sandboxes)
 		.where(
 			and(
@@ -403,17 +436,10 @@ export async function kickOffSandboxProvisionIfNeeded(
 			),
 		)
 		.limit(1)
-		.then((rows) => rows[0] ?? null)
 
-	if (
-		row &&
-		(row.status === "volume_creating" || row.status === "creating") &&
-		row.updatedAt instanceof Date &&
-		Date.now() - row.updatedAt.getTime() < PROVISION_WORKFLOW_THROTTLE_MS
-	) {
-		return
-	}
+	if (exists.length > 0) return
 
+	// First-time user with no sandbox row — start provisioning.
 	await createWorkflow()
 }
 

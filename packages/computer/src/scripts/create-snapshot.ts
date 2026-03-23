@@ -51,7 +51,11 @@ try {
 			image: COMPUTER_DOCKER_IMAGE,
 			resources: SANDBOX_RESOURCES,
 		},
-		{ onLogs: (log: string) => process.stdout.write(log) },
+		{
+			onLogs: (log: string) => {
+				process.stdout.write(log)
+			},
+		},
 	)
 	console.log(`Done: snapshot '${COMPUTER_SNAPSHOT}' registered.`)
 } catch (cause) {

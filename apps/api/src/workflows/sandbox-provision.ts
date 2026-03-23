@@ -12,6 +12,8 @@ import {
 	tryGetSandboxByName,
 	upsertMainSandboxRow,
 	VOLUME_MOUNT_PATH,
+	volumeWorkflowId,
+	wait,
 	waitForSandboxStarted,
 } from "@amby/computer/sandbox-config"
 import { DbService } from "@amby/db"
@@ -26,8 +28,6 @@ import type { VolumeProvisionParams, VolumeProvisionResult } from "./volume-prov
 const WORKFLOW_POLL_INTERVAL_MS = 1_000
 const SANDBOX_READY_TIMEOUT_MS = 10 * 60 * 1000
 const WORKFLOW_CHILD_TIMEOUT_MS = 25 * 60 * 1000
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 function describeWorkflowFailure(status: WorkflowInstanceStatus): string {
 	const reason = status.error?.message ?? status.error?.name
@@ -93,10 +93,10 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 
 		const waitForWorkflowOutput = async <Output>(
 			workflow: WorkflowBinding<VolumeProvisionParams>,
-			workflowId: string,
+			instanceId: string,
 			deadlineMs: number = WORKFLOW_CHILD_TIMEOUT_MS,
 		): Promise<Output> => {
-			const instance = await workflow.get(workflowId)
+			const instance = await workflow.get(instanceId)
 			const deadline = Date.now() + deadlineMs
 
 			while (Date.now() < deadline) {
@@ -107,13 +107,13 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				}
 
 				if (status.status === "errored" || status.status === "terminated") {
-					throw new Error(`Child workflow ${workflowId} failed: ${describeWorkflowFailure(status)}`)
+					throw new Error(`Child workflow ${instanceId} failed: ${describeWorkflowFailure(status)}`)
 				}
 
 				await wait(WORKFLOW_POLL_INTERVAL_MS)
 			}
 
-			throw new Error(`Child workflow ${workflowId} timed out after ${deadlineMs}ms`)
+			throw new Error(`Child workflow ${instanceId} timed out after ${deadlineMs}ms`)
 		}
 
 		const deleteSandboxIfPresent = async (
@@ -165,8 +165,11 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				throw new Error("VOLUME_WORKFLOW binding is not configured.")
 			}
 
-			const volumeWorkflowId = await step.do("start-volume-workflow", async () => {
-				const instance = await volumeWorkflow.create({ params: { userId } })
+			const volWfInstanceId = await step.do("start-volume-workflow", async () => {
+				const instance = await volumeWorkflow.create({
+					id: volumeWorkflowId(userId),
+					params: { userId },
+				})
 				return instance.id
 			})
 
@@ -179,7 +182,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				async () => {
 					const output = await waitForWorkflowOutput<VolumeProvisionResult>(
 						volumeWorkflow,
-						volumeWorkflowId,
+						volWfInstanceId,
 					)
 					if (output.status !== "ready") {
 						throw new Error(`Volume workflow completed with unexpected status ${output.status}.`)
@@ -239,13 +242,9 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 
 				await upsertMainSandbox(null, "creating", volumeRow.id, COMPUTER_SNAPSHOT)
 
-				const createFreshSandbox = async () => {
+				try {
 					const sandbox = await daytona.create(createSpec, { timeout: 300 })
 					return await ensureRunningSandbox(sandbox, true)
-				}
-
-				try {
-					return await createFreshSandbox()
 				} catch (cause) {
 					if (isDuplicateSandboxNameError(cause)) {
 						const recovered = await tryGetSandboxByName(daytona, name)
@@ -257,7 +256,9 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 								inferDbStatusFromSandbox(recovered) === "error"
 							) {
 								await deleteSandboxIfPresent(recovered)
-								return await createFreshSandbox()
+								// Single retry — no recursion
+								const sandbox = await daytona.create(createSpec, { timeout: 300 })
+								return await ensureRunningSandbox(sandbox, true)
 							}
 
 							return await ensureRunningSandbox(recovered, false)

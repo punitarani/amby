@@ -1,4 +1,4 @@
-import { kickOffSandboxProvisionIfNeeded } from "@amby/computer/sandbox-config"
+import { kickOffSandboxProvisionIfNeeded, sandboxWorkflowId } from "@amby/computer/sandbox-config"
 import {
 	ConnectorsService,
 	getIntegrationLabel,
@@ -202,7 +202,10 @@ const startTelegramSession = (
 			yield* Effect.tryPromise({
 				try: () =>
 					kickOffSandboxProvisionIfNeeded(db, userId, () =>
-						sandboxWorkflow.create({ params: { userId } }),
+						sandboxWorkflow.create({
+							id: sandboxWorkflowId(userId),
+							params: { userId },
+						}),
 					),
 				catch: (cause) =>
 					new Error(

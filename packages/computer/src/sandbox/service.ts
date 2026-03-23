@@ -3,7 +3,7 @@ import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Daytona } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
-import { AGENT_WORKDIR, COMMAND_EXEC_TIMEOUT } from "../config"
+import { AGENT_WORKDIR, COMMAND_EXEC_TIMEOUT, sandboxWorkflowId } from "../config"
 import { SandboxError } from "../errors"
 import { ensureMainSandbox, kickOffSandboxProvisionIfNeeded } from "./resolve-volume"
 
@@ -67,7 +67,7 @@ export const SandboxServiceLive = Layer.effect(
 					const workflow = env.SANDBOX_WORKFLOW
 					if (!workflow) return
 					await kickOffSandboxProvisionIfNeeded(db, userId, () =>
-						workflow.create({ params: { userId } }),
+						workflow.create({ id: sandboxWorkflowId(userId), params: { userId } }),
 					)
 				},
 				catch: (cause) =>

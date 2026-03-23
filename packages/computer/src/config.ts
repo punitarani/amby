@@ -85,3 +85,12 @@ export const sandboxLabels = (userId: string, isDev: boolean) => ({
 })
 
 export const taskSessionId = (taskId: string) => `task-${taskId}`
+
+// ── Workflow IDs ────────────────────────────────────────────────────
+
+export const sandboxWorkflowId = (userId: string) => `sandbox-provision-${userId}`
+export const volumeWorkflowId = (userId: string) => `volume-provision-${userId}`
+
+// ── Utilities ───────────────────────────────────────────────────────
+
+export const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))

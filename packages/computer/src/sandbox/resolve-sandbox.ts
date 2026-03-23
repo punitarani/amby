@@ -8,6 +8,7 @@ import {
 	SANDBOX_START_TIMEOUT,
 	sandboxLabels,
 	sandboxName,
+	wait,
 } from "../config"
 
 export type SandboxDbStatus =
@@ -33,8 +34,6 @@ export function buildSandboxCreateParams(userId: string, isDev: boolean) {
 
 const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 10 * 60 * 1000
 const DEFAULT_SANDBOX_POLL_INTERVAL_MS = 1_000
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function isDuplicateSandboxNameError(cause: unknown): boolean {
 	const msg = cause instanceof Error ? cause.message : String(cause)
