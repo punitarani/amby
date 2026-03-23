@@ -1,4 +1,5 @@
 import type { Platform } from "@amby/channels"
+import { BrowserService } from "@amby/browser"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
 import { ConnectorsService, createConnectorManagementTools } from "@amby/connectors"
 import { DbService, eq, schema } from "@amby/db"
@@ -39,14 +40,15 @@ import {
 } from "./context"
 import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
 import { type ResolveThreadResult, resolveThread } from "./router"
-import { createSubagentTools } from "./subagents/spawner"
+import { SUBAGENT_DEFS } from "./subagents/definitions"
+import { createSubagentTools, runDelegatedSubagent } from "./subagents/spawner"
 import { buildToolGroups } from "./subagents/tool-groups"
 import {
 	synopsisCurrentThreadIfOverflowsAfterSave,
 	synopsisPreviousThreadIfDormantSwitch,
 } from "./synopsis"
 import { createCodexAuthTools } from "./tools/codex-auth"
-import { createSandboxDelegationTools } from "./tools/delegation"
+import { createTaskDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
 import { persistExecutionTrace } from "./traces"
 import { extractToolUserMessages } from "./utils/extract-tool-user-messages"
@@ -100,6 +102,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			const models = yield* ModelService
 			const memory = yield* MemoryService
 			const sandbox = yield* SandboxService
+			const browser = yield* BrowserService
 			const taskSupervisor = yield* TaskSupervisor
 			const connectors = yield* ConnectorsService
 			const env = yield* EnvService
@@ -115,6 +118,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			}
 
 			const computer = createComputerTools(sandbox, userId)
+			const computerSubagentDef = SUBAGENT_DEFS.find((def) => def.name === "computer")
 
 			const saveMessage = (
 				conversationId: string,
@@ -219,13 +223,10 @@ export const makeAgentServiceLive = (userId: string) =>
 							: ""
 
 					const memoryTools = createMemoryTools(memory, userId)
-					const sandboxTools = sandbox.enabled
-						? createSandboxDelegationTools(taskSupervisor, userId, conversationId)
-						: undefined
 					const codexAuthTools = sandbox.enabled
 						? createCodexAuthTools(taskSupervisor, userId)
 						: undefined
-					const cuaTools = agentConfig.cuaEnabled
+					const cuaTools = agentConfig.cuaEnabled && sandbox.enabled
 						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
 						: undefined
 					const connectorManagementTools = connectors.isEnabled()
@@ -255,9 +256,17 @@ export const makeAgentServiceLive = (userId: string) =>
 						integrationTools,
 					)
 
-					const basePrompt = agentConfig.cuaEnabled
-						? `${buildSystemPrompt(formatted, userTimezone)}\n\n${CUA_PROMPT}`
-						: buildSystemPrompt(formatted, userTimezone)
+					const basePrompt = [
+						buildSystemPrompt(formatted, userTimezone, {
+							browserEnabled: browser.enabled,
+							computerEnabled: Boolean(cuaTools),
+							integrationEnabled: Boolean(integrationTools),
+							sandboxEnabled: sandbox.enabled,
+						}),
+						cuaTools ? CUA_PROMPT : "",
+					]
+						.filter(Boolean)
+						.join("\n\n")
 
 					const contextSections = [otherThreads, threadSynopsisBlock, artifactRecap].filter(Boolean)
 					const extraContext = contextSections.join("\n\n")
@@ -281,7 +290,6 @@ export const makeAgentServiceLive = (userId: string) =>
 					const { search_memories } = memoryTools
 					const tools = {
 						search_memories,
-						...(sandboxTools ?? {}),
 						...(codexAuthTools ?? {}),
 						...createJobTools(db, userId, userTimezone),
 						...(onReply ? createReplyTools(onReply) : {}),
@@ -358,6 +366,49 @@ export const makeAgentServiceLive = (userId: string) =>
 							agentConfig,
 							requestTraceMetadata,
 						)
+						const computerEnabled = Boolean(toolGroups.cua && computerSubagentDef)
+						const taskTools =
+							browser.enabled || computerEnabled || sandbox.enabled
+								? createTaskDelegationTools(
+										taskSupervisor,
+										{
+											enabled: browser.enabled,
+											runTask: browser.runTask,
+										},
+										{
+											enabled: computerEnabled,
+											runTask: async ({ task, context, abortSignal, toolCallId }) => {
+												if (!computerSubagentDef) {
+													return {
+														error: true,
+														summary: "Computer delegation is not available in this runtime.",
+													}
+												}
+
+												return await runDelegatedSubagent(
+													computerSubagentDef,
+													{
+														getModel: models.getModel,
+														toolGroups,
+														sharedPromptContext,
+														config: agentConfig,
+														requestTraceMetadata,
+														traceStore: subagentTraces,
+													},
+													{
+														task,
+														context,
+														abortSignal,
+														toolCallId,
+													},
+												)
+											},
+										},
+										sandbox.enabled,
+										userId,
+										conversationId,
+									)
+								: undefined
 						const orchestratorMetadata: AgentTraceMetadata = {
 							...requestTraceMetadata,
 							user_id: agentConfig.userId,
@@ -369,7 +420,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						const functionId = onPart ? "amby.orchestrator.stream" : "amby.orchestrator.generate"
 						const agent = createOrchestrator(
 							systemPrompt,
-							{ ...delegationTools, ...tools } as ToolSet,
+							{ ...delegationTools, ...(taskTools ?? {}), ...tools } as ToolSet,
 							functionId as "amby.orchestrator.generate" | "amby.orchestrator.stream",
 							orchestratorMetadata,
 						)

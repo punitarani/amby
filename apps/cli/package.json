@@ -11,6 +11,7 @@
 	},
 	"dependencies": {
 		"@amby/agent": "workspace:*",
+		"@amby/browser": "workspace:*",
 		"@amby/channels": "workspace:*",
 		"@amby/computer": "workspace:*",
 		"@amby/connectors": "workspace:*",

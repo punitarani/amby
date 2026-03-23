@@ -6,41 +6,49 @@ This document describes the sandbox compute layer (`@amby/computer`) and the tas
 
 ## Overview
 
-Amby runs a per-user Daytona sandbox for direct tool use (execute_command, read_file, write_file). On top of this, the **task delegation system** lets the agent spawn Codex CLI processes inside the sandbox for autonomous multi-step work — research, code generation, web scraping, data analysis.
+Amby runs a per-user Daytona sandbox for direct tool use (`execute_command`, `read_file`, `write_file`). On top of this, the **task delegation system** lets the agent spawn Codex CLI processes inside the sandbox for autonomous multi-step work like research, code generation, and data analysis.
 
-The user interacts with one agent. Under the hood, heavy work runs asynchronously in the sandbox via Daytona sessions.
+The user interacts with one agent. Under the hood, work is split across three execution paths:
+
+- `delegate_task target="browser"` for worker-only, headless, single-tab website work via Stagehand on Cloudflare Browser Rendering
+- `delegate_task target="computer"` for Daytona CUA when a task needs the actual desktop
+- `delegate_task target="sandbox"` for long-running autonomous sandbox work via Codex sessions
 
 ```
 User ──> Channel ──> AgentService.handleMessage()
                           │
-                     LLM calls delegate_task / get_task
-                          │
-                ┌─────────┴──────────┐
-                │  tools/delegation   │
-                │  (thin wrappers)    │
-                └─────────┬──────────┘
-                          │
-                ┌─────────┴──────────┐
-                │  TaskSupervisor     │
-                │  (state machine,    │
-                │   session lifecycle,│
-                │   heartbeat)        │
-                └─────────┬──────────┘
-                          │
-           ┌──────────────┴──────────────┐
-           │  Daytona Sandbox (per-user)  │
-           │                              │
-           │  /home/agent/workspace/      │
-           │    tasks/{taskId}/           │
-           │      workspace/  (cwd)       │
-           │      artifacts/  (outputs)   │
-           │      .codex/config.toml      │
-           │      AGENTS.md               │
-           │      prompt.txt              │
-           │                              │
-           │  Session: task-{taskId}      │
-           │  $ codex exec --full-auto    │
-           └──────────────────────────────┘
+            LLM calls delegate_task with target
+                    │            │              │
+                    │            │              └── target="sandbox" + get_task
+                    │            │                          │
+                    │            │                ┌─────────┴──────────┐
+                    │            │                │  TaskSupervisor     │
+                    │            │                │  (state machine,    │
+                    │            │                │   session lifecycle,│
+                    │            │                │   heartbeat)        │
+                    │            │                └─────────┬──────────┘
+                    │            │                          │
+                    │            └── target="computer"      │
+                    │                    │                  │
+                    │                Daytona CUA            │
+                    │                                       │
+                    └── target="browser"                    │
+                             │                              │
+               Cloudflare Browser Rendering                 │
+               + Stagehand + AI Gateway                     │
+                                                            │
+                                       ┌────────────────────┴────────────────────┐
+                                       │       Daytona Sandbox (per-user)        │
+                                       │                                          │
+                                       │  /home/agent/workspace/tasks/{taskId}/  │
+                                       │    workspace/   (cwd)                   │
+                                       │    artifacts/   (outputs)               │
+                                       │    AGENTS.md                             │
+                                       │    prompt.txt                            │
+                                       │                                          │
+                                       │  Session: task-{taskId}                  │
+                                       │  $ codex exec --full-auto                │
+                                       └──────────────────────────────────────────┘
 ```
 
 ---
@@ -51,12 +59,13 @@ User ──> Channel ──> AgentService.handleMessage()
 |---|---|---|
 | Sandbox per task or per user? | **Per user** | Reuse existing sandbox. Each task gets its own folder. `sandboxId` in DB allows per-task sandboxes later. |
 | Codex install | **HarnessInstaller** | `CodexInstaller.ensureInstalled()` runs once per sandbox lifecycle, caches result in `/.amby/harnesses.json`. |
-| Sync or async? | **Always async** | `delegate_task` returns immediately. `get_task` polls briefly (max 15s) or returns instantly. |
+| Sync or async? | **Mixed by target** | `delegate_task target="browser"` and `target="computer"` return inline results. `target="sandbox"` returns immediately; `get_task` polls briefly (max 15s) or returns instantly. |
 | Auth | **Codex-managed auth cache** | Keep Codex credentials in `CODEX_HOME/auth.json`. Prefer ChatGPT device login for headless flows; use API keys for automation. |
 | Outputs | **Sandbox filesystem** | DB stores `artifactRoot` path + small `outputSummary`. Heavy outputs stay in sandbox. |
 | Provider abstraction | **Interface now, one impl** | `TaskProvider` interface with `CodexProvider`. `ClaudeCodeProvider` slots in later. |
 | Prompt/env passing | **File-based** | Prompt written to `prompt.txt`, env to `.env` — avoids shell injection via `$(cat ...)`. |
 | Heartbeat | **Required** | Daytona auto-stop kills processes after 15 min. `refreshActivity()` every 60s keeps sandbox alive. |
+| Ordinary website automation | **Direct browser target when available** | Same-tab headless browsing prefers `delegate_task target="browser"`. When that target is unavailable (for example in local Bun runtimes), sandbox tasks can fall back to `needsBrowser: true`. |
 
 ---
 
@@ -82,12 +91,17 @@ harness/                  # Task delegation: providers + supervisor
   codex-installer.ts      # CodexInstaller implements HarnessInstaller
   supervisor.ts           # TaskSupervisor (Effect service — session lifecycle, heartbeat, state)
   index.ts
+
+browser/                  # Worker-only browser delegation
+  shared.ts               # BrowserService interface + result types
+  local.ts                # Disabled local/Bun runtime layer
+  workers.ts              # Cloudflare Browser Rendering + Stagehand implementation
 ```
 
 ### `packages/agent/src/tools/`
 
 ```
-delegation.ts             # delegate_task, get_task tools (wrappers around TaskSupervisor)
+delegation.ts             # delegate_task, get_task tools (browser/computer/sandbox routing)
 codex-auth.ts             # Codex auth status + setup tools
 ```
 
@@ -156,7 +170,7 @@ interface TaskProvider {
 
 1. Create `tasks/{taskId}/workspace/` and `tasks/{taskId}/artifacts/`
 2. `git init` in workspace (Codex requires a repo)
-3. Write `.codex/config.toml` with Playwright MCP if `needsBrowser: true`
+3. Write `.codex/config.toml` with optional Codex notify hooks and Playwright MCP when `needsBrowser: true`
 4. Write `AGENTS.md` with output instructions
 5. Write `prompt.txt` (prompt) and `.env` (API key + CODEX_HOME)
 6. Write `run.sh` wrapper that sources `.env` with `set -a` and runs `codex exec --full-auto --output-last-message -o ../artifacts/result.md "$prompt" 2>../artifacts/stderr.log`
@@ -212,16 +226,25 @@ interface TaskProvider {
 
 ## Agent Tools
 
-Two tools exposed to the LLM:
-
 ### `delegate_task`
 
-Starts an autonomous background task. Returns immediately with `{ taskId, status }`.
+Routes a task to browser, computer, or sandbox execution.
 
 ```
-Input:  { prompt: string, needsBrowser?: boolean }
-Output: { taskId: string, status: "running" }
+Input:  { task: string, target: "browser" | "computer" | "sandbox", context?: string, startUrl?: string, needsBrowser?: boolean }
+Output:
+  - browser: { target: "browser", success: boolean, summary: string, finalUrl?: string, title?: string }
+  - computer: { target: "computer", summary: string, toolsUsed?: string[] }
+  - sandbox: { target: "sandbox", taskId: string, status: "running", summary: string }
 ```
+
+Target selection:
+
+- `browser`: same-tab headless website work through Stagehand on Cloudflare Browser Rendering
+- `computer`: Daytona CUA for screen-dependent flows, native dialogs, uploads/downloads, CAPTCHA, MFA, popups, or multi-tab handling
+- `sandbox`: long-running autonomous background Codex work
+
+`needsBrowser` applies only to `target="sandbox"` and is meant as a fallback when direct browser delegation is unavailable in the current runtime.
 
 ### `get_task`
 
@@ -231,6 +254,8 @@ Checks task status. Optionally waits briefly (max 15s) for completion.
 Input:  { taskId: string, waitSeconds?: number }
 Output: { taskId, status, outputSummary, error, exitCode, startedAt, completedAt }
 ```
+
+`get_task`, `probe_task`, and `get_task_artifacts` apply only to `delegate_task target="sandbox"` tasks.
 
 ---
 
@@ -244,7 +269,7 @@ Output: { taskId, status, outputSummary, error, exitCode, startedAt, completedAt
 | `authMode` | text | `"api_key"` or `"chatgpt_account"` |
 | `status` | text | State machine status |
 | `prompt` | text | Task prompt |
-| `needsBrowser` | text | `"true"` / `"false"` |
+| `needsBrowser` | text | `"true"` / `"false"` for sandbox tasks that need Playwright browser automation |
 | `sandboxId` | text | Daytona sandbox ID |
 | `sessionId` | text | Daytona session ID |
 | `commandId` | text | Daytona command ID |
@@ -274,18 +299,17 @@ Codex auth now follows the official Codex CLI model instead of a custom OAuth im
 
 ---
 
-## Browser Automation
+## Browser Delegation
 
-When `needsBrowser: true`, the Codex provider writes Playwright MCP config:
+Single-tab browser work now runs outside the sandbox task system.
 
-```toml
-[mcp_servers.playwright]
-command = "npx"
-args = ["@playwright/mcp@latest", "--headless", "--browser", "chromium", "--isolated"]
-startup_timeout_sec = 30
-```
+- `@amby/browser` provides a `BrowserService` with `runTask({ task, startUrl? })`
+- Worker runtimes back that service with Cloudflare Browser Rendering and Stagehand
+- Stagehand uses an OpenAI-compatible AI Gateway endpoint, with `google/gemini-3-flash-preview` as the default model unless overridden
+- Local Bun runtimes expose a disabled browser service, so `delegate_task target="browser"` is unavailable there
+- In those runtimes, sandbox tasks can still opt into Playwright by using `delegate_task target="sandbox"` with `needsBrowser: true`
 
-Codex auto-discovers this from `.codex/config.toml` and makes 25+ browser tools available (navigate, click, type, snapshot, evaluate JS, etc.) via accessibility tree snapshots.
+This keeps ordinary website automation fast and direct when the browser target exists, while preserving a sandbox fallback in runtimes that do not expose it.
 
 ---
 
@@ -319,7 +343,7 @@ AgentService, JobRunnerService
       {taskId}/
         .env                       # CODEX_API_KEY + CODEX_HOME (file-based, avoids shell injection)
         workspace/                 # Codex working directory
-          .codex/config.toml       # Per-task MCP config (Playwright if needsBrowser)
+          .codex/config.toml       # Per-task Codex config (notify hook when enabled)
           AGENTS.md                # Task instructions + output requirements
           prompt.txt               # Task prompt (file-based, avoids shell injection)
           .git/                    # Codex requires a git repo

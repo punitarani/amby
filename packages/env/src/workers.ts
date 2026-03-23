@@ -7,6 +7,9 @@ export interface WorkerBindings {
 	APP_URL?: string
 	OPENROUTER_API_KEY: string
 	OPENAI_API_KEY?: string
+	BROWSER_AI_GATEWAY_BASE_URL?: string
+	BROWSER_AI_GATEWAY_AUTH_TOKEN?: string
+	BROWSER_STAGEHAND_MODEL?: string
 	CARTESIA_API_KEY?: string
 	DAYTONA_API_KEY?: string
 	DAYTONA_API_URL?: string
@@ -34,6 +37,7 @@ export interface WorkerBindings {
 	POSTHOG_KEY?: string
 	POSTHOG_HOST?: string
 	CF_VERSION_METADATA?: { id?: string }
+	BROWSER?: unknown
 
 	// Cloudflare primitives — typed structurally for portability
 	TELEGRAM_QUEUE?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
@@ -63,6 +67,10 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		APP_URL: bindings.APP_URL ?? "https://hiamby.com",
 		OPENROUTER_API_KEY: bindings.OPENROUTER_API_KEY,
 		OPENAI_API_KEY: bindings.OPENAI_API_KEY ?? "",
+		BROWSER_AI_GATEWAY_BASE_URL: bindings.BROWSER_AI_GATEWAY_BASE_URL ?? "",
+		BROWSER_AI_GATEWAY_AUTH_TOKEN: bindings.BROWSER_AI_GATEWAY_AUTH_TOKEN ?? "",
+		BROWSER_STAGEHAND_MODEL:
+			bindings.BROWSER_STAGEHAND_MODEL ?? "google/gemini-3-flash-preview",
 		CARTESIA_API_KEY: bindings.CARTESIA_API_KEY ?? "",
 		DAYTONA_API_KEY: bindings.DAYTONA_API_KEY ?? "",
 		DAYTONA_API_URL: bindings.DAYTONA_API_URL ?? "https://app.daytona.io/api",

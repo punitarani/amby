@@ -16,9 +16,9 @@ Inbound message
   → persist execution traces
 ```
 
-## Orchestrator and Subagents
+## Orchestrator, Direct Tools, and Subagents
 
-All agents are AI SDK v6 `ToolLoopAgent` instances. The orchestrator keeps only coordination tools. Heavy work is delegated.
+All delegated agents are AI SDK v6 `ToolLoopAgent` instances. The orchestrator keeps coordination tools plus a small set of direct capabilities. Heavy work is delegated.
 
 | Agent | Tool groups | Role |
 |---|---|---|
@@ -31,6 +31,12 @@ All agents are AI SDK v6 `ToolLoopAgent` instances. The orchestrator keeps only 
 
 Subagents are exposed to the orchestrator as tools such as `delegate_research` and `delegate_builder`.
 
+The orchestrator also gets a few direct tools that are not subagents:
+
+- `delegate_task` for unified browser/computer/sandbox delegation
+- `get_task` and related sandbox task inspection tools for background Codex tasks
+- reply/job/memory tools
+
 ## Request Lifecycle
 
 1. `resolveThread()` chooses the active thread for the inbound message.
@@ -42,9 +48,11 @@ Subagents are exposed to the orchestrator as tools such as `delegate_research` a
    - user memory and formatted current time
 3. The orchestrator runs with direct access to:
    - `search_memories`
+   - `delegate_task` when at least one delegated execution target is enabled
    - job tools
    - reply tools
    - Codex auth tools when sandbox support is available
+   - background task tools when sandbox support is available
    - delegated subagent tools
 4. A delegated subagent returns `{ summary, toolsUsed? }`.
 5. The orchestrator synthesizes the final user-facing response.
@@ -139,6 +147,16 @@ Subagent tool access is defined by named groups in `packages/agent/src/subagents
 
 The research agent uses the same `execute_command` tool as the builder, but its prompt constrains it to read-only operations.
 
+## Routing Rules
+
+The orchestrator chooses among three execution paths:
+
+- Connected apps like Gmail, Calendar, Notion, Slack, and Drive go to `delegate_integration`.
+- Ordinary same-tab website work goes to `delegate_task` with `target="browser"` when browser support is enabled.
+- If direct browser delegation is unavailable in the runtime, website work can fall back to `delegate_task` with `target="sandbox"` and `needsBrowser: true`.
+- Real desktop tasks go to `delegate_task` with `target="computer"` when the flow needs a screen, native dialogs, file pickers, uploads/downloads, CAPTCHA/MFA, popups/new tabs, or other non-browser UI.
+- Long-running autonomous background Codex work goes to `delegate_task` with `target="sandbox"`.
+
 ## Design Choices
 
 - Orchestrator-only delegation keeps control flow simple.
@@ -157,4 +175,3 @@ The research agent uses the same `execute_command` tool as the builder, but its 
 | `packages/agent/src/traces.ts` | Trace persistence and tool annotation formatting |
 | `packages/agent/src/subagents/spawner.ts` | `delegate_*` tool creation |
 | `packages/agent/src/subagents/tool-groups.ts` | Tool-group definitions and resolution |
-

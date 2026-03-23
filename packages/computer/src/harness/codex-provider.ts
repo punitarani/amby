@@ -44,7 +44,7 @@ function utf8SizeLimited(buf: Buffer): string {
 	return `${head}\n\n… [truncated ${buf.length} bytes] …\n\n${tail}`
 }
 
-function buildCodexConfigToml(needsBrowser: boolean, includeNotify: boolean): string {
+export function buildCodexConfigToml(needsBrowser: boolean, includeNotify: boolean): string {
 	const parts: string[] = []
 	if (includeNotify) {
 		parts.push(`notify = ["node", "../notify.js"]`)
@@ -71,7 +71,7 @@ export class CodexProvider implements TaskProvider {
 
 		const hasCallback = Boolean(config.callbackUrl && config.callbackSecret && config.callbackId)
 
-		// Write .codex/config.toml (Playwright + optional Codex notify hook)
+		// Write .codex/config.toml (Playwright fallback + optional Codex notify hook)
 		const configToml = buildCodexConfigToml(config.needsBrowser, hasCallback)
 		if (configToml.trim().length > 0) {
 			await sandbox.fs.uploadFile(Buffer.from(configToml), `${workspaceDir}/.codex/config.toml`)

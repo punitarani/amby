@@ -22,6 +22,7 @@
 	"dependencies": {
 		"@amby/agent": "workspace:*",
 		"@amby/auth": "workspace:*",
+		"@amby/browser": "workspace:*",
 		"@amby/computer": "workspace:*",
 		"@amby/connectors": "workspace:*",
 		"@amby/db": "workspace:*",
