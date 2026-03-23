@@ -1,5 +1,6 @@
 export type {
 	BrowserArtifactRef,
+	BrowserOutputSchema,
 	BrowserTaskInput,
 	BrowserTaskMetrics,
 	BrowserTaskMode,
@@ -7,5 +8,4 @@ export type {
 	BrowserTaskResult,
 	BrowserTaskSideEffectLevel,
 	BrowserTaskStatus,
-	JsonSchemaLike,
 } from "@amby/browser"

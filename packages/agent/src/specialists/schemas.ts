@@ -1,21 +1,30 @@
 import { z } from "zod"
+import type { JsonValue } from "../types/persistence"
 
 const jsonPrimitiveSchema = z.union([z.string(), z.number(), z.boolean(), z.null()])
-export const jsonValueSchema: z.ZodTypeAny = z.lazy(() =>
+
+export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 	z.union([jsonPrimitiveSchema, z.array(jsonValueSchema), z.record(jsonValueSchema)]),
 )
+
+const jsonObjectSchema = z.record(z.unknown())
+const jsonShallowValueSchema = z.union([
+	jsonPrimitiveSchema,
+	z.array(z.union([jsonPrimitiveSchema, jsonObjectSchema])),
+	jsonObjectSchema,
+])
 
 export const artifactRefSchema = z.object({
 	kind: z.string(),
 	title: z.string().optional(),
 	uri: z.string().optional(),
-	metadata: z.record(jsonValueSchema).optional(),
+	metadata: jsonObjectSchema.optional(),
 })
 
 export const taskIssueSchema = z.object({
 	code: z.string(),
 	message: z.string(),
-	metadata: z.record(jsonValueSchema).optional(),
+	metadata: jsonObjectSchema.optional(),
 })
 
 export const specialistTaskInputSchema = z.object({
@@ -23,12 +32,12 @@ export const specialistTaskInputSchema = z.object({
 	goal: z.string(),
 	context: z.string().optional(),
 	expectedOutput: z.string().optional(),
-	payload: jsonValueSchema.optional(),
+	payload: jsonShallowValueSchema.optional(),
 })
 
 export const specialistResultSchema = z.object({
 	summary: z.string(),
-	data: jsonValueSchema.optional(),
+	data: jsonShallowValueSchema.optional(),
 	artifacts: z.array(artifactRefSchema).optional(),
 	issues: z.array(taskIssueSchema).optional(),
 })
@@ -51,7 +60,7 @@ export const settingsTaskInputSchema = z.union([
 	z.object({
 		kind: z.literal("schedule"),
 		description: z.string(),
-		schedule: jsonValueSchema,
+		schedule: jsonShallowValueSchema,
 	}),
 	z.object({
 		kind: z.literal("codex_auth"),
@@ -88,7 +97,7 @@ export const executionTaskSchema = z.object({
 		}),
 	]),
 	dependencies: z.array(z.string()),
-	inputBindings: z.record(jsonValueSchema).default({}),
+	inputBindings: jsonObjectSchema.default({}),
 	resourceLocks: z.array(z.string()),
 	mutates: z.boolean(),
 	writesExternal: z.boolean(),
@@ -107,5 +116,5 @@ export const validatorResultSchema = z.object({
 	ok: z.boolean(),
 	summary: z.string(),
 	issues: z.array(taskIssueSchema).optional(),
-	data: z.record(jsonValueSchema).optional(),
+	data: jsonObjectSchema.optional(),
 })

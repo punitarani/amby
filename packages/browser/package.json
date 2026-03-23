@@ -17,10 +17,9 @@
 		"@amby/env": "workspace:*",
 		"@browserbasehq/stagehand": "2.5.x",
 		"@cloudflare/playwright": "^1.0.0",
-		"workers-ai-provider": "3.1.7"
+		"workers-ai-provider": "0.7.5"
 	},
 	"peerDependencies": {
-		"ai": "^6.0.116",
 		"effect": "^3.19.19",
 		"zod": "^3.24.0"
 	}

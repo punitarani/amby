@@ -1,6 +1,6 @@
 import type { ExecutionMode, RunnerKind, SpecialistKind, TaskStatus } from "@amby/db"
 import type { BrowserTaskInput, BrowserTaskResult } from "./browser"
-import type { ArtifactRef, JsonObject, JsonValue, TaskIssue } from "./persistence"
+import type { ArtifactRef, JsonValue, TaskIssue } from "./persistence"
 import type { SettingsTaskInput } from "./settings"
 
 export type ToolGroupKey =

@@ -1,5 +1,5 @@
 import type { WorkerBindings } from "@amby/env/workers"
-import { AISdkClient, Stagehand } from "@browserbasehq/stagehand"
+import { AISdkClient, type LLMClient, Stagehand } from "@browserbasehq/stagehand"
 import type { BrowserWorker } from "@cloudflare/playwright"
 import { Effect, Layer } from "effect"
 import { createWorkersAI } from "workers-ai-provider"
@@ -16,7 +16,6 @@ import {
 	summarizePageArtifact,
 } from "./shared"
 
-/** Workers AI model via Cloudflare AI Gateway */
 export const STAGEHAND_MODEL = "@cf/moonshotai/kimi-k2.5"
 
 const BROWSER_AGENT_SYSTEM_PROMPT = [
@@ -33,9 +32,9 @@ type BrowserWorkerBindings = Pick<
 
 export interface BrowserWorkerSettings {
 	enabled: boolean
-	llmClient: AISdkClient
-	aiGatewayId: string
+	llmClient: LLMClient
 	model: string
+	providerLabel: string
 	browserBinding: unknown
 	verbose: 0 | 1
 }
@@ -44,39 +43,70 @@ function trim(value: string | undefined): string {
 	return value?.trim() ?? ""
 }
 
-function createStagehandLlmClient(
+function mapUsage(usage: unknown): BrowserTaskResult["metrics"] | undefined {
+	if (!usage || typeof usage !== "object") return undefined
+
+	const record = usage as Record<string, unknown>
+	const inputTokens = record.input_tokens
+	const outputTokens = record.output_tokens
+	const reasoningTokens = record.reasoning_tokens
+	const cachedInputTokens = record.cached_input_tokens
+	const inferenceTimeMs = record.inference_time_ms
+
+	return {
+		inputTokens: typeof inputTokens === "number" ? inputTokens : undefined,
+		outputTokens: typeof outputTokens === "number" ? outputTokens : undefined,
+		reasoningTokens: typeof reasoningTokens === "number" ? reasoningTokens : undefined,
+		cachedInputTokens: typeof cachedInputTokens === "number" ? cachedInputTokens : undefined,
+		inferenceTimeMs: typeof inferenceTimeMs === "number" ? inferenceTimeMs : undefined,
+	}
+}
+
+function createStagehandWorkersAiClient(
 	ai: NonNullable<WorkerBindings["AI"]>,
 	aiGatewayId: string,
-): AISdkClient {
+): {
+	llmClient: LLMClient
+	model: string
+	providerLabel: string
+} {
+	const gatewayId = trim(aiGatewayId)
+	const binding = ai as NonNullable<Parameters<typeof createWorkersAI>[0]["binding"]>
 	const workersai = createWorkersAI({
-		binding: ai,
-		gateway: { id: aiGatewayId },
+		binding,
+		gateway: gatewayId ? { id: gatewayId } : undefined,
 	} as Parameters<typeof createWorkersAI>[0])
+	const stagehandModel = STAGEHAND_MODEL as Parameters<typeof workersai>[0]
 
-	return new AISdkClient({
-		model: workersai(STAGEHAND_MODEL) as unknown as ConstructorParameters<
-			typeof AISdkClient
-		>[0]["model"],
-	})
+	return {
+		llmClient: new AISdkClient({
+			// `workers-ai-provider@0.7.5` model unions lag the current Workers AI catalog.
+			model: workersai(stagehandModel),
+		}),
+		model: STAGEHAND_MODEL,
+		providerLabel: gatewayId ? `Workers AI via AI Gateway "${gatewayId}"` : "Workers AI binding",
+	}
 }
 
 function browserWorkerSettingsFromBindings(
 	bindings: BrowserWorkerBindings,
 ): BrowserWorkerSettings | null {
-	const ai = bindings.AI
 	const browserBinding = bindings.BROWSER
+	const ai = bindings.AI
 	const aiGatewayId = trim(bindings.CLOUDFLARE_AI_GATEWAY_ID)
 	const verbose = trim(bindings.NODE_ENV) === "development" ? 1 : 0
 
-	if (!browserBinding || !ai || !aiGatewayId) {
+	if (!browserBinding || !ai) {
 		return null
 	}
 
+	const { llmClient, model, providerLabel } = createStagehandWorkersAiClient(ai, aiGatewayId)
+
 	return {
 		enabled: true,
-		llmClient: createStagehandLlmClient(ai, aiGatewayId),
-		aiGatewayId,
-		model: STAGEHAND_MODEL,
+		llmClient,
+		model,
+		providerLabel,
 		browserBinding,
 		verbose,
 	}
@@ -119,25 +149,6 @@ function buildBrowserInstruction(input: BrowserTaskInput): string {
 	return parts.join("\n\n")
 }
 
-function mapUsage(usage: unknown): BrowserTaskResult["metrics"] | undefined {
-	if (!usage || typeof usage !== "object") return undefined
-
-	const record = usage as Record<string, unknown>
-	const inputTokens = record.input_tokens
-	const outputTokens = record.output_tokens
-	const reasoningTokens = record.reasoning_tokens
-	const cachedInputTokens = record.cached_input_tokens
-	const inferenceTimeMs = record.inference_time_ms
-
-	return {
-		inputTokens: typeof inputTokens === "number" ? inputTokens : undefined,
-		outputTokens: typeof outputTokens === "number" ? outputTokens : undefined,
-		reasoningTokens: typeof reasoningTokens === "number" ? reasoningTokens : undefined,
-		cachedInputTokens: typeof cachedInputTokens === "number" ? cachedInputTokens : undefined,
-		inferenceTimeMs: typeof inferenceTimeMs === "number" ? inferenceTimeMs : undefined,
-	}
-}
-
 function isEscalationResult(status: BrowserTaskStatus, message: string, output: unknown): boolean {
 	return (
 		status !== "escalate" &&
@@ -162,17 +173,29 @@ async function runBrowserTask(
 	const startedAt = Date.now()
 
 	if (settings.verbose) {
-		console.info(
-			`[BrowserService] LLM: Workers AI ${settings.model} via AI Gateway "${settings.aiGatewayId}" (workers-ai-provider + AISdkClient)`,
-		)
+		console.info(`[BrowserService] LLM: ${settings.model} via ${settings.providerLabel}`)
 	}
 
 	const { endpointURLString } = await import("@cloudflare/playwright")
+	const stagehandLogger = (entry: { level?: number; message: string; [key: string]: unknown }) => {
+		if (entry.message === "Custom LLM clients are currently not supported in API mode") {
+			return
+		}
+
+		if ((entry.level ?? 1) <= 0) {
+			console.warn(entry)
+			return
+		}
+
+		if (settings.verbose) {
+			console.info(entry)
+		}
+	}
+
 	const stagehand = new Stagehand({
 		env: "LOCAL",
-		experimental: true,
-		useAPI: false,
 		verbose: settings.verbose ? 2 : 1,
+		logger: stagehandLogger,
 		modelName: settings.model,
 		llmClient: settings.llmClient,
 		localBrowserLaunchOptions: {
@@ -216,7 +239,7 @@ async function runBrowserTask(
 					normalized.outputSchema != null
 						? await page.extract({
 								instruction: normalized.instruction,
-								schema: normalized.outputSchema as never,
+								schema: normalized.outputSchema,
 							})
 						: await page.extract({
 								instruction: normalized.instruction,
@@ -310,7 +333,7 @@ async function runBrowserTask(
 						try {
 							const extraction = await page.extract({
 								instruction: normalized.expectedOutcome?.trim() || normalized.instruction,
-								schema: normalized.outputSchema as never,
+								schema: normalized.outputSchema,
 							})
 							output =
 								extraction && typeof extraction === "object" && "data" in extraction
@@ -403,7 +426,7 @@ export const makeBrowserServiceFromBindings = (bindings: BrowserWorkerBindings) 
 				Effect.fail(
 					new BrowserError({
 						message:
-							'Browser LLM requires BROWSER, Workers AI ([ai] binding = "AI"), and CLOUDFLARE_AI_GATEWAY_ID (AI Gateway slug).',
+							'Browser LLM requires BROWSER and Workers AI ([ai] binding = "AI"). Optional: CLOUDFLARE_AI_GATEWAY_ID.',
 					}),
 				),
 		})

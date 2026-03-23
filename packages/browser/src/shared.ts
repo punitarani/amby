@@ -3,7 +3,7 @@ import type { z } from "zod"
 
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | { [key: string]: JsonValue } | JsonValue[]
-export type JsonSchemaLike = z.ZodTypeAny | Record<string, unknown>
+export type BrowserOutputSchema = z.AnyZodObject
 
 export type BrowserTaskMode = "extract" | "act" | "agent"
 export type BrowserTaskSideEffectLevel = "read" | "soft-write" | "hard-write"
@@ -16,7 +16,7 @@ export interface BrowserTaskInput {
 	maxSteps?: number
 	expectedOutcome?: string
 	sideEffectLevel: BrowserTaskSideEffectLevel
-	outputSchema?: JsonSchemaLike
+	outputSchema?: BrowserOutputSchema
 }
 
 export interface BrowserTaskPage {
