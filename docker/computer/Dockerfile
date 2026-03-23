@@ -1,4 +1,4 @@
-FROM ubuntu:24.04
+FROM mcr.microsoft.com/devcontainers/python:3.14
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -8,13 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	curl wget git ca-certificates gnupg sudo \
 	# Build essentials
 	build-essential pkg-config \
-	# Languages
-	python3 python3-pip python3-venv \
 	# Networking / utilities
 	openssh-client jq unzip zip htop less nano ripgrep \
 	iputils-ping bind9-dnsutils \
+	sqlite3 poppler-utils file \
 	# Browser
-	chromium-browser \
+	chromium \
 	# X11 libraries (required for computer-use / screen interaction)
 	libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 \
 	libxss1 libxtst6 libxi6 \
@@ -35,12 +34,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 	&& apt-get install -y --no-install-recommends nodejs \
 	&& rm -rf /var/lib/apt/lists/*
 
-# ─── Global Node tools ────────────────────────────────────
-RUN npm install -g typescript@5 ts-node bun@1.3
+# ─── Python requirements ───────────────────────────────────
+COPY requirements.txt /tmp/requirements.txt
 
-# ─── Python tooling ───────────────────────────────────────
-RUN python3 -m pip install --no-cache-dir --break-system-packages \
-	pipx uv
+# ─── Global Node tools ────────────────────────────────────
+RUN npm install -g typescript@5 ts-node typescript-language-server bun@1.3
+
+# ─── Python tooling & packages ────────────────────────────
+RUN python3 -m pip install --no-cache-dir pipx==1.8.0 \
+	&& PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install uv==0.9.26 \
+	&& uv pip install --system --break-system-packages --no-cache --only-binary=:all: -r /tmp/requirements.txt \
+	&& rm -f /tmp/requirements.txt
 
 # ─── Users & permissions ──────────────────────────────────
 # user — default human user (VNC sessions, browser, limited access)
@@ -75,13 +79,13 @@ ENV LANG=en_US.UTF-8 \
 	LC_ALL=en_US.UTF-8 \
 	DISPLAY=:1 \
 	HOME=/home/agent \
-	PATH="/home/agent/.local/bin:/usr/local/bin:${PATH}"
+	PATH="/home/agent/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 WORKDIR /home/agent/Desktop
 
 USER agent
 
 # Suppress shell setup prompts
-RUN touch ~/.bashrc
+RUN touch ~/.bashrc ~/.zshrc
 
 ENTRYPOINT ["sleep", "infinity"]
