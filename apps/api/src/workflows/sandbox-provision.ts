@@ -47,11 +47,17 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				target: env.DAYTONA_TARGET ?? "us",
 			})
 
-		/** Run an effect that needs DbService using a short-lived runtime */
+		/** Run an effect that needs DbService using a short-lived runtime.
+		 *  Converts Effect FiberFailure to a plain Error so Cloudflare Workflows
+		 *  can handle step failures without logging them as "Uncaught". */
 		const withRuntime = async <T>(effect: Effect.Effect<T, unknown, DbService>) => {
 			const runtime = makeRuntimeForConsumer(env)
 			try {
 				return await runtime.runPromise(effect)
+			} catch (cause) {
+				// Unwrap FiberFailure to a plain Error with a readable message
+				const message = cause instanceof Error ? cause.message : String(cause)
+				throw new Error(message)
 			} finally {
 				await runtime.dispose()
 			}
@@ -66,9 +72,13 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			await withRuntime(
 				Effect.gen(function* () {
 					const { db } = yield* DbService
-					yield* Effect.tryPromise(() =>
-						upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volId),
-					)
+					yield* Effect.tryPromise({
+						try: () => upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volId),
+						catch: (cause) =>
+							new Error(
+								`Failed to upsert sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,
+							),
+					})
 				}),
 			)
 		}
@@ -79,7 +89,13 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 			const row = await withRuntime(
 				Effect.gen(function* () {
 					const { db } = yield* DbService
-					return yield* Effect.tryPromise(() => ensureVolume(daytona, db, userId, isDev))
+					return yield* Effect.tryPromise({
+						try: () => ensureVolume(daytona, db, userId, isDev),
+						catch: (cause) =>
+							new Error(
+								`Failed to ensure volume: ${cause instanceof Error ? cause.message : String(cause)}`,
+							),
+					})
 				}),
 			)
 			// Serialize for step return (Cloudflare Workflows require JSON-serializable)

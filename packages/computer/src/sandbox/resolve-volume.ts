@@ -1,7 +1,6 @@
 import type { Database } from "@amby/db"
 import { and, eq, ne, schema } from "@amby/db"
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
-import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
 import { Effect } from "effect"
 import {
 	SANDBOX_CREATE_TIMEOUT,
@@ -42,19 +41,9 @@ export async function ensureVolume(
 		.then((rows) => rows[0])
 
 	if (existing?.status === "ready") {
-		try {
-			await daytona.volume.get(existing.daytonaVolumeId)
-			return existing
-		} catch (cause) {
-			// Only fall through to re-create on 404; propagate transient errors
-			if (cause instanceof DaytonaNotFoundError) {
-				/* volume gone — fall through to re-create */
-			} else if (cause instanceof DaytonaError && cause.statusCode === 404) {
-				/* volume gone — fall through to re-create */
-			} else {
-				throw cause
-			}
-		}
+		// Trust the DB row — skip Daytona validation to avoid spurious 403/transient errors.
+		// If the volume was deleted externally, sandbox creation will fail explicitly at that point.
+		return existing
 	}
 
 	const name = volumeName(userId, isDev)
@@ -194,27 +183,44 @@ export interface EnsureMainSandboxParams {
 }
 
 /**
- * Single ensure path: volume → cache → get-by-name → create.
- * The volume is always ensured first; the sandbox is created with a volume mount.
+ * Single ensure path: volume (DB read-only) → cache → get-by-name → create.
+ *
+ * Volumes are managed exclusively by SandboxProvisionWorkflow (triggered on /start).
+ * This function only reads the volume row from the DB — it never calls the Daytona
+ * volume API. If no ready volume exists, it fails with a user-friendly message.
  */
 export const ensureMainSandbox = (
 	params: EnsureMainSandboxParams,
-): Effect.Effect<Sandbox, SandboxError | VolumeError> =>
+): Effect.Effect<Sandbox, SandboxError> =>
 	Effect.gen(function* () {
 		const { daytona, db, userId, isDev, cache } = params
 		const name = sandboxName(userId, isDev)
 
-		// Step 1: ensure volume
+		// Step 1: require an existing ready volume row (created by the provision workflow).
+		// We never call the Daytona volume API here — that is the provision workflow's job.
 		const volumeRow = yield* Effect.tryPromise({
-			try: () => ensureVolume(daytona, db, userId, isDev),
+			try: () =>
+				db
+					.select()
+					.from(schema.userVolumes)
+					.where(eq(schema.userVolumes.userId, userId))
+					.limit(1)
+					.then((rows) => rows[0] ?? null),
 			catch: (cause) =>
-				cause instanceof VolumeError
-					? cause
-					: new VolumeError({
-							message: `Volume ensure failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
+				new SandboxError({
+					message: `Failed to load volume record: ${cause instanceof Error ? cause.message : String(cause)}`,
+					cause,
+				}),
 		})
+
+		if (!volumeRow || volumeRow.status !== "ready") {
+			return yield* Effect.fail(
+				new SandboxError({
+					message:
+						"Your computer environment is being set up — this usually takes a few minutes. Please try again shortly.",
+				}),
+			)
+		}
 
 		// Step 2: try cache
 		const cached = cache.get(userId)

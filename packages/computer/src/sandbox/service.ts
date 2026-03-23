@@ -67,12 +67,7 @@ export const SandboxServiceLive = Layer.effect(
 		return {
 			enabled: true,
 
-			ensure: (userId) =>
-				ensureMainSandbox({ daytona, db, userId, isDev, cache }).pipe(
-					Effect.catchTag("VolumeError", (e) =>
-						Effect.fail(new SandboxError({ message: e.message, cause: e.cause })),
-					),
-				),
+			ensure: (userId) => ensureMainSandbox({ daytona, db, userId, isDev, cache }),
 
 			exec: (sandbox, command, cwd?) =>
 				Effect.tryPromise({
