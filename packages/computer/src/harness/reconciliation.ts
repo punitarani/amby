@@ -319,7 +319,7 @@ async function insertReconcilerEvent(
 		taskId,
 		eventId,
 		source: "reconciler",
-		eventType,
+		kind: eventType as typeof schema.taskEvents.$inferInsert.kind,
 		seq: null,
 		payload,
 		occurredAt,

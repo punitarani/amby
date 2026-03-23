@@ -16,6 +16,19 @@ import { users } from "./users"
 
 export type Platform = "cli" | "telegram" | "slack" | "discord"
 export type ThreadSource = "native" | "reply_chain" | "derived" | "manual"
+export type SpecialistKind =
+	| "conversation"
+	| "planner"
+	| "research"
+	| "builder"
+	| "integration"
+	| "computer"
+	| "browser"
+	| "memory"
+	| "settings"
+	| "validator"
+export type RunnerKind = "toolloop" | "browser_service" | "background_handoff"
+export type ExecutionMode = "direct" | "sequential" | "parallel" | "background"
 export type TraceEventKind =
 	| "context_built"
 	| "model_request"
@@ -118,7 +131,11 @@ export const traces = pgTable(
 		messageId: uuid("message_id").references(() => messages.id, { onDelete: "set null" }),
 		parentTraceId: uuid("parent_trace_id"),
 		rootTraceId: uuid("root_trace_id"),
-		agentName: text("agent_name").notNull(),
+		taskId: uuid("task_id"),
+		specialist: text("specialist").$type<SpecialistKind>(),
+		runnerKind: text("runner_kind").$type<RunnerKind>(),
+		mode: text("mode").$type<ExecutionMode>(),
+		depth: integer("depth"),
 		status: text("status").$type<"running" | "completed" | "failed">().notNull().default("running"),
 		startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
 		completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -130,6 +147,10 @@ export const traces = pgTable(
 		index("traces_message_id_idx").on(t.messageId),
 		index("traces_parent_trace_id_idx").on(t.parentTraceId),
 		index("traces_root_trace_id_idx").on(t.rootTraceId),
+		index("traces_task_id_idx").on(t.taskId),
+		index("traces_specialist_idx").on(t.specialist),
+		index("traces_runner_kind_idx").on(t.runnerKind),
+		index("traces_mode_idx").on(t.mode),
 		index("traces_thread_idx").on(t.threadId),
 	],
 )

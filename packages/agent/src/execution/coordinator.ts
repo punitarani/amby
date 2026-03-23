@@ -1,0 +1,359 @@
+import type { BrowserService } from "@amby/browser"
+import type { TaskSupervisor } from "@amby/computer"
+import { Effect } from "effect"
+import type { LanguageModel } from "ai"
+import { createTrace, type TraceWriter } from "./ledger"
+import { buildReadyBatch } from "./locks"
+import { buildExecutionPlan } from "./planner"
+import { buildExecutionSummary } from "./reducer"
+import type { ToolGroups } from "./registry"
+import { buildTaskMetadata } from "./ledger"
+import { runBackgroundSpecialist } from "./runners/background"
+import { runBrowserSpecialist } from "./runners/browser"
+import { runToolloopSpecialist } from "./runners/toolloop"
+import type { AgentRunConfig } from "../types/agent"
+import type {
+	ExecutionPlan,
+	ExecutionSummary,
+	ExecutionTask,
+	ExecutionTaskResult,
+} from "../types/execution"
+import type { ExecutionRequestEnvelope, ExecutionResponseEnvelope } from "../types/persistence"
+
+type QueryFn = <T>(
+	fn: (db: import("@amby/db").Database) => Promise<T>,
+) => Effect.Effect<T, import("@amby/db").DbError>
+
+function materializePlan(plan: ExecutionPlan): ExecutionTask[] {
+	const ids = plan.tasks.map(() => crypto.randomUUID())
+	return plan.tasks.map((task, index) => {
+		const id = ids[index] ?? crypto.randomUUID()
+		const dependencyIds = task.dependencies.map((dependency) => {
+			const match = /^task-(\d+)$/.exec(dependency)
+			if (!match) return dependency
+			const sourceIndex = Number.parseInt(match[1] ?? "", 10)
+			return ids[sourceIndex] ?? dependency
+		})
+		return {
+			...task,
+			id,
+			rootTaskId: id,
+			depth: 1,
+			dependencies: dependencyIds,
+		}
+	})
+}
+
+function buildRequestEnvelope(task: ExecutionTask): ExecutionRequestEnvelope {
+	return {
+		taskId: task.id,
+		rootTaskId: task.rootTaskId,
+		parentTaskId: task.parentTaskId,
+		depth: task.depth,
+		specialist: task.specialist,
+		runnerKind: task.runnerKind,
+		dependencies: task.dependencies,
+		input: task.input as unknown as ExecutionRequestEnvelope["input"],
+		resourceLocks: task.resourceLocks,
+		mutates: task.mutates,
+		writesExternal: task.writesExternal,
+		requiresConfirmation: task.requiresConfirmation,
+		requiresValidation: task.requiresValidation,
+	}
+}
+
+function buildResponseEnvelope(result: ExecutionTaskResult): ExecutionResponseEnvelope {
+	return {
+		taskId: result.taskId,
+		status: result.status,
+		summary: result.summary,
+		data: result.data,
+		artifacts: result.artifacts,
+		issues: result.issues,
+		metrics: result.metrics as Record<string, unknown> | undefined,
+		backgroundRef: result.backgroundRef,
+	}
+}
+
+async function runTaskWithTrace(params: {
+	task: ExecutionTask
+	query: QueryFn
+	config: AgentRunConfig
+	getModel: (id?: string) => LanguageModel
+	toolGroups: ToolGroups
+	browser: import("effect").Context.Tag.Service<typeof BrowserService>
+	supervisor: import("effect").Context.Tag.Service<typeof TaskSupervisor>
+	rootTrace: TraceWriter
+}) {
+	const requestEnvelope = buildRequestEnvelope(params.task)
+	const trace = await Effect.runPromise(
+		createTrace({
+			query: params.query,
+			conversationId: params.config.request.conversationId,
+			threadId: params.config.request.threadId,
+			parentTraceId: params.rootTrace.traceId,
+			rootTraceId: params.rootTrace.traceId,
+			taskId: params.task.id,
+			specialist: params.task.specialist,
+			runnerKind: params.task.runnerKind,
+			mode: params.task.mode,
+			depth: params.task.depth,
+			metadata: buildTaskMetadata({ request: requestEnvelope }),
+		}),
+	)
+
+	await Effect.runPromise(
+		trace.append("delegation_start", {
+			taskId: params.task.id,
+			specialist: params.task.specialist,
+			runnerKind: params.task.runnerKind,
+			request: requestEnvelope,
+		}),
+	)
+
+	try {
+		const runResult =
+			params.task.runnerKind === "browser_service"
+				? await runBrowserSpecialist({
+						task: params.task,
+						browser: params.browser,
+						trace,
+					})
+				: params.task.runnerKind === "background_handoff"
+					? await runBackgroundSpecialist({
+							task: params.task,
+							supervisor: params.supervisor,
+							userId: params.config.request.userId,
+							conversationId: params.config.request.conversationId,
+							threadId: params.config.request.threadId,
+							trace,
+						})
+					: await runToolloopSpecialist({
+							task: params.task,
+							config: params.config,
+							getModel: params.getModel,
+							toolGroups: params.toolGroups,
+							trace,
+						})
+
+		if (runResult.toolEvents.length > 0) {
+			await Effect.runPromise(trace.appendMany(runResult.toolEvents))
+		}
+
+		if (params.task.runnerKind === "background_handoff") {
+			await Effect.runPromise(
+				trace.updateMetadata(
+					buildTaskMetadata({
+						request: requestEnvelope,
+						response: buildResponseEnvelope(runResult.result),
+					}),
+				),
+			)
+			return runResult.result
+		}
+
+		const responseEnvelope = buildResponseEnvelope(runResult.result)
+		await Effect.runPromise(
+			trace.append("delegation_end", {
+				taskId: params.task.id,
+				response: responseEnvelope,
+			}),
+		)
+		await Effect.runPromise(
+			trace.complete(runResult.result.status === "failed" ? "failed" : "completed", buildTaskMetadata({
+				request: requestEnvelope,
+				response: responseEnvelope,
+			})),
+		)
+		return runResult.result
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		const failedResult: ExecutionTaskResult = {
+			taskId: params.task.id,
+			rootTaskId: params.task.rootTaskId,
+			parentTaskId: params.task.parentTaskId,
+			depth: params.task.depth,
+			specialist: params.task.specialist,
+			status: "failed",
+			summary: message,
+			issues: [{ code: "execution_failed", message }],
+			traceRef: { traceId: trace.traceId },
+		}
+		await Effect.runPromise(
+			trace.append("error", {
+				taskId: params.task.id,
+				message,
+			}),
+		)
+		await Effect.runPromise(
+			trace.complete("failed", buildTaskMetadata({
+				request: requestEnvelope,
+				response: buildResponseEnvelope(failedResult),
+			})),
+		)
+		return failedResult
+	}
+}
+
+async function runValidatorIfNeeded(params: {
+	query: QueryFn
+	config: AgentRunConfig
+	getModel: (id?: string) => LanguageModel
+	toolGroups: ToolGroups
+	browser: import("effect").Context.Tag.Service<typeof BrowserService>
+	supervisor: import("effect").Context.Tag.Service<typeof TaskSupervisor>
+	rootTrace: TraceWriter
+	plan: ExecutionPlan
+	taskResults: ExecutionTaskResult[]
+}): Promise<ExecutionTaskResult | undefined> {
+	if (
+		params.plan.reducer !== "validator" &&
+		!params.taskResults.some((task) => task.status === "partial" || task.status === "escalate") &&
+		!params.taskResults.some((task) => task.issues && task.issues.length > 0)
+	) {
+		return undefined
+	}
+
+	const validatorTask: ExecutionTask = {
+		id: crypto.randomUUID(),
+		rootTaskId: "",
+		depth: 1,
+		specialist: "validator",
+		runnerKind: "toolloop",
+		mode: "sequential",
+		input: {
+			kind: "specialist",
+			goal: "Validate the completed execution tasks and identify conflicts, risks, or missing verification.",
+			payload: {
+				plan: params.plan,
+				taskResults: params.taskResults,
+			},
+		},
+		dependencies: params.taskResults.map((task) => task.taskId),
+		inputBindings: Object.fromEntries(
+			params.taskResults.map((task) => [task.taskId, task.data ?? { summary: task.summary }]),
+		),
+		resourceLocks: [],
+		mutates: false,
+		writesExternal: false,
+		requiresConfirmation: false,
+		requiresValidation: false,
+	}
+	validatorTask.rootTaskId = validatorTask.id
+
+	return runTaskWithTrace({
+		task: validatorTask,
+		query: params.query,
+		config: params.config,
+		getModel: params.getModel,
+		toolGroups: params.toolGroups,
+		browser: params.browser,
+		supervisor: params.supervisor,
+		rootTrace: params.rootTrace,
+	})
+}
+
+export async function executeRequestPlan(params: {
+	request: string
+	query: QueryFn
+	config: AgentRunConfig
+	getModel: (id?: string) => LanguageModel
+	toolGroups: ToolGroups
+	browser: import("effect").Context.Tag.Service<typeof BrowserService>
+	supervisor: import("effect").Context.Tag.Service<typeof TaskSupervisor>
+	rootTrace: TraceWriter
+}): Promise<ExecutionSummary> {
+	const plan = await buildExecutionPlan({
+		request: params.request,
+		config: params.config,
+		getModel: params.getModel,
+	})
+
+	if (plan.strategy === "direct" || plan.tasks.length === 0) {
+		return buildExecutionSummary({
+			mode: "direct",
+			taskResults: [],
+		})
+	}
+
+	const pending = materializePlan(plan)
+	const completed = new Map<string, ExecutionTaskResult>()
+
+	while (pending.length > 0) {
+		const batch = buildReadyBatch(
+			pending,
+			completed,
+			[],
+			plan.strategy === "parallel" ? params.config.budgets.maxParallelAgents : 1,
+		)
+
+		if (batch.length === 0) {
+			throw new Error("Execution plan is blocked by unresolved dependencies or conflicting locks.")
+		}
+
+		const runnable = batch.map((task) => ({
+			...task,
+			rootTaskId: task.rootTaskId,
+			inputBindings: Object.fromEntries(
+				task.dependencies
+					.map((dependencyId) => completed.get(dependencyId))
+					.filter((result): result is ExecutionTaskResult => Boolean(result))
+					.map((result) => [result.taskId, result.data ?? { summary: result.summary }]),
+			),
+		}))
+
+		const results =
+			plan.strategy === "parallel"
+				? await Promise.all(
+						runnable.map((task) =>
+							runTaskWithTrace({
+								task,
+								query: params.query,
+								config: params.config,
+								getModel: params.getModel,
+								toolGroups: params.toolGroups,
+								browser: params.browser,
+								supervisor: params.supervisor,
+								rootTrace: params.rootTrace,
+							}),
+						),
+					)
+				: [
+						await runTaskWithTrace({
+							task: runnable[0] as ExecutionTask,
+							query: params.query,
+							config: params.config,
+							getModel: params.getModel,
+							toolGroups: params.toolGroups,
+							browser: params.browser,
+							supervisor: params.supervisor,
+							rootTrace: params.rootTrace,
+						}),
+					]
+
+		for (const result of results) {
+			completed.set(result.taskId, result)
+			const index = pending.findIndex((task) => task.id === result.taskId)
+			if (index >= 0) pending.splice(index, 1)
+		}
+	}
+
+	const taskResults = [...completed.values()]
+	const validatorResult = await runValidatorIfNeeded({
+		query: params.query,
+		config: params.config,
+		getModel: params.getModel,
+		toolGroups: params.toolGroups,
+		browser: params.browser,
+		supervisor: params.supervisor,
+		rootTrace: params.rootTrace,
+		plan,
+		taskResults,
+	})
+
+	return buildExecutionSummary({
+		mode: plan.strategy,
+		taskResults,
+		validatorResult,
+	})
+}

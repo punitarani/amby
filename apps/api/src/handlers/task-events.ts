@@ -6,8 +6,8 @@ import {
 	isTimestampValid,
 	verifyHmacSignature,
 } from "@amby/computer"
-import type { TaskEventSource, TaskStatus } from "@amby/db"
-import { and, DbService, eq, lt, schema } from "@amby/db"
+import type { TaskEventKind, TaskEventSource, TaskStatus } from "@amby/db"
+import { and, DbService, desc, eq, lt, schema } from "@amby/db"
 import { Effect } from "effect"
 
 type TaskEventBody = {
@@ -48,6 +48,37 @@ function mapHarnessEventToStatus(eventType: string): TaskStatus | undefined {
 		default:
 			return undefined
 	}
+}
+
+async function appendLinkedTraceEvent(params: {
+	db: import("@amby/db").Database
+	traceId: string
+	kind: "delegation_end" | "error"
+	payload: Record<string, unknown>
+	status: "completed" | "failed"
+}) {
+	const lastRows = await params.db
+		.select({ seq: schema.traceEvents.seq })
+		.from(schema.traceEvents)
+		.where(eq(schema.traceEvents.traceId, params.traceId))
+		.orderBy(desc(schema.traceEvents.seq))
+		.limit(1)
+		.catch(() => [])
+
+	const nextSeq = (lastRows[0]?.seq ?? -1) + 1
+	await params.db.insert(schema.traceEvents).values({
+		traceId: params.traceId,
+		seq: nextSeq,
+		kind: params.kind,
+		payload: params.payload,
+	})
+	await params.db
+		.update(schema.traces)
+		.set({
+			status: params.status,
+			completedAt: new Date(),
+		})
+		.where(eq(schema.traces.id, params.traceId))
 }
 
 export const handleTaskEventPost = (request: Request) =>
@@ -143,8 +174,8 @@ export const handleTaskEventPost = (request: Request) =>
 					taskId: task.id,
 					eventId: body.eventId,
 					source,
-					eventType: body.eventType,
-					seq: seq ?? null,
+					kind: body.eventType as TaskEventKind,
+					seq: isHarnessSeq ? seq : null,
 					payload: body.payload ?? {
 						status: body.status,
 						message: body.message,
@@ -204,6 +235,9 @@ export const handleTaskEventPost = (request: Request) =>
 				patch.callbackSecretHash = null
 				if (body.message) {
 					patch.outputSummary = body.message.slice(0, 2000)
+					if (body.eventType === "task.failed") {
+						patch.error = body.message.slice(0, 4000)
+					}
 				}
 			}
 
@@ -222,6 +256,26 @@ export const handleTaskEventPost = (request: Request) =>
 			})
 			// CAS returned 0 rows → lost race; still ack so sender doesn't retry
 			void casResult
+
+			const traceId = task.traceId
+			if (statusOk && traceId && (body.eventType === "task.completed" || body.eventType === "task.failed")) {
+				yield* Effect.tryPromise({
+					try: () =>
+						appendLinkedTraceEvent({
+							db,
+							traceId,
+							kind: body.eventType === "task.completed" ? "delegation_end" : "error",
+							payload: {
+								taskId: task.id,
+								status: nextStatus,
+								message: body.message ?? null,
+								exitCode: body.exitCode ?? null,
+							},
+							status: body.eventType === "task.completed" ? "completed" : "failed",
+						}),
+					catch: () => undefined,
+				})
+			}
 		}
 
 		return jsonResponse(

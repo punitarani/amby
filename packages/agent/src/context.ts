@@ -1,7 +1,6 @@
 import { and, desc, eq, inArray, ne, schema } from "@amby/db"
 import { Effect } from "effect"
 import { messageThreadFilter } from "./router"
-import { formatToolAnnotation } from "./traces"
 
 const THREAD_TAIL_LIMIT = 20
 const ARTIFACT_MSG_LIMIT = 5
@@ -14,6 +13,24 @@ export { THREAD_TAIL_LIMIT }
 type QueryFn = <T>(
 	fn: (db: import("@amby/db").Database) => Promise<T>,
 ) => Effect.Effect<T, import("@amby/db").DbError>
+
+function formatToolAnnotation(toolResults: unknown[]): string {
+	if (toolResults.length === 0) return ""
+	const parts = toolResults.map((tr: unknown) => {
+		if (typeof tr !== "object" || tr === null) return "unknown"
+		const name = "toolName" in tr && typeof tr.toolName === "string" ? tr.toolName : "unknown"
+		const output = "output" in tr ? tr.output : undefined
+		const summary =
+			typeof output === "object" &&
+			output !== null &&
+			"summary" in output &&
+			typeof output.summary === "string"
+				? output.summary.slice(0, 200)
+				: ""
+		return summary ? `${name}: ${summary}` : name
+	})
+	return `[Tools used: ${parts.join("; ")}]`
+}
 
 export function buildReplayMessages(
 	rows: Array<{

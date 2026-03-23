@@ -11,6 +11,18 @@ import {
 import { tasks } from "./tasks"
 
 export type TaskEventSource = "server" | "harness" | "codex_notify" | "reconciler"
+export type TaskEventKind =
+	| "task.created"
+	| "task.started"
+	| "task.progress"
+	| "task.heartbeat"
+	| "task.completed"
+	| "task.failed"
+	| "task.timed_out"
+	| "task.lost"
+	| "task.notification_sent"
+	| "codex.notify"
+	| "reconciler.probe"
 
 export const taskEvents = pgTable(
 	"task_events",
@@ -21,10 +33,11 @@ export const taskEvents = pgTable(
 			.references(() => tasks.id, { onDelete: "cascade" }),
 		eventId: uuid("event_id").notNull(),
 		source: text("source").$type<TaskEventSource>().notNull(),
-		eventType: text("event_type").notNull(),
+		kind: text("kind").$type<TaskEventKind>().notNull(),
 		/**
-		 * Monotonic sequence for `source = 'harness'` events only; other sources use `null`
-		 * (unordered metadata: codex_notify, reconciler, server).
+		 * Monotonic sequence for `source = 'harness'` events only; all non-harness events use
+		 * `null` so the durable log stays append-only and non-authoritative for external sources.
+		 * This includes `task.created`, `codex.notify`, and reconciler metadata events.
 		 */
 		seq: integer("seq"),
 		payload: jsonb("payload").$type<Record<string, unknown>>(),

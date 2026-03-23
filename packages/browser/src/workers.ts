@@ -3,19 +3,27 @@ import { AISdkClient, Stagehand } from "@browserbasehq/stagehand"
 import type { BrowserWorker } from "@cloudflare/playwright"
 import { Effect, Layer } from "effect"
 import { createWorkersAI } from "workers-ai-provider"
-import { BrowserError, BrowserService, type BrowserTaskResult } from "./shared"
+import {
+	buildBrowserSummary,
+	BrowserError,
+	BrowserService,
+	type BrowserTaskInput,
+	type BrowserTaskPage,
+	type BrowserTaskResult,
+	type BrowserTaskStatus,
+	DEFAULT_BROWSER_MAX_STEPS,
+	isBrowserEscalationSignal,
+	summarizePageArtifact,
+} from "./shared"
 
 /** Workers AI model via Cloudflare AI Gateway */
 export const STAGEHAND_MODEL = "@cf/moonshotai/kimi-k2.5"
 
-const DEFAULT_BROWSER_MAX_STEPS = 100
-
-const BROWSER_AGENT_INSTRUCTIONS = [
-	"You are a browser-only agent.",
-	"Stay within a single browser tab.",
-	"Do not rely on desktop or operating-system interaction.",
-	"Only perform actions that are clearly requested in the instruction.",
-	"If the task requires new tabs, popups, native file dialogs, downloads/uploads, CAPTCHA, MFA, login handoffs, or other non-single-tab behavior, stop and say it requires computer access.",
+const BROWSER_AGENT_SYSTEM_PROMPT = [
+	"You are a browser specialist.",
+	"Stay within the current tab unless the instruction explicitly requires otherwise.",
+	"Use DOM interactions and page navigation for same-tab web work.",
+	"If the task requires a native dialog, file picker, download/upload flow, CAPTCHA, MFA, multi-tab behavior, or OS-level interaction, stop and say it requires computer escalation.",
 ].join(" ")
 
 type BrowserWorkerBindings = Pick<
@@ -26,7 +34,6 @@ type BrowserWorkerBindings = Pick<
 export interface BrowserWorkerSettings {
 	enabled: boolean
 	llmClient: AISdkClient
-	/** AI Gateway id from `CLOUDFLARE_AI_GATEWAY_ID`. */
 	aiGatewayId: string
 	model: string
 	browserBinding: unknown
@@ -45,7 +52,7 @@ function createStagehandLlmClient(
 		binding: ai,
 		gateway: { id: aiGatewayId },
 	} as Parameters<typeof createWorkersAI>[0])
-	// workers-ai-provider v3 emits AI SDK v3 models; Stagehand 2.5 typings target older LanguageModel shapes.
+
 	return new AISdkClient({
 		model: workersai(STAGEHAND_MODEL) as unknown as ConstructorParameters<
 			typeof AISdkClient
@@ -75,14 +82,82 @@ function browserWorkerSettingsFromBindings(
 	}
 }
 
+async function resolveBrowserPageTitle(stagehand: Stagehand): Promise<BrowserTaskPage> {
+	const page = stagehand.context.pages()[0]
+	if (!page) return { url: null, title: null }
+
+	const [url, title] = await Promise.all([
+		Promise.resolve(trim(page.url()) || null),
+		page.title().catch(() => null),
+	])
+
+	return {
+		url,
+		title: trim(title ?? undefined) || null,
+	}
+}
+
+function buildBrowserInstruction(input: BrowserTaskInput): string {
+	const parts = [input.instruction.trim()]
+
+	if (input.expectedOutcome?.trim()) {
+		parts.push(`Expected outcome: ${input.expectedOutcome.trim()}`)
+	}
+
+	parts.push(`Side effect level: ${input.sideEffectLevel}.`)
+
+	if (input.sideEffectLevel === "read") {
+		parts.push("Prefer read-only page inspection. If the task cannot be completed without writes, return escalate.")
+	}
+
+	if (input.sideEffectLevel === "hard-write") {
+		parts.push("Perform irreversible writes only when the instruction explicitly requires them.")
+	}
+
+	return parts.join("\n\n")
+}
+
+function mapUsage(usage: unknown): BrowserTaskResult["metrics"] | undefined {
+	if (!usage || typeof usage !== "object") return undefined
+
+	const record = usage as Record<string, unknown>
+	const inputTokens = record.input_tokens
+	const outputTokens = record.output_tokens
+	const reasoningTokens = record.reasoning_tokens
+	const cachedInputTokens = record.cached_input_tokens
+	const inferenceTimeMs = record.inference_time_ms
+
+	return {
+		inputTokens: typeof inputTokens === "number" ? inputTokens : undefined,
+		outputTokens: typeof outputTokens === "number" ? outputTokens : undefined,
+		reasoningTokens: typeof reasoningTokens === "number" ? reasoningTokens : undefined,
+		cachedInputTokens: typeof cachedInputTokens === "number" ? cachedInputTokens : undefined,
+		inferenceTimeMs: typeof inferenceTimeMs === "number" ? inferenceTimeMs : undefined,
+	}
+}
+
+function isEscalationResult(status: BrowserTaskStatus, message: string, output: unknown): boolean {
+	return (
+		status !== "escalate" &&
+		(isBrowserEscalationSignal(message) || isBrowserEscalationSignal(output))
+	)
+}
+
+function summarizeText(mode: BrowserTaskInput["mode"], page: BrowserTaskPage, text?: string) {
+	const trimmed = text?.trim()
+	if (trimmed) return trimmed
+	return buildBrowserSummary(mode, "completed", page, "Browser task completed.")
+}
+
 async function runBrowserTask(
 	settings: BrowserWorkerSettings,
-	task: string,
-	startUrl?: string,
+	input: BrowserTaskInput,
 ): Promise<BrowserTaskResult> {
 	if (!settings.browserBinding) {
 		throw new BrowserError({ message: "Browser Rendering binding is not configured." })
 	}
+
+	const startedAt = Date.now()
 
 	if (settings.verbose) {
 		console.info(
@@ -93,6 +168,7 @@ async function runBrowserTask(
 	const { endpointURLString } = await import("@cloudflare/playwright")
 	const stagehand = new Stagehand({
 		env: "LOCAL",
+		experimental: true,
 		useAPI: false,
 		verbose: settings.verbose ? 2 : 1,
 		modelName: settings.model,
@@ -107,34 +183,192 @@ async function runBrowserTask(
 		await stagehand.init()
 		initialized = true
 
-		const rawUrl = trim(startUrl)
-		if (rawUrl) {
-			if (!/^https?:\/\//i.test(rawUrl)) {
+		const normalized = {
+			...input,
+			instruction: input.instruction.trim(),
+			startUrl: trim(input.startUrl) || undefined,
+			expectedOutcome: trim(input.expectedOutcome) || undefined,
+		}
+		const startUrl = trim(normalized.startUrl)
+		if (startUrl) {
+			if (!/^https?:\/\//i.test(startUrl)) {
 				throw new BrowserError({
-					message: `Invalid startUrl scheme (only http/https allowed): ${rawUrl}`,
+					message: `Invalid startUrl scheme (only http/https allowed): ${startUrl}`,
 				})
 			}
-			await stagehand.page.goto(rawUrl)
+
+			const page = stagehand.context.pages()[0]
+			if (!page) {
+				throw new BrowserError({ message: "Browser page unavailable after initialization." })
+			}
+
+			await page.goto(startUrl)
 		}
 
-		const agent = stagehand.agent({
-			instructions: BROWSER_AGENT_INSTRUCTIONS,
-		})
-		const result = await agent.execute({
-			instruction: task,
-			maxSteps: DEFAULT_BROWSER_MAX_STEPS,
-		})
+		switch (normalized.mode) {
+			case "extract": {
+				const page = stagehand.context.pages()[0]
+				if (!page) throw new BrowserError({ message: "Browser page unavailable." })
 
-		const currentUrl = stagehand.page.url()
-		const title = await stagehand.page.title().catch(() => null)
-		const summary = result.message.trim() || "Browser task completed without a summary."
+				const extraction =
+					normalized.outputSchema != null
+						? await page.extract({
+								instruction: normalized.instruction,
+								schema: normalized.outputSchema as never,
+							})
+						: await page.extract({
+								instruction: normalized.instruction,
+							})
 
-		return {
-			success: result.success,
-			summary,
-			finalUrl: currentUrl ? currentUrl.trim() : null,
-			title: title?.trim() || null,
+				const pageInfo = await resolveBrowserPageTitle(stagehand)
+				const output =
+					extraction && typeof extraction === "object" && "data" in extraction
+						? ((extraction as { data?: unknown }).data as BrowserTaskResult["output"])
+						: (extraction as BrowserTaskResult["output"])
+				const summary = summarizeText("extract", pageInfo, "Structured data extracted from the page.")
+
+				return {
+					status: "completed",
+					summary,
+					page: pageInfo,
+					output,
+					artifacts: summarizePageArtifact(pageInfo),
+					issues: [],
+					metrics: {
+						steps: 1,
+						durationMs: Date.now() - startedAt,
+					},
+				}
+			}
+			case "act": {
+				const page = stagehand.context.pages()[0]
+				if (!page) throw new BrowserError({ message: "Browser page unavailable." })
+
+				const result = (await page.act(normalized.instruction)) as {
+					success?: boolean
+					message?: string
+					actions?: unknown[]
+					usage?: unknown
+				}
+
+				const pageInfo = await resolveBrowserPageTitle(stagehand)
+				const summary = summarizeText("act", pageInfo, result.message)
+				const escalated = isEscalationResult(
+					result.success === false ? "partial" : "completed",
+					summary,
+					result,
+				)
+
+				return {
+					status: escalated ? "escalate" : result.success === false ? "partial" : "completed",
+					summary,
+					page: pageInfo,
+					actions: Array.isArray(result.actions) ? (result.actions as BrowserTaskResult["actions"]) : [],
+					artifacts: summarizePageArtifact(pageInfo),
+					issues: result.success === false ? [summary] : [],
+					metrics: {
+						steps: Array.isArray(result.actions) ? result.actions.length : 1,
+						durationMs: Date.now() - startedAt,
+						...mapUsage(result.usage),
+					},
+				}
+			}
+			case "agent": {
+				const agent = stagehand.agent({
+					instructions: BROWSER_AGENT_SYSTEM_PROMPT,
+				})
+
+				const result = (await agent.execute({
+					instruction: buildBrowserInstruction(normalized),
+					maxSteps: normalized.maxSteps ?? DEFAULT_BROWSER_MAX_STEPS,
+				})) as {
+					success?: boolean
+					completed?: boolean
+					message?: string
+					actions?: unknown[]
+					steps?: unknown[]
+					usage?: unknown
+				}
+
+				const pageInfo = await resolveBrowserPageTitle(stagehand)
+				const summary = summarizeText("agent", pageInfo, result.message)
+				const completed = result.completed ?? result.success
+				let output: BrowserTaskResult["output"] | undefined
+				const issues: string[] = []
+
+				if (normalized.outputSchema != null) {
+					const page = stagehand.context.pages()[0]
+					if (page) {
+						try {
+							const extraction = await page.extract({
+								instruction: normalized.expectedOutcome?.trim() || normalized.instruction,
+								schema: normalized.outputSchema as never,
+							})
+							output =
+								extraction && typeof extraction === "object" && "data" in extraction
+									? ((extraction as { data?: unknown }).data as BrowserTaskResult["output"])
+									: (extraction as BrowserTaskResult["output"])
+						} catch (cause) {
+							issues.push(cause instanceof Error ? cause.message : String(cause))
+						}
+					} else {
+						issues.push("Browser page unavailable for structured output extraction.")
+					}
+				}
+
+				if (output !== undefined && issues.length > 0) {
+					issues.unshift("Structured output extraction did not complete cleanly.")
+				}
+
+				const escalated = isEscalationResult(
+					completed === false ? "partial" : "completed",
+					summary,
+					result,
+				)
+
+				return {
+					status: escalated
+						? "escalate"
+						: completed === false || issues.length > 0
+							? "partial"
+							: "completed",
+					summary,
+					page: pageInfo,
+					output,
+					actions: Array.isArray(result.actions) ? (result.actions as BrowserTaskResult["actions"]) : [],
+					artifacts: summarizePageArtifact(pageInfo),
+					issues: completed === false ? [summary, ...issues] : issues,
+					metrics: {
+						steps: Array.isArray(result.steps) ? result.steps.length : normalized.maxSteps ?? DEFAULT_BROWSER_MAX_STEPS,
+						durationMs: Date.now() - startedAt,
+						...mapUsage(result.usage),
+					},
+				}
+			}
 		}
+		throw new BrowserError({
+			message: `Unsupported browser task mode: ${(normalized as { mode?: string }).mode ?? "unknown"}`,
+		})
+	} catch (cause) {
+		const message = cause instanceof Error ? cause.message : String(cause)
+		if (isBrowserEscalationSignal(message) || isBrowserEscalationSignal(cause)) {
+			const pageInfo = await resolveBrowserPageTitle(stagehand).catch(() => ({ url: null, title: null }))
+			return {
+				status: "escalate",
+				summary: message,
+				page: pageInfo,
+				artifacts: summarizePageArtifact(pageInfo),
+				issues: [message],
+				metrics: {
+					durationMs: Date.now() - startedAt,
+				},
+			}
+		}
+
+		throw new BrowserError({
+			message,
+			cause,
+		})
 	} finally {
 		if (initialized) {
 			await stagehand.close().catch((err) => {
@@ -162,9 +396,9 @@ export const makeBrowserServiceFromBindings = (bindings: BrowserWorkerBindings) 
 
 	return Layer.succeed(BrowserService, {
 		enabled: settings.enabled,
-		runTask: ({ task, startUrl }) =>
+		runTask: (input) =>
 			Effect.tryPromise({
-				try: () => runBrowserTask(settings, task, startUrl),
+				try: () => runBrowserTask(settings, input),
 				catch: (cause) =>
 					cause instanceof BrowserError
 						? cause

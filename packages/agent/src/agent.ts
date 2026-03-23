@@ -4,54 +4,37 @@ import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } f
 import { ConnectorsService, createConnectorManagementTools } from "@amby/connectors"
 import { DbService, eq, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
-import {
-	buildMemoriesText,
-	createMemoryTools,
-	deduplicateMemories,
-	MemoryService,
-} from "@amby/memory"
-import { ModelService } from "@amby/models"
-import { stepCountIs, ToolLoopAgent, type ToolSet } from "ai"
+import { createMemoryTools, MemoryService } from "@amby/memory"
+import { HIGH_INTELLIGENCE_MODEL_ID, ModelService } from "@amby/models"
+import { stepCountIs, tool, ToolLoopAgent, type ToolSet } from "ai"
 import { Context, Effect, Layer } from "effect"
+import { z } from "zod"
+import { prepareConversationContext } from "./context/builder"
+import { executeRequestPlan } from "./execution/coordinator"
+import { createRootTrace, type TraceWriter } from "./execution/ledger"
+import { queryExecution } from "./execution/query-execution"
+import type { ToolGroups } from "./execution/registry"
 import { AgentError } from "./errors"
-import {
-	type AgentConfig,
-	type AgentTraceMetadata,
-	buildRequestTraceMetadata,
-	createTelemetrySettings,
-	initializeTelemetry,
-	shutdownTelemetry,
-	type TraceRequestMode,
-	withTelemetryFlush,
-} from "./telemetry"
-
-export type StreamPart =
-	| { type: "text-delta"; text: string }
-	| { type: "tool-call"; toolName: string; args: Record<string, unknown> }
-	| { type: "tool-result"; toolName: string; result: unknown }
-
-const ORCHESTRATOR_MAX_STEPS = 14
-
-import {
-	formatArtifactRecap,
-	loadOtherThreadSummaries,
-	loadThreadArtifacts,
-	loadThreadTail,
-} from "./context"
-import { buildSystemPrompt, CUA_PROMPT } from "./prompts/system"
 import { type ResolveThreadResult, resolveThread } from "./router"
-import { SUBAGENT_DEFS } from "./subagents/definitions"
-import { createSubagentTools, runDelegatedSubagent } from "./subagents/spawner"
-import { buildToolGroups } from "./subagents/tool-groups"
 import {
 	synopsisCurrentThreadIfOverflowsAfterSave,
 	synopsisPreviousThreadIfDormantSwitch,
 } from "./synopsis"
 import { createCodexAuthTools } from "./tools/codex-auth"
-import { createTaskDelegationTools } from "./tools/delegation"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
-import { persistExecutionTrace } from "./traces"
-import { extractToolUserMessages } from "./utils/extract-tool-user-messages"
+import type { AgentRunConfig, AgentRunResult, StreamPart } from "./types/agent"
+import type { QueryExecutionResult } from "./types/execution"
+
+const CONVERSATION_MAX_STEPS = 8
+
+function toErrorMessage(error: unknown): string {
+	if (error instanceof AgentError) return error.message
+	if (error instanceof Error) return error.message
+	if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
+		return error.message
+	}
+	return String(error)
+}
 
 function buildThreadMeta(threadCtx: ResolveThreadResult) {
 	return {
@@ -60,6 +43,151 @@ function buildThreadMeta(threadCtx: ResolveThreadResult) {
 			action: threadCtx.decision.action,
 			source: threadCtx.decision.source,
 		},
+	}
+}
+
+function buildRunConfig(params: {
+	userId: string
+	conversationId: string
+	threadId: string
+	mode: "message" | "batched-message" | "stream-message"
+	modelId: string
+	userTimezone: string
+	sharedPromptContext: string
+	runtime: {
+		sandboxEnabled: boolean
+		cuaEnabled: boolean
+		integrationEnabled: boolean
+		streamingEnabled: boolean
+		browserEnabled: boolean
+	}
+}): AgentRunConfig {
+	return {
+		request: {
+			requestId: crypto.randomUUID(),
+			conversationId: params.conversationId,
+			threadId: params.threadId,
+			userId: params.userId,
+			mode: params.mode,
+		},
+		modelPolicy: {
+			defaultModelId: params.modelId,
+			lowLatencyModelId: params.modelId,
+			highReasoningModelId: HIGH_INTELLIGENCE_MODEL_ID,
+			validatorModelId: HIGH_INTELLIGENCE_MODEL_ID,
+		},
+		runtime: params.runtime,
+		policy: {
+			allowDirectAnswer: true,
+			allowBackgroundTasks: params.runtime.sandboxEnabled,
+			allowMemoryWrites: true,
+			allowExternalWrites: true,
+			requireWriteConfirmation: true,
+			maxDepth: 1,
+		},
+		budgets: {
+			maxConversationSteps: CONVERSATION_MAX_STEPS,
+			maxSubagentStepsByKind: {},
+			maxParallelAgents: 3,
+			maxToolCallsPerRun: 32,
+		},
+		context: {
+			sharedPromptContext: params.sharedPromptContext,
+			userTimezone: params.userTimezone,
+		},
+		trace: {
+			enabled: true,
+			includeToolPayloads: true,
+			includeContextEvents: true,
+		},
+	}
+}
+
+function buildSendMessageTool(onReply?: ReplyFn) {
+	if (onReply) {
+		return createReplyTools(onReply).send_message
+	}
+
+	return tool({
+		description:
+			"Send a short progress update to the user. In runtimes without incremental messaging this becomes a no-op.",
+		inputSchema: z.object({ text: z.string() }),
+		execute: async () => ({ sent: false }),
+	})
+}
+
+function buildExecutionToolSummary(
+	result:
+		| QueryExecutionResult
+		| {
+				mode: AgentRunResult["execution"]["mode"]
+				tasks: AgentRunResult["execution"]["tasks"]
+				backgroundTasks?: AgentRunResult["execution"]["backgroundTasks"]
+		  },
+): string {
+	if ("executions" in result) {
+		if (result.executions.length === 0) return "No matching background executions found."
+		return result.executions
+			.map((execution) => `${execution.taskId}: ${execution.status}${execution.summary ? ` — ${execution.summary}` : ""}`)
+			.join("\n")
+	}
+
+	if (result.tasks.length === 0) {
+		return "No specialist execution was required."
+	}
+
+	const background = result.backgroundTasks?.length
+		? ` Background tasks: ${result.backgroundTasks.map((task) => `${task.taskId} (${task.status})`).join(", ")}.`
+		: ""
+
+	return `Execution mode: ${result.mode}. ${result.tasks
+		.map((task) => `${task.specialist}: ${task.summary}`)
+		.join(" | ")}.${background}`
+}
+
+function buildConversationPrepareStep() {
+	return ({ steps }: { steps: Array<{ toolCalls: Array<{ toolName: string }> }> }) => {
+		const usedExecutionBoundary = steps.some((step) =>
+			step.toolCalls.some(
+				(toolCall) => toolCall.toolName === "execute_plan" || toolCall.toolName === "query_execution",
+			),
+		)
+		if (usedExecutionBoundary) {
+			return {
+				activeTools: [],
+			}
+		}
+		return undefined
+	}
+}
+
+async function flushConversationToolEvents(result: {
+	steps?: Array<{
+		toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown }>
+		toolResults: Array<{ toolCallId: string; toolName: string; output: unknown }>
+	}>
+}, trace: TraceWriter) {
+	const events = (result.steps ?? []).flatMap((step) => [
+		...step.toolCalls.map((toolCall) => ({
+			kind: "tool_call" as const,
+			payload: {
+				toolCallId: toolCall.toolCallId,
+				toolName: toolCall.toolName,
+				input: toolCall.input,
+			},
+		})),
+		...step.toolResults.map((toolResult) => ({
+			kind: "tool_result" as const,
+			payload: {
+				toolCallId: toolResult.toolCallId,
+				toolName: toolResult.toolName,
+				output: toolResult.output,
+			},
+		})),
+	])
+
+	if (events.length > 0) {
+		await Effect.runPromise(trace.appendMany(events))
 	}
 }
 
@@ -72,19 +200,19 @@ export class AgentService extends Context.Tag("AgentService")<
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
 			onTextDelta?: (text: string) => void,
-		) => Effect.Effect<string, AgentError>
+		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly handleBatchedMessages: (
 			conversationId: string,
 			messages: string[],
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
 			onTextDelta?: (text: string) => void,
-		) => Effect.Effect<string, AgentError>
+		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly streamMessage: (
 			conversationId: string,
 			content: string,
 			onPart: (part: StreamPart) => void,
-		) => Effect.Effect<string, AgentError>
+		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly ensureConversation: (
 			platform: Platform,
 			externalConversationKey: string,
@@ -102,23 +230,13 @@ export const makeAgentServiceLive = (userId: string) =>
 			const models = yield* ModelService
 			const memory = yield* MemoryService
 			const sandbox = yield* SandboxService
-			const browser = yield* BrowserService
+			const browserService = yield* BrowserService
 			const taskSupervisor = yield* TaskSupervisor
 			const connectors = yield* ConnectorsService
 			const env = yield* EnvService
-			initializeTelemetry({
-				apiKey: env.BRAINTRUST_API_KEY,
-				projectId: env.BRAINTRUST_PROJECT_ID,
-			})
 			const baseModel = models.getModel()
-			const agentConfig: AgentConfig = {
-				userId,
-				modelId: models.defaultModelId,
-				cuaEnabled: env.ENABLE_CUA,
-			}
 
 			const computer = createComputerTools(sandbox, userId)
-			const computerSubagentDef = SUBAGENT_DEFS.find((def) => def.name === "computer")
 
 			const saveMessage = (
 				conversationId: string,
@@ -129,8 +247,8 @@ export const makeAgentServiceLive = (userId: string) =>
 					threadId?: string
 				},
 			) =>
-				query((d) =>
-					d
+				query((database) =>
+					database
 						.insert(schema.messages)
 						.values({
 							conversationId,
@@ -151,180 +269,9 @@ export const makeAgentServiceLive = (userId: string) =>
 			) =>
 				content.trim()
 					? saveMessage(conversationId, "assistant", content, opts)
-					: Effect.succeed([])
+					: Effect.succeed([] as Array<{ id: string }>)
 
-			const prepareContext = (
-				conversationId: string,
-				threadCtx: ResolveThreadResult,
-				onReply?: ReplyFn,
-			) =>
-				Effect.gen(function* () {
-					const [userRow, profile] = yield* Effect.all(
-						[
-							query((d) =>
-								d
-									.select({ timezone: schema.users.timezone })
-									.from(schema.users)
-									.where(eq(schema.users.id, userId))
-									.limit(1),
-							),
-							memory.getProfile(userId),
-						],
-						{ concurrency: 2 },
-					)
-					const userTimezone = userRow[0]?.timezone ?? "UTC"
-
-					const formatted = new Intl.DateTimeFormat("en-US", {
-						timeZone: userTimezone,
-						dateStyle: "full",
-						timeStyle: "long",
-					}).format(new Date())
-
-					const deduped = deduplicateMemories(profile.static, profile.dynamic)
-					const memoryContext = buildMemoriesText(deduped)
-
-					const [threadRow, history, otherThreads, artifactRows] = yield* Effect.all(
-						[
-							query((d) =>
-								d
-									.select({
-										label: schema.conversationThreads.label,
-										synopsis: schema.conversationThreads.synopsis,
-									})
-									.from(schema.conversationThreads)
-									.where(eq(schema.conversationThreads.id, threadCtx.threadId))
-									.limit(1),
-							),
-							loadThreadTail(
-								query,
-								conversationId,
-								threadCtx.threadId,
-								undefined,
-								threadCtx.threadId === threadCtx.defaultThreadId,
-							),
-							loadOtherThreadSummaries(query, conversationId, threadCtx.threadId),
-							loadThreadArtifacts(
-								query,
-								conversationId,
-								threadCtx.threadId,
-								threadCtx.threadId === threadCtx.defaultThreadId,
-							),
-						],
-						{ concurrency: 4 },
-					)
-
-					const threadLabel = threadRow[0]?.label ?? null
-					const threadSynopsis = threadRow[0]?.synopsis?.trim() ?? ""
-					const artifactRecap = formatArtifactRecap(artifactRows, threadLabel)
-
-					const threadSynopsisBlock =
-						threadCtx.threadWasDormant && threadSynopsis
-							? `## Resumed thread synopsis\n${threadSynopsis}`
-							: ""
-
-					const memoryTools = createMemoryTools(memory, userId)
-					const codexAuthTools = sandbox.enabled
-						? createCodexAuthTools(taskSupervisor, userId)
-						: undefined
-					const cuaTools =
-						agentConfig.cuaEnabled && sandbox.enabled
-							? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
-							: undefined
-					const connectorManagementTools = connectors.isEnabled()
-						? createConnectorManagementTools(connectors, userId)
-						: undefined
-					const connectorSessionTools = connectors.isEnabled()
-						? yield* connectors.getAgentTools(userId).pipe(
-								Effect.catchAll((error) =>
-									Effect.sync(() => {
-										console.error("[Agent] Failed to load Composio tools:", error)
-										return undefined
-									}),
-								),
-							)
-						: undefined
-					const integrationTools =
-						connectorManagementTools || connectorSessionTools
-							? ({
-									...(connectorManagementTools ?? {}),
-									...(connectorSessionTools ?? {}),
-								} as ToolSet)
-							: undefined
-					const toolGroups = buildToolGroups(
-						memoryTools,
-						computer.tools,
-						cuaTools,
-						integrationTools,
-					)
-
-					const basePrompt = [
-						buildSystemPrompt(formatted, userTimezone, {
-							browserEnabled: browser.enabled,
-							computerEnabled: Boolean(cuaTools),
-							integrationEnabled: Boolean(integrationTools),
-							sandboxEnabled: sandbox.enabled,
-						}),
-						cuaTools ? CUA_PROMPT : "",
-					]
-						.filter(Boolean)
-						.join("\n\n")
-
-					const contextSections = [otherThreads, threadSynopsisBlock, artifactRecap].filter(Boolean)
-					const extraContext = contextSections.join("\n\n")
-
-					const systemPrompt = [
-						basePrompt,
-						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
-						extraContext,
-					]
-						.filter(Boolean)
-						.join("\n\n")
-
-					const sharedPromptContext = [
-						memoryContext ? `# User Memory Context\n${memoryContext}` : "",
-						extraContext,
-						`# Current Date/Time\n${formatted} (${userTimezone})`,
-					]
-						.filter(Boolean)
-						.join("\n\n")
-
-					const { search_memories } = memoryTools
-					const tools = {
-						search_memories,
-						...(codexAuthTools ?? {}),
-						...createJobTools(db, userId, userTimezone),
-						...(onReply ? createReplyTools(onReply) : {}),
-					}
-
-					return { tools, systemPrompt, history, userTimezone, sharedPromptContext, toolGroups }
-				})
-
-			const createOrchestrator = (
-				systemPrompt: string,
-				tools: ToolSet,
-				functionId: "amby.orchestrator.generate" | "amby.orchestrator.stream",
-				conversationTraceMetadata: AgentTraceMetadata,
-			) =>
-				new ToolLoopAgent({
-					id: "orchestrator",
-					model: baseModel,
-					instructions: systemPrompt,
-					tools,
-					stopWhen: stepCountIs(ORCHESTRATOR_MAX_STEPS),
-					experimental_telemetry: createTelemetrySettings({
-						functionId,
-						metadata: conversationTraceMetadata,
-					}),
-				})
-
-			const sendToolUserMessages = (toolUserMessages: string[], onReply: ReplyFn) =>
-				Effect.tryPromise(async () => {
-					for (const message of toolUserMessages) {
-						await onReply(message)
-					}
-				})
-
-			const runGenerateRequest = ({
+			const runRequest = ({
 				conversationId,
 				mode,
 				requestMessages,
@@ -334,253 +281,370 @@ export const makeAgentServiceLive = (userId: string) =>
 				onPart,
 			}: {
 				conversationId: string
-				mode: TraceRequestMode
+				mode: AgentRunConfig["request"]["mode"]
 				requestMessages: ReadonlyArray<{ role: "user"; content: string }>
 				metadata?: Record<string, unknown>
 				onReply?: ReplyFn
 				onTextDelta?: (text: string) => void
 				onPart?: (part: StreamPart) => void
-			}) =>
-				withTelemetryFlush(
-					Effect.gen(function* () {
-						const inboundText = requestMessages.map((m) => m.content).join("\n\n")
-						const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
+			}) => {
+				let rootTraceRef: TraceWriter | undefined
+				return (
+				Effect.gen(function* () {
+					const inboundText = requestMessages.map((message) => message.content).join("\n\n")
+					const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
 
-						yield* synopsisPreviousThreadIfDormantSwitch(
-							query,
-							baseModel,
-							conversationId,
-							threadCtx,
-						)
+					yield* synopsisPreviousThreadIfDormantSwitch(query, baseModel, conversationId, threadCtx)
 
-						const { tools, systemPrompt, history, sharedPromptContext, toolGroups } =
-							yield* prepareContext(conversationId, threadCtx, onReply)
-						const requestTraceMetadata = buildRequestTraceMetadata({
-							conversationId,
-							requestMode: mode,
-							requestMetadata: metadata,
-						})
-						const { tools: delegationTools, traceStore: subagentTraces } = createSubagentTools(
-							models.getModel,
-							toolGroups,
-							sharedPromptContext,
-							agentConfig,
-							requestTraceMetadata,
-						)
-						const computerEnabled = Boolean(toolGroups.cua && computerSubagentDef)
-						const taskTools =
-							browser.enabled || computerEnabled || sandbox.enabled
-								? createTaskDelegationTools(
-										taskSupervisor,
-										{
-											enabled: browser.enabled,
-											runTask: browser.runTask,
+					const prepared = yield* prepareConversationContext({
+						query,
+						userId,
+						conversationId,
+						threadCtx,
+						memory,
+					})
+
+					const config = buildRunConfig({
+						userId,
+						conversationId,
+						threadId: threadCtx.threadId,
+							mode,
+							modelId: models.defaultModelId,
+							userTimezone: prepared.userTimezone,
+						sharedPromptContext: prepared.sharedPromptContext,
+							runtime: {
+								sandboxEnabled: sandbox.enabled,
+								cuaEnabled: env.ENABLE_CUA && sandbox.enabled,
+								integrationEnabled: connectors.isEnabled(),
+								streamingEnabled: Boolean(onPart || onTextDelta),
+								browserEnabled: browserService.enabled,
+						},
+					})
+
+					const rootTrace = yield* createRootTrace(query, config, {
+						router: threadCtx.decision,
+						requestMetadata: metadata ?? null,
+					})
+					rootTraceRef = rootTrace
+					yield* rootTrace.append("context_built", {
+						threadId: threadCtx.threadId,
+						sharedPromptContext: prepared.sharedPromptContext,
+					})
+
+					const memoryTools = createMemoryTools(memory, userId)
+					const settingsTools = {
+						...createJobTools(db, userId, prepared.userTimezone),
+						...(sandbox.enabled ? createCodexAuthTools(taskSupervisor, userId) : {}),
+					}
+					const integrationTools =
+						connectors.isEnabled()
+							? ({
+									...(createConnectorManagementTools(connectors, userId) ?? {}),
+									...((yield* connectors.getAgentTools(userId).pipe(
+										Effect.catchAll(() => Effect.succeed(undefined)),
+									)) ?? {}),
+								} as ToolSet)
+							: undefined
+					const cuaTools =
+						config.runtime.cuaEnabled
+							? createCuaTools(
+									sandbox,
+									userId,
+									conversationId,
+									computer.getSandbox,
+								).tools
+							: undefined
+
+					const toolGroups: ToolGroups = {
+						"memory-read": { search_memories: memoryTools.search_memories },
+						"memory-write": { save_memory: memoryTools.save_memory },
+						"sandbox-read": computer.readTools,
+						"sandbox-write": computer.writeTools,
+						settings: settingsTools as ToolSet,
+						cua: cuaTools as ToolSet | undefined,
+						integration: integrationTools,
+					}
+
+					const state = {
+						execution: undefined as Awaited<ReturnType<typeof executeRequestPlan>> | undefined,
+						queryResult: undefined as QueryExecutionResult | undefined,
+					}
+
+					const conversationTools = {
+						search_memories: memoryTools.search_memories,
+						send_message: buildSendMessageTool(onReply),
+						execute_plan: tool({
+							description:
+								"Execute specialist work through the internal execution runtime. Use this when the request needs browser, code, research, integration, memory, settings, computer, or background execution.",
+							inputSchema: z
+								.object({
+									request: z.string(),
+									context: z.string().optional(),
+								})
+								.strict(),
+							async execute({ request, context }) {
+								const composed = context?.trim() ? `${request}\n\nAdditional context:\n${context}` : request
+								const summary = await executeRequestPlan({
+									request: composed,
+									query,
+									config,
+									getModel: models.getModel,
+									toolGroups,
+									browser: browserService,
+									supervisor: taskSupervisor,
+									rootTrace,
+								})
+								state.execution = summary
+								await Effect.runPromise(rootTrace.setMode(summary.mode))
+								return {
+									mode: summary.mode,
+									status: summary.status,
+									tasks: summary.taskResults,
+									backgroundTasks: summary.backgroundTasks,
+									summary: summary.summary,
+								}
+							},
+							toModelOutput({ output }) {
+								return {
+									type: "text" as const,
+									value: buildExecutionToolSummary(
+										output as {
+											mode: AgentRunResult["execution"]["mode"]
+											tasks: AgentRunResult["execution"]["tasks"]
+											backgroundTasks?: AgentRunResult["execution"]["backgroundTasks"]
 										},
-										{
-											enabled: computerEnabled,
-											runTask: async ({ task, context, abortSignal, toolCallId }) => {
-												if (!computerSubagentDef) {
-													return {
-														error: true,
-														summary: "Computer delegation is not available in this runtime.",
-													}
-												}
-
-												return await runDelegatedSubagent(
-													computerSubagentDef,
-													{
-														getModel: models.getModel,
-														toolGroups,
-														sharedPromptContext,
-														config: agentConfig,
-														requestTraceMetadata,
-														traceStore: subagentTraces,
-													},
-													{
-														task,
-														context,
-														abortSignal,
-														toolCallId,
-													},
-												)
-											},
-										},
-										sandbox.enabled,
+									),
+								}
+							},
+						}),
+						query_execution: tool({
+							description:
+								"Inspect durable background executions for this conversation. Use this when the user asks about a task that is still running or recently completed.",
+							inputSchema: z.union([
+								z.object({
+									kind: z.literal("by-id"),
+									taskId: z.string(),
+									waitSeconds: z.number().optional(),
+								}),
+								z.object({
+									kind: z.literal("latest"),
+									limit: z.number().optional(),
+									includeCompleted: z.boolean().optional(),
+								}),
+							]),
+							async execute(input) {
+								const result = await Effect.runPromise(
+									queryExecution({
+										query,
+										supervisor: taskSupervisor,
 										userId,
 										conversationId,
-									)
-								: undefined
-						const orchestratorMetadata: AgentTraceMetadata = {
-							...requestTraceMetadata,
-							user_id: agentConfig.userId,
-							model_id: agentConfig.modelId,
-							cua_enabled: agentConfig.cuaEnabled,
-							agent_role: "orchestrator",
-							agent_name: "orchestrator",
-						}
-						const functionId = onPart ? "amby.orchestrator.stream" : "amby.orchestrator.generate"
-						const agent = createOrchestrator(
-							systemPrompt,
-							{ ...delegationTools, ...(taskTools ?? {}), ...tools } as ToolSet,
-							functionId as "amby.orchestrator.generate" | "amby.orchestrator.stream",
-							orchestratorMetadata,
-						)
-
-						const messages = [
-							...history,
-							...requestMessages.map((m) => ({ role: "user" as const, content: m.content })),
-						]
-
-						const result = yield* Effect.tryPromise({
-							try: async () => {
-								if (onPart || onTextDelta) {
-									const stream = await agent.stream({ messages })
-
-									for await (const part of stream.fullStream) {
-										switch (part.type) {
-											case "text-delta":
-												if (onTextDelta) onTextDelta(part.text)
-												if (onPart) onPart({ type: "text-delta", text: part.text })
-												break
-											case "tool-call":
-												if (onPart) {
-													onPart({
-														type: "tool-call",
-														toolName: part.toolName,
-														args: part.input as Record<string, unknown>,
-													})
-												}
-												break
-											case "tool-result":
-												if (onPart) {
-													onPart({
-														type: "tool-result",
-														toolName: part.toolName,
-														result: part.output,
-													})
-												}
-												break
-										}
-									}
-
-									const [text, toolResults, steps] = await Promise.all([
-										stream.text,
-										stream.toolResults,
-										stream.steps,
-									])
-									return { text, toolResults, steps }
-								}
-								return await agent.generate({ messages })
+										input,
+									}),
+								)
+								state.queryResult = result
+								return result
 							},
-							catch: (cause) =>
-								new AgentError({
-									message: onPart ? "Failed to stream response" : "Failed to generate response",
-									cause,
+							toModelOutput({ output }) {
+								return {
+									type: "text" as const,
+									value: buildExecutionToolSummary(output as QueryExecutionResult),
+								}
+							},
+						}),
+					}
+
+					const agent = new ToolLoopAgent({
+						id: "conversation",
+						model: baseModel,
+						instructions: prepared.systemPrompt,
+						tools: conversationTools,
+						stopWhen: stepCountIs(config.budgets.maxConversationSteps),
+						prepareStep: buildConversationPrepareStep(),
+						experimental_onStepStart: async (event) => {
+							await Effect.runPromise(
+								rootTrace.append("model_request", {
+									stepNumber: event.stepNumber,
+									activeTools: event.activeTools,
 								}),
-						})
+							)
+						},
+						onStepFinish: async (event) => {
+							await Effect.runPromise(
+								rootTrace.append("model_response", {
+									finishReason: event.finishReason,
+									text: event.text,
+								}),
+							)
+						},
+					})
 
-						const toolUserMessages = onReply
-							? extractToolUserMessages(result.toolResults)
-							: undefined
-						if (toolUserMessages && onReply) {
-							yield* sendToolUserMessages(toolUserMessages, onReply)
-						}
-						const finalText = toolUserMessages ? "" : result.text
+					const messages = [
+						...prepared.history,
+						...requestMessages.map((message) => ({ role: "user" as const, content: message.content })),
+					]
 
-						const threadMeta = buildThreadMeta(threadCtx)
-						const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
+					const result = yield* Effect.tryPromise({
+						try: async () => {
+							if (onPart || onTextDelta) {
+								const stream = await agent.stream({ messages })
 
-						// Persist inbound messages
-						for (const message of requestMessages) {
-							yield* saveMessage(conversationId, "user", message.content, {
-								metadata: userMetadata,
-								threadId: threadCtx.threadId,
-							})
-						}
+								for await (const part of stream.fullStream) {
+									switch (part.type) {
+										case "text-delta":
+											onTextDelta?.(part.text)
+											onPart?.({ type: "text-delta", text: part.text })
+											break
+										case "tool-call":
+											onPart?.({
+												type: "tool-call",
+												toolName: part.toolName,
+												args: part.input as Record<string, unknown>,
+											})
+											break
+										case "tool-result":
+											onPart?.({
+												type: "tool-result",
+												toolName: part.toolName,
+												result: part.output,
+											})
+											break
+									}
+								}
 
-						// Save assistant message
-						const savedRows = yield* maybeSaveAssistantMessage(conversationId, finalText, {
+								const [text, toolResults, steps] = await Promise.all([
+									stream.text,
+									stream.toolResults,
+									stream.steps,
+								])
+								return { text, toolResults, steps }
+							}
+							return await agent.generate({ messages })
+						},
+						catch: (cause) => new AgentError({ message: "Agent request failed", cause }),
+					})
+
+					yield* Effect.tryPromise(() => flushConversationToolEvents(result, rootTrace)).pipe(
+						Effect.catchAll(() => Effect.void),
+					)
+
+					const threadMeta = buildThreadMeta(threadCtx)
+					const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
+					for (const message of requestMessages) {
+						yield* saveMessage(conversationId, "user", message.content, {
+							metadata: userMetadata,
 							threadId: threadCtx.threadId,
 						})
+					}
 
-						// Persist execution traces
-						const savedMessageId = savedRows[0]?.id
-						if (result.steps?.length) {
-							yield* persistExecutionTrace(query, {
-								conversationId,
-								threadId: threadCtx.threadId,
-								messageId: savedMessageId,
-								agentName: "orchestrator",
-								steps: result.steps,
-								subagentTraces,
-							})
-						}
+					const savedRows = yield* maybeSaveAssistantMessage(conversationId, result.text, {
+						threadId: threadCtx.threadId,
+					})
+					yield* rootTrace.linkMessage(savedRows[0]?.id)
+					yield* synopsisCurrentThreadIfOverflowsAfterSave(
+						query,
+						baseModel,
+						conversationId,
+						threadCtx,
+						requestMessages.length + 1,
+					)
 
-						yield* synopsisCurrentThreadIfOverflowsAfterSave(
-							query,
-							baseModel,
-							conversationId,
-							threadCtx,
-							requestMessages.length + 1,
-						)
+					const execution =
+						state.execution
+							? {
+									mode: state.execution.mode,
+									rootTraceId: rootTrace.traceId,
+									tasks: state.execution.taskResults,
+									backgroundTasks: state.execution.backgroundTasks,
+								}
+							: {
+									mode: "direct" as const,
+									rootTraceId: rootTrace.traceId,
+									tasks: [],
+									backgroundTasks: state.queryResult?.executions.map((execution) => ({
+										taskId: execution.taskId,
+										traceId: execution.traceId ?? "",
+										status: execution.status,
+									})),
+								}
 
-						return finalText
-					}),
+					const agentResult: AgentRunResult = {
+						status: state.execution?.status ?? "completed",
+						userResponse: {
+							text: result.text,
+						},
+						execution,
+						sideEffects: {
+							memoriesSaved: state.execution?.sideEffects.memoriesSaved,
+							scheduledJobs: state.execution?.sideEffects.scheduledJobs,
+							externalWrites: state.execution?.sideEffects.externalWrites,
+						},
+					}
+
+					yield* rootTrace.complete(agentResult.status === "failed" ? "failed" : "completed", {
+						executionMode: agentResult.execution.mode,
+						status: agentResult.status,
+					})
+
+					return agentResult
+				}).pipe(
+					Effect.catchAll((error) =>
+						Effect.gen(function* () {
+							const trace = rootTraceRef
+							if (trace) {
+								yield* Effect.tryPromise(() =>
+									Effect.runPromise(
+										trace.complete("failed", {
+											error: toErrorMessage(error),
+										}),
+									),
+								).pipe(Effect.catchAll(() => Effect.void))
+							}
+							if (error instanceof AgentError) return yield* Effect.fail(error)
+							return yield* Effect.fail(
+								new AgentError({
+									message: "Agent request failed",
+									cause: error,
+								}),
+							)
+						}),
+					),
 				)
+				)
+			}
 
 			return {
 				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>
-					runGenerateRequest({
+					runRequest({
 						conversationId,
 						mode: "message",
 						requestMessages: [{ role: "user", content }],
 						metadata,
 						onReply,
 						onTextDelta,
-					}).pipe(
-						Effect.mapError((e) =>
-							e instanceof AgentError
-								? e
-								: new AgentError({ message: "Agent message handling failed", cause: e }),
-						),
-					),
+					}),
 
 				handleBatchedMessages: (conversationId, messages, metadata, onReply, onTextDelta) =>
-					runGenerateRequest({
+					runRequest({
 						conversationId,
 						mode: "batched-message",
 						requestMessages: messages.map((content) => ({ role: "user" as const, content })),
 						metadata,
 						onReply,
 						onTextDelta,
-					}).pipe(
-						Effect.mapError((e) =>
-							e instanceof AgentError
-								? e
-								: new AgentError({
-										message: "Agent batched message handling failed",
-										cause: e,
-									}),
-						),
-					),
+					}),
 
 				streamMessage: (conversationId, content, onPart) =>
-					runGenerateRequest({
+					runRequest({
 						conversationId,
 						mode: "stream-message",
 						requestMessages: [{ role: "user", content }],
 						onPart,
-					}).pipe(
-						Effect.mapError((e) =>
-							e instanceof AgentError
-								? e
-								: new AgentError({ message: "Agent stream handling failed", cause: e }),
-						),
-					),
+					}),
 
 				ensureConversation: (platform, externalConversationKey, workspaceKey) =>
-					query((d) =>
-						d
+					query((database) =>
+						database
 							.insert(schema.conversations)
 							.values({
 								userId,
@@ -605,32 +669,18 @@ export const makeAgentServiceLive = (userId: string) =>
 							return row.id
 						}),
 						Effect.mapError(
-							(e) =>
+							(cause) =>
 								new AgentError({
-									message: `Failed to ensure conversation: ${e instanceof Error ? e.message : String(e)}`,
-									cause: e,
+									message:
+										cause instanceof Error ? cause.message : "Failed to ensure conversation",
+									cause,
 								}),
 						),
 					),
 
-				shutdown: () =>
-					Effect.gen(function* () {
-						yield* taskSupervisor.shutdown()
-						yield* Effect.tryPromise({
-							try: () => shutdownTelemetry(),
-							catch: (cause) => new AgentError({ message: "Failed to shut down telemetry", cause }),
-						})
-						const instance = computer.getSandbox()
-						if (instance) {
-							yield* sandbox
-								.stop(instance)
-								.pipe(
-									Effect.mapError(
-										(e) => new AgentError({ message: "Failed to stop sandbox", cause: e }),
-									),
-								)
-						}
-					}),
+				shutdown: () => taskSupervisor.shutdown().pipe(
+					Effect.mapError((cause) => new AgentError({ message: "Failed to shut down agent", cause })),
+				),
 			}
 		}),
 	)

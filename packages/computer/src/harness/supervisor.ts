@@ -1,5 +1,5 @@
 import { getTelegramChatId } from "@amby/connectors"
-import type { TaskStatus } from "@amby/db"
+import type { RunnerKind, SpecialistKind, TaskStatus } from "@amby/db"
 import { and, DbService, eq, inArray, lte, notInArray, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
@@ -162,10 +162,20 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 		) => Effect.Effect<CodexAuthSummary, SandboxError>
 		readonly clearCodexAuth: (userId: string) => Effect.Effect<CodexAuthSummary, SandboxError>
 		readonly startTask: (params: {
+			taskId?: string
 			userId: string
 			prompt: string
 			needsBrowser?: boolean
 			conversationId?: string
+			threadId?: string
+			traceId?: string
+			parentTaskId?: string
+			rootTaskId?: string
+			specialist?: SpecialistKind
+			runnerKind?: RunnerKind
+			input?: Record<string, unknown>
+			metadata?: Record<string, unknown>
+			confirmationState?: "not_required" | "required" | "confirmed" | "rejected"
 		}) => Effect.Effect<{ taskId: string; status: string }, SandboxError>
 		readonly probeTask: (
 			taskId: string,
@@ -475,7 +485,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							taskId: row.id,
 							eventId,
 							source: "server",
-							eventType: "task.lost",
+							kind: "task.lost",
 							seq: null,
 							payload: { reason: "preparing_timeout" },
 							occurredAt: new Date(),
@@ -694,7 +704,22 @@ export const TaskSupervisorLive = Layer.scoped(
 					})
 				}),
 
-			startTask: ({ userId, prompt, needsBrowser, conversationId }) =>
+			startTask: ({
+				taskId: providedTaskId,
+				userId,
+				prompt,
+				needsBrowser,
+				conversationId,
+				threadId,
+				traceId,
+				parentTaskId,
+				rootTaskId,
+				specialist,
+				runnerKind,
+				input,
+				metadata,
+				confirmationState,
+			}) =>
 				Effect.gen(function* () {
 					const sandbox = yield* sandboxService.ensure(userId)
 
@@ -756,6 +781,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							}),
 					})
 
+					const taskId = providedTaskId ?? crypto.randomUUID()
 					const callbackId = crypto.randomUUID()
 					const apiBase = env.API_URL.replace(/\/$/, "")
 					const callbackUrl = `${apiBase}/internal/task-events`
@@ -810,10 +836,19 @@ export const TaskSupervisorLive = Layer.scoped(
 						d
 							.insert(schema.tasks)
 							.values({
+								id: taskId,
 								userId,
 								provider: "codex",
 								authMode,
 								status: "preparing",
+								threadId,
+								traceId,
+								parentTaskId,
+								rootTaskId: rootTaskId ?? taskId,
+								specialist,
+								runnerKind,
+								input,
+								confirmationState,
 								prompt,
 								needsBrowser: needsBrowser ? "true" : "false",
 								sandboxId: sandbox.id,
@@ -823,6 +858,7 @@ export const TaskSupervisorLive = Layer.scoped(
 								callbackId,
 								callbackSecretHash: creds.hash,
 								lastEventSeq: 0,
+								metadata,
 							})
 							.returning({ id: schema.tasks.id }),
 					).pipe(
@@ -835,20 +871,26 @@ export const TaskSupervisorLive = Layer.scoped(
 						),
 					)
 
-					const taskId = rows[0]?.id
-					if (!taskId) {
+					const insertedTaskId = rows[0]?.id
+					if (!insertedTaskId) {
 						return yield* Effect.fail(new SandboxError({ message: "Failed to insert task record" }))
 					}
 
 					const createdEventId = crypto.randomUUID()
 					yield* query((d) =>
 						d.insert(schema.taskEvents).values({
-							taskId,
+							taskId: insertedTaskId,
 							eventId: createdEventId,
 							source: "server",
-							eventType: "task.created",
-							seq: 0,
-							payload: { conversationId: conversationId ?? null },
+							kind: "task.created",
+							seq: null,
+							payload: {
+								conversationId: conversationId ?? null,
+								threadId: threadId ?? null,
+								traceId: traceId ?? null,
+								parentTaskId: parentTaskId ?? null,
+								rootTaskId: rootTaskId ?? taskId,
+							},
 							occurredAt: new Date(),
 						}),
 					).pipe(
@@ -867,7 +909,7 @@ export const TaskSupervisorLive = Layer.scoped(
 						try: async () => {
 							try {
 								const command = await provider.prepareAndBuildCommand(sandbox, {
-									taskId,
+									taskId: insertedTaskId,
 									prompt,
 									authMode,
 									needsBrowser: needsBrowser ?? false,
@@ -878,7 +920,7 @@ export const TaskSupervisorLive = Layer.scoped(
 									callbackSecret: creds.raw,
 								})
 
-								sessionId = taskSessionId(taskId)
+								sessionId = taskSessionId(insertedTaskId)
 								await sandbox.process.createSession(sessionId)
 
 								const execResult = await sandbox.process.executeSessionCommand(sessionId, {
@@ -891,17 +933,17 @@ export const TaskSupervisorLive = Layer.scoped(
 									.update(schema.tasks)
 									.set({
 										status: "running",
-										artifactRoot: provider.getArtifactRoot(taskId),
+										artifactRoot: provider.getArtifactRoot(insertedTaskId),
 										sessionId,
 										commandId: execResult.cmdId,
 										startedAt: now,
 										heartbeatAt: now,
 										updatedAt: now,
 									})
-									.where(eq(schema.tasks.id, taskId))
+									.where(eq(schema.tasks.id, insertedTaskId))
 
-								activeTasks.set(taskId, {
-									taskId,
+								activeTasks.set(insertedTaskId, {
+									taskId: insertedTaskId,
 									sandbox,
 									sessionId,
 									commandId: execResult.cmdId,
@@ -911,7 +953,7 @@ export const TaskSupervisorLive = Layer.scoped(
 									hasCallbacks: true,
 								})
 
-								return { taskId, status: "running" as const }
+								return { taskId: insertedTaskId, status: "running" as const }
 							} catch (cause) {
 								// Roll back: mark as failed and clean up the session
 								const failNow = new Date()
@@ -923,7 +965,7 @@ export const TaskSupervisorLive = Layer.scoped(
 										completedAt: failNow,
 										updatedAt: failNow,
 									})
-									.where(eq(schema.tasks.id, taskId))
+									.where(eq(schema.tasks.id, insertedTaskId))
 								await deletePendingSession(sandbox, sessionId)
 								throw cause
 							}

@@ -1,5 +1,14 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
-import { conversations } from "./conversations"
+import {
+	foreignKey,
+	index,
+	integer,
+	jsonb,
+	pgTable,
+	text,
+	timestamp,
+	uuid,
+} from "drizzle-orm/pg-core"
+import { conversationThreads, conversations, type RunnerKind, type SpecialistKind } from "./conversations"
 import { users } from "./users"
 
 export type TaskStatus =
@@ -23,6 +32,17 @@ export const tasks = pgTable(
 		provider: text("provider").$type<"codex" | "claude_code">().notNull().default("codex"),
 		authMode: text("auth_mode").$type<"api_key" | "chatgpt_account">().notNull().default("api_key"),
 		status: text("status").$type<TaskStatus>().notNull().default("pending"),
+		threadId: uuid("thread_id").references(() => conversationThreads.id, { onDelete: "set null" }),
+		traceId: uuid("trace_id"),
+		parentTaskId: uuid("parent_task_id"),
+		rootTaskId: uuid("root_task_id"),
+		specialist: text("specialist").$type<SpecialistKind>(),
+		runnerKind: text("runner_kind").$type<RunnerKind>(),
+		input: jsonb("input").$type<unknown>(),
+		output: jsonb("output").$type<unknown>(),
+		artifacts: jsonb("artifacts").$type<unknown>(),
+		confirmationState: text("confirmation_state")
+			.$type<"not_required" | "required" | "confirmed" | "rejected">(),
 		prompt: text("prompt").notNull(),
 		// Stored as text "true"/"false" because Drizzle's boolean doesn't support
 		// the .$type<>() branded-text pattern used for other enum-like columns,
@@ -57,7 +77,23 @@ export const tasks = pgTable(
 	},
 	(t) => [
 		index("tasks_user_status_idx").on(t.userId, t.status),
+		index("tasks_thread_idx").on(t.threadId),
+		index("tasks_trace_id_idx").on(t.traceId),
+		index("tasks_parent_task_id_idx").on(t.parentTaskId),
+		index("tasks_root_task_id_idx").on(t.rootTaskId),
+		index("tasks_specialist_idx").on(t.specialist),
+		index("tasks_runner_kind_idx").on(t.runnerKind),
 		index("tasks_callback_id_idx").on(t.callbackId),
 		index("tasks_status_heartbeat_idx").on(t.status, t.heartbeatAt),
+		foreignKey({
+			columns: [t.parentTaskId],
+			foreignColumns: [t.id],
+			name: "tasks_parent_task_id_fkey",
+		}),
+		foreignKey({
+			columns: [t.rootTaskId],
+			foreignColumns: [t.id],
+			name: "tasks_root_task_id_fkey",
+		}),
 	],
 )
