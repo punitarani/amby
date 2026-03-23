@@ -1,8 +1,11 @@
-import { type Database, type DbError, eq, schema, type TaskStatus } from "@amby/db"
+import {
+	completeTaskRecord,
+	createTaskRecord,
+	deriveRuntimeForRunner,
+	type TaskQueryFn,
+} from "@amby/computer"
 import { Effect } from "effect"
 import type { ExecutionTask, ExecutionTaskInput, ExecutionTaskResult } from "../types/execution"
-
-type QueryFn = <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, DbError>
 
 function derivePrompt(input: ExecutionTaskInput): string {
 	switch (input.kind) {
@@ -17,19 +20,30 @@ function derivePrompt(input: ExecutionTaskInput): string {
 	}
 }
 
-function mapResultStatus(status: ExecutionTaskResult["status"]): TaskStatus {
-	switch (status) {
-		case "completed":
-		case "partial":
-		case "escalate":
-			return "succeeded"
-		case "failed":
-			return "failed"
+function buildRuntimeData(task: ExecutionTask): Record<string, unknown> | null {
+	switch (task.input.kind) {
+		case "browser":
+			return {
+				mode: task.input.task.mode,
+				startUrl: task.input.task.startUrl ?? null,
+				sideEffectLevel: task.input.task.sideEffectLevel,
+			}
+		case "specialist":
+			return null
+		case "settings":
+			return {
+				settingsTask: task.input.task,
+			}
+		case "background":
+			return {
+				instructions: task.input.instructions ?? null,
+				context: task.input.context ?? null,
+			}
 	}
 }
 
 export async function persistTaskCreated(
-	query: QueryFn,
+	query: TaskQueryFn,
 	task: ExecutionTask,
 	config: {
 		userId: string
@@ -38,54 +52,49 @@ export async function persistTaskCreated(
 		traceId: string
 	},
 ): Promise<void> {
+	const runtime = deriveRuntimeForRunner({
+		runnerKind: task.runnerKind,
+		requiresBrowser: task.input.kind === "background" ? task.input.needsBrowser : undefined,
+	})
+
 	try {
 		await Effect.runPromise(
-			query((db) =>
-				db.insert(schema.tasks).values({
-					id: task.id,
-					userId: config.userId,
-					status: "running",
-					specialist: task.specialist,
-					runnerKind: task.runnerKind,
+			createTaskRecord(query, {
+				id: task.id,
+				userId: config.userId,
+				runtime: runtime.runtime,
+				provider: runtime.provider,
+				status: "running",
+				specialist: task.specialist,
+				runnerKind: task.runnerKind,
+				conversationId: config.conversationId,
+				threadId: config.threadId,
+				traceId: config.traceId,
+				rootTaskId: task.rootTaskId,
+				parentTaskId: task.parentTaskId,
+				input: task.input,
+				prompt: derivePrompt(task.input),
+				requiresBrowser: runtime.requiresBrowser,
+				confirmationState: task.requiresConfirmation ? "required" : "not_required",
+				startedAt: new Date(),
+				runtimeData: buildRuntimeData(task),
+				metadata: {
+					depth: task.depth,
+					spawnedBySpecialist: task.spawnedBySpecialist ?? null,
+					resourceLocks: task.resourceLocks,
+					mutates: task.mutates,
+					writesExternal: task.writesExternal,
+				},
+				eventPayload: {
 					conversationId: config.conversationId,
-					threadId: config.threadId,
+					threadId: config.threadId ?? null,
 					traceId: config.traceId,
+					parentTaskId: task.parentTaskId ?? null,
 					rootTaskId: task.rootTaskId,
-					parentTaskId: task.parentTaskId,
-					input: task.input as unknown as Record<string, unknown>,
-					prompt: derivePrompt(task.input),
-					confirmationState: task.requiresConfirmation ? "required" : "not_required",
-					startedAt: new Date(),
-					metadata: {
-						depth: task.depth,
-						spawnedBySpecialist: task.spawnedBySpecialist ?? null,
-						resourceLocks: task.resourceLocks,
-						mutates: task.mutates,
-						writesExternal: task.writesExternal,
-					},
-				}),
-			),
-		)
-
-		const eventId = crypto.randomUUID()
-		await Effect.runPromise(
-			query((db) =>
-				db.insert(schema.taskEvents).values({
-					taskId: task.id,
-					eventId,
-					source: "server",
-					kind: "task.created",
-					seq: null,
-					payload: {
-						conversationId: config.conversationId,
-						threadId: config.threadId ?? null,
-						traceId: config.traceId,
-						parentTaskId: task.parentTaskId ?? null,
-						rootTaskId: task.rootTaskId,
-					},
-					occurredAt: new Date(),
-				}),
-			),
+					runtime: runtime.runtime,
+					provider: runtime.provider,
+				},
+			}),
 		)
 	} catch (error) {
 		console.error(
@@ -96,50 +105,33 @@ export async function persistTaskCreated(
 }
 
 export async function persistTaskCompleted(
-	query: QueryFn,
+	query: TaskQueryFn,
 	taskId: string,
 	result: ExecutionTaskResult,
 ): Promise<void> {
 	try {
-		const status = mapResultStatus(result.status)
-		const now = new Date()
-
 		await Effect.runPromise(
-			query((db) =>
-				db
-					.update(schema.tasks)
-					.set({
-						status,
-						output: result.data as unknown as Record<string, unknown>,
-						artifacts: result.artifacts as unknown as Record<string, unknown>,
-						outputSummary: result.summary,
-						...(status === "failed"
-							? { error: result.issues?.[0]?.message ?? result.summary }
-							: {}),
-						completedAt: now,
-						updatedAt: now,
-					})
-					.where(eq(schema.tasks.id, taskId)),
-			),
-		)
-
-		const eventKind = status === "failed" ? "task.failed" : "task.completed"
-		const eventId = crypto.randomUUID()
-		await Effect.runPromise(
-			query((db) =>
-				db.insert(schema.taskEvents).values({
-					taskId,
-					eventId,
-					source: "server",
-					kind: eventKind,
-					seq: null,
-					payload: {
-						status: result.status,
-						summary: result.summary,
-					},
-					occurredAt: now,
-				}),
-			),
+			completeTaskRecord(query, {
+				taskId,
+				status:
+					result.status === "completed"
+						? "succeeded"
+						: result.status === "partial"
+							? "partial"
+							: result.status === "escalate"
+								? "escalated"
+								: "failed",
+				output: result.data,
+				artifacts: result.artifacts,
+				summary: result.summary,
+				error: result.status === "failed" ? result.issues?.[0]?.message ?? result.summary : null,
+				runtimeData: result.runtimeData ?? null,
+				payload: {
+					status: result.status,
+					summary: result.summary,
+					issues: result.issues,
+				},
+			}),
 		)
 	} catch (error) {
 		console.error(

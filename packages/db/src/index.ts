@@ -24,6 +24,8 @@ export type {
 	SpecialistKind,
 	TaskEventKind,
 	TaskEventSource,
+	TaskProvider,
+	TaskRuntime,
 	TaskStatus,
 	ThreadSource,
 	TraceEventKind,

@@ -1,3 +1,4 @@
+import { sanitizeBrowserStartUrl } from "@amby/browser"
 import type { SpecialistKind } from "@amby/db"
 import { generateObject, type LanguageModel } from "ai"
 import { executionPlanSchema } from "../specialists/schemas"
@@ -14,7 +15,7 @@ type PlannerInput = {
 	config: AgentRunConfig
 }
 
-const URL_RE = /https?:\/\/[^\s)]+/g
+const URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g
 const INTEGRATION_RE = /\b(gmail|google calendar|calendar|notion|slack|drive|google drive)\b/i
 const SETTINGS_RE =
 	/\b(timezone|remind|reminder|schedule|every day|every week|codex|api key|auth)\b/i
@@ -34,7 +35,13 @@ function contains(text: string, pattern: RegExp) {
 }
 
 function extractUrls(text: string): string[] {
-	return [...text.matchAll(URL_RE)].map((match) => match[0])
+	return [
+		...new Set(
+			[...text.matchAll(URL_RE)]
+				.map((match) => sanitizeBrowserStartUrl(match[0]))
+				.filter((url): url is string => Boolean(url)),
+		),
+	]
 }
 
 function extractPathHints(text: string): string[] {

@@ -4,6 +4,8 @@ import { isLegalTransition, isTerminal } from "./task-state"
 describe("isTerminal", () => {
 	it.each([
 		"succeeded",
+		"partial",
+		"escalated",
 		"failed",
 		"cancelled",
 		"timed_out",

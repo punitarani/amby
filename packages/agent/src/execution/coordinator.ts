@@ -1,5 +1,5 @@
 import type { BrowserService } from "@amby/browser"
-import type { TaskSupervisor } from "@amby/computer"
+import { appendTaskProgressEvent, type TaskSupervisor } from "@amby/computer"
 import type { LanguageModel } from "ai"
 import { Effect } from "effect"
 import type { AgentRunConfig } from "../types/agent"
@@ -126,6 +126,7 @@ async function runTaskWithTrace(params: {
 	rootTrace: TraceWriter
 }) {
 	const requestEnvelope = buildRequestEnvelope(params.task)
+	let progressSeq = 0
 	const trace = await Effect.runPromise(
 		createTrace({
 			query: params.query,
@@ -167,6 +168,33 @@ async function runTaskWithTrace(params: {
 						task: params.task,
 						browser: params.browser,
 						trace,
+						onProgress: async (event) => {
+							progressSeq += 1
+							try {
+								await Effect.runPromise(
+									appendTaskProgressEvent(params.query, {
+										taskId: params.task.id,
+										seq: progressSeq,
+										kind: "task.progress",
+										status: "running",
+										payload: {
+											phase: event.phase ?? null,
+											category: event.category ?? null,
+											message: event.message,
+											level: event.level ?? null,
+											stepIndex: event.stepIndex ?? null,
+											page: event.page ?? null,
+											auxiliary: event.auxiliary,
+										},
+									}),
+								)
+							} catch (error) {
+								console.warn(
+									`[execution-coordinator] Failed to persist browser progress for task ${params.task.id}:`,
+									error instanceof Error ? error.message : String(error),
+								)
+							}
+						},
 					})
 				: params.task.runnerKind === "background_handoff"
 					? await runBackgroundSpecialist({

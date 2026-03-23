@@ -157,18 +157,37 @@ function buildExecutionToolSummary(
 		  },
 ): string {
 	if ("executions" in result) {
-		if (result.executions.length === 0) return "No matching background executions found."
+		if (result.executions.length === 0) return "No matching executions found."
 		return result.executions
 			.map((execution) => {
 				const preview = summarizeExecutionOutput(execution.output)
+				const progress = execution.recentEvents
+					?.filter((event) => event.kind === "task.progress" || event.kind === "task.started")
+					.slice(0, 3)
+					.map((event) => {
+						const payload =
+							event.payload && typeof event.payload === "object" ? event.payload : undefined
+						const message =
+							payload && "message" in payload && typeof payload.message === "string"
+								? payload.message
+								: null
+						const phase =
+							payload && "phase" in payload && typeof payload.phase === "string"
+								? payload.phase
+								: null
+						return message ?? phase ?? event.kind
+					})
+					.filter(Boolean)
 				const artifacts = execution.artifacts?.length
 					? ` Files: ${execution.artifacts
 							.map((artifact) => artifact.title ?? artifact.uri ?? artifact.kind)
 							.join(", ")}.`
 					: ""
-				return `${execution.taskId}: ${execution.status}${execution.summary ? ` — ${execution.summary}` : ""}${
+				return `${execution.taskId}: ${execution.status} [${execution.runtime}/${execution.provider}]${
+					execution.summary ? ` — ${execution.summary}` : ""
+				}${
 					preview ? `\nOutput preview: ${preview}` : ""
-				}${artifacts}`
+				}${progress?.length ? `\nRecent progress: ${progress.join(" | ")}` : ""}${artifacts}`
 			})
 			.join("\n")
 	}
@@ -416,7 +435,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						send_message: buildSendMessageTool(onReply),
 						execute_plan: tool({
 							description:
-								"Execute specialist work through the internal execution runtime. Use this when the request needs browser, code, research, integration, memory, settings, computer, or background execution.",
+								"Execute specialist work through the internal execution runtime. Use this when the request needs browser, code, research, integration, memory, settings, computer, or durable execution.",
 							inputSchema: z
 								.object({
 									request: z.string(),
@@ -472,7 +491,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						}),
 						query_execution: tool({
 							description:
-								"Inspect durable background executions for this conversation. Use this when the user asks about a task that is still running or recently completed.",
+								"Inspect durable executions for this conversation. Use this when the user asks about work that is still running or recently completed.",
 							inputSchema: z.union([
 								z.object({
 									kind: z.literal("by-id"),

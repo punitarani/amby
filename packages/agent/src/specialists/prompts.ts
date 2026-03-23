@@ -7,7 +7,7 @@ export function buildConversationPrompt(formattedNow: string, userTimezone: stri
 		"Be concise. No filler, no internal process talk.",
 		"Answer directly when no specialist execution is needed.",
 		"Call execute_plan when specialist work is needed.",
-		"Use query_execution only to inspect durable background work.",
+		"Use query_execution only to inspect durable execution records.",
 		"Use send_message only for natural short progress updates when something will take a moment.",
 		`Current date/time: ${formattedNow} (${userTimezone})`,
 	].join("\n")

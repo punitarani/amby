@@ -4,11 +4,15 @@ import { desc, eq, schema } from "@amby/db"
 type TraceTerminalStatus = "completed" | "failed"
 
 function toTraceTerminalStatus(status: TaskStatus): TraceTerminalStatus {
-	return status === "succeeded" ? "completed" : "failed"
+	return status === "succeeded" || status === "partial" || status === "escalated"
+		? "completed"
+		: "failed"
 }
 
 function toTraceEventKind(status: TaskStatus): "delegation_end" | "error" {
-	return status === "succeeded" ? "delegation_end" : "error"
+	return status === "succeeded" || status === "partial" || status === "escalated"
+		? "delegation_end"
+		: "error"
 }
 
 export async function appendTaskTraceTerminalEvent(params: {

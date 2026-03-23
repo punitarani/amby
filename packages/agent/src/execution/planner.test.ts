@@ -84,6 +84,19 @@ describe("buildHeuristicPlan", () => {
 		expect(plan.tasks.every((t) => t.specialist === "browser")).toBe(true)
 	})
 
+	it("sanitizes quoted browser URLs before building the task", () => {
+		const plan = buildHeuristicPlan({
+			request: 'Open "https://www.nytimes.com" and summarize the homepage',
+			config: stubConfig,
+		})
+		const task = plan.tasks.find((candidate) => candidate.specialist === "browser")
+		expect(task).toBeDefined()
+		expect(task?.input.kind).toBe("browser")
+		if (task?.input.kind === "browser") {
+			expect(task.input.task.startUrl).toBe("https://www.nytimes.com/")
+		}
+	})
+
 	it("routes code changes to builder specialist", () => {
 		const plan = buildHeuristicPlan({
 			request: "Implement a new login form component",

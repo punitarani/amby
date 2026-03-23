@@ -1,4 +1,4 @@
-import type { TaskSupervisor } from "@amby/computer"
+import { isSandboxTask, isTerminal, listRecentTaskEvents, type TaskSupervisor } from "@amby/computer"
 import type { Database } from "@amby/db"
 import { and, desc, eq, inArray, schema } from "@amby/db"
 import { Effect } from "effect"
@@ -25,10 +25,24 @@ function mapTaskRow(task: typeof schema.tasks.$inferSelect) {
 		summary: task.outputSummary,
 		output: task.output as JsonValue | undefined,
 		traceId: task.traceId ?? null,
+		runtime: task.runtime,
+		provider: task.provider,
+		runnerKind: task.runnerKind ?? null,
+		requiresBrowser: task.requiresBrowser,
 		startedAt: task.startedAt?.toISOString() ?? null,
 		completedAt: task.completedAt?.toISOString() ?? null,
 		lastEventAt: task.lastEventAt?.toISOString() ?? null,
 		artifacts: parseArtifacts(task.artifacts),
+	}
+}
+
+function mapTaskEventRow(event: typeof schema.taskEvents.$inferSelect) {
+	return {
+		kind: event.kind,
+		source: event.source,
+		seq: event.seq,
+		occurredAt: event.occurredAt.toISOString(),
+		payload: event.payload as JsonValue | undefined,
 	}
 }
 
@@ -45,10 +59,38 @@ export function queryExecution(params: {
 	const { query, supervisor, userId, conversationId, input } = params
 
 	if (input.kind === "by-id") {
-		return supervisor.getTask(input.taskId, userId, input.waitSeconds).pipe(
-			Effect.map((task) => ({
-				executions: task ? [mapTaskRow(task)] : [],
-			})),
+		return query((db) =>
+			db
+				.select()
+				.from(schema.tasks)
+				.where(and(eq(schema.tasks.id, input.taskId), eq(schema.tasks.userId, userId)))
+				.limit(1),
+		).pipe(
+			Effect.flatMap((rows) => {
+				const task = rows[0] ?? null
+				if (!task) {
+					return Effect.succeed<QueryExecutionResult>({ executions: [] })
+				}
+				const taskEffect =
+					isSandboxTask(task) && !isTerminal(task.status)
+						? supervisor.getTask(task.id, userId, input.waitSeconds)
+						: Effect.succeed(task)
+				return Effect.all({
+					task: taskEffect.pipe(Effect.map((value) => value ?? task)),
+					recentEvents: listRecentTaskEvents(query, task.id, 10).pipe(
+						Effect.map((events) => events.map(mapTaskEventRow)),
+					),
+				}).pipe(
+					Effect.map(({ task: resolvedTask, recentEvents }) => ({
+						executions: [
+							{
+								...mapTaskRow(resolvedTask),
+								recentEvents,
+							},
+						],
+					})),
+				)
+			}),
 		)
 	}
 

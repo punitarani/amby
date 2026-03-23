@@ -3,6 +3,8 @@ import type { TaskStatus } from "@amby/db"
 /** Terminal task statuses — no further status transitions except no-ops. */
 export const TERMINAL_STATUSES: TaskStatus[] = [
 	"succeeded",
+	"partial",
+	"escalated",
 	"failed",
 	"cancelled",
 	"timed_out",

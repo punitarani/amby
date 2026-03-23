@@ -1,11 +1,13 @@
-import type { Database, TaskStatus } from "@amby/db"
-import { and, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, schema } from "@amby/db"
+import type { Database, DbError, TaskStatus } from "@amby/db"
+import { and, eq, inArray, isNotNull, isNull, lt, ne, or, schema } from "@amby/db"
 import type { Sandbox } from "@daytonaio/sdk"
+import { Effect } from "effect"
 import { STALE_HEARTBEAT_MS, TASK_BASE } from "../config"
 import { CodexProvider } from "./codex-provider"
 import { parseReplyTarget } from "./reply-target"
 import { collectTaskExecutionData } from "./task-execution-data"
 import { isTerminal, TERMINAL_STATUSES } from "./task-state"
+import { completeTaskRecord, isSandboxTask, readSandboxRuntimeData, type TaskQueryFn } from "./task-store"
 import { appendTaskTraceTerminalEvent } from "./task-trace"
 
 type TaskRow = typeof schema.tasks.$inferSelect
@@ -53,50 +55,63 @@ function buildNotificationMessage(task: TaskRow): string | null {
 	const err = task.error?.trim()
 	switch (task.status) {
 		case "succeeded":
-			return `Your background task is done.\n\n${summary}`
+			return `Your task is done.\n\n${summary}`
 		case "failed":
-			return `Your background task failed.${err ? `\n\n${err}` : ""}\n\nYou can ask me to try again.`
+			return `Your task failed.${err ? `\n\n${err}` : ""}\n\nYou can ask me to try again.`
 		case "timed_out":
-			return `Your background task timed out. You can ask me to try again or split the work into smaller steps.`
+			return `Your task timed out. You can ask me to try again or split the work into smaller steps.`
 		case "lost":
-			return `I lost track of your background task. You can ask me to start it again.`
+			return `I lost track of your task. You can ask me to start it again.`
 		default:
 			return null
 	}
 }
 
-function nonTerminalTaskWhere(taskId: string) {
-	return and(eq(schema.tasks.id, taskId), notInArray(schema.tasks.status, TERMINAL_STATUSES))
-}
-
 /** Force probe a single task (Daytona session + status.json) — used by probe_task tool. */
 export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow): Promise<void> {
 	const { db, ensureSandbox } = ctx
+	if (!isSandboxTask(task)) {
+		return
+	}
 	const sandbox = await ensureSandbox(task.userId)
+	const query: TaskQueryFn = (fn) =>
+		Effect.tryPromise({
+			try: () => fn(db),
+			catch: (error) => error as DbError,
+		})
+	const runtimeData = readSandboxRuntimeData(task)
 
 	if (isTerminal(task.status as TaskStatus)) {
 		return
 	}
 
-	if (!task.sessionId || !task.commandId) {
-		const now = new Date()
-		await db
-			.update(schema.tasks)
-			.set({ status: "lost", completedAt: now, updatedAt: now })
-			.where(nonTerminalTaskWhere(task.id))
-		await appendTaskTraceTerminalEvent({
-			db,
-			traceId: task.traceId,
-			taskId: task.id,
-			status: "lost",
-			reason: "missing_session",
-		}).catch(() => undefined)
-		await insertReconcilerEvent(db, task.id, "task.lost", { reason: "missing_session" })
+	if (!runtimeData?.sessionId || !runtimeData.commandId) {
+		const completed = await Effect.runPromise(
+			completeTaskRecord(query, {
+				taskId: task.id,
+				status: "lost",
+				summary: "Task lost because session metadata is missing.",
+				payload: { reason: "missing_session" },
+			}),
+		)
+		if (completed) {
+			await appendTaskTraceTerminalEvent({
+				db,
+				traceId: task.traceId,
+				taskId: task.id,
+				status: "lost",
+				reason: "missing_session",
+			}).catch(() => undefined)
+			await insertMaintenanceEvent(db, task.id, {
+				kind: "task.lost",
+				payload: { reason: "missing_session" },
+			})
+		}
 		return
 	}
 
 	try {
-		const cmd = await sandbox.process.getSessionCommand(task.sessionId, task.commandId)
+		const cmd = await sandbox.process.getSessionCommand(runtimeData.sessionId, runtimeData.commandId)
 		if (cmd.exitCode != null) {
 			if (shouldSkipProbeFinalize(task)) {
 				const skipNow = new Date()
@@ -104,11 +119,14 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 					.update(schema.tasks)
 					.set({ lastProbeAt: skipNow, updatedAt: skipNow })
 					.where(eq(schema.tasks.id, task.id))
-				await insertReconcilerEvent(db, task.id, "reconciler.probe", {
-					exitCode: cmd.exitCode,
-					source: "session_command",
-					skipped: "active_callback_stream",
-					lastEventSeq: task.lastEventSeq,
+				await insertMaintenanceEvent(db, task.id, {
+					kind: "maintenance.probe",
+					payload: {
+						exitCode: cmd.exitCode,
+						source: "session_command",
+						skipped: "active_callback_stream",
+						lastEventSeq: task.lastEventSeq,
+					},
 				})
 				return
 			}
@@ -117,38 +135,43 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 				sandbox,
 				provider,
 				taskId: task.id,
-				artifactRoot: provider.getArtifactRoot(task.id),
+				artifactRoot: runtimeData.artifactRoot ?? provider.getArtifactRoot(task.id),
 			})
 			const nextStatus: TaskStatus = cmd.exitCode === 0 ? "succeeded" : "failed"
-			const probeNow = new Date()
-			const updated = await db
-				.update(schema.tasks)
-				.set({
-					status: nextStatus,
-					exitCode: cmd.exitCode,
-					outputSummary: result.summary.slice(0, 2000),
-					output: result.output ? { result: result.output } : null,
-					artifacts: result.artifacts,
-					completedAt: probeNow,
-					heartbeatAt: probeNow,
-					updatedAt: probeNow,
-					callbackSecretHash: null,
-				})
-				.where(nonTerminalTaskWhere(task.id))
-				.returning({ id: schema.tasks.id })
-			if (updated.length > 0) {
-				await appendTaskTraceTerminalEvent({
-					db,
-					traceId: task.traceId,
-					taskId: task.id,
-					status: nextStatus,
-					message: result.summary,
-					exitCode: cmd.exitCode,
-				}).catch(() => undefined)
-				await insertReconcilerEvent(db, task.id, "reconciler.probe", {
-					exitCode: cmd.exitCode,
-					source: "session_command",
-				})
+			if (!isTerminal(task.status as TaskStatus)) {
+				const completed = await Effect.runPromise(
+					completeTaskRecord(query, {
+						taskId: task.id,
+						status: nextStatus,
+						exitCode: cmd.exitCode,
+						summary: result.summary.slice(0, 2000),
+						output: result.output ? { result: result.output } : null,
+						artifacts: result.artifacts,
+						error: nextStatus === "failed" ? result.summary.slice(0, 4000) : null,
+						payload: {
+							exitCode: cmd.exitCode,
+							source: "session_command",
+							summary: result.summary,
+						},
+					}),
+				)
+				if (completed) {
+					await appendTaskTraceTerminalEvent({
+						db,
+						traceId: task.traceId,
+						taskId: task.id,
+						status: nextStatus,
+						message: result.summary,
+						exitCode: cmd.exitCode,
+					}).catch(() => undefined)
+					await insertMaintenanceEvent(db, task.id, {
+						kind: "maintenance.probe",
+						payload: {
+							exitCode: cmd.exitCode,
+							source: "session_command",
+						},
+					})
+				}
 			}
 			return
 		}
@@ -165,39 +188,44 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 				sandbox,
 				provider,
 				taskId: task.id,
-				artifactRoot: provider.getArtifactRoot(task.id),
+				artifactRoot: runtimeData.artifactRoot ?? provider.getArtifactRoot(task.id),
 			})
 			const success = statusJson.status === "succeeded"
 			const nextStatus: TaskStatus = success ? "succeeded" : "failed"
-			const sjNow = new Date()
-			const updated = await db
-				.update(schema.tasks)
-				.set({
-					status: nextStatus,
-					exitCode: statusJson.exitCode ?? (success ? 0 : 1),
-					outputSummary: result.summary.slice(0, 2000),
-					output: result.output ? { result: result.output } : null,
-					artifacts: result.artifacts,
-					completedAt: sjNow,
-					heartbeatAt: sjNow,
-					updatedAt: sjNow,
-					callbackSecretHash: null,
-				})
-				.where(nonTerminalTaskWhere(task.id))
-				.returning({ id: schema.tasks.id })
-			if (updated.length > 0) {
-				await appendTaskTraceTerminalEvent({
-					db,
-					traceId: task.traceId,
-					taskId: task.id,
-					status: nextStatus,
-					message: result.summary,
-					exitCode: statusJson.exitCode ?? (success ? 0 : 1),
-				}).catch(() => undefined)
-				await insertReconcilerEvent(db, task.id, "reconciler.probe", {
-					source: "status_json",
-					statusJson,
-				})
+			if (!isTerminal(task.status as TaskStatus)) {
+				const completed = await Effect.runPromise(
+					completeTaskRecord(query, {
+						taskId: task.id,
+						status: nextStatus,
+						exitCode: statusJson.exitCode ?? (success ? 0 : 1),
+						summary: result.summary.slice(0, 2000),
+						output: result.output ? { result: result.output } : null,
+						artifacts: result.artifacts,
+						error: nextStatus === "failed" ? result.summary.slice(0, 4000) : null,
+						payload: {
+							source: "status_json",
+							statusJson,
+							summary: result.summary,
+						},
+					}),
+				)
+				if (completed) {
+					await appendTaskTraceTerminalEvent({
+						db,
+						traceId: task.traceId,
+						taskId: task.id,
+						status: nextStatus,
+						message: result.summary,
+						exitCode: statusJson.exitCode ?? (success ? 0 : 1),
+					}).catch(() => undefined)
+					await insertMaintenanceEvent(db, task.id, {
+						kind: "maintenance.probe",
+						payload: {
+							source: "status_json",
+							statusJson,
+						},
+					})
+				}
 			}
 		} else if (
 			!trustStatusJson &&
@@ -208,10 +236,13 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 				.update(schema.tasks)
 				.set({ lastProbeAt: naNow, updatedAt: naNow })
 				.where(eq(schema.tasks.id, task.id))
-			await insertReconcilerEvent(db, task.id, "reconciler.probe", {
-				source: "still_running",
-				statusJsonDebug: statusJson,
-				note: "status_json_not_authoritative_lastEventSeq_gt_0",
+			await insertMaintenanceEvent(db, task.id, {
+				kind: "maintenance.probe",
+				payload: {
+					source: "still_running",
+					statusJsonDebug: statusJson,
+					note: "status_json_not_authoritative_lastEventSeq_gt_0",
+				},
 			})
 		} else {
 			const elseNow = new Date()
@@ -219,7 +250,10 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 				.update(schema.tasks)
 				.set({ lastProbeAt: elseNow, updatedAt: elseNow })
 				.where(eq(schema.tasks.id, task.id))
-			await insertReconcilerEvent(db, task.id, "reconciler.probe", { source: "still_running" })
+			await insertMaintenanceEvent(db, task.id, {
+				kind: "maintenance.probe",
+				payload: { source: "still_running" },
+			})
 		}
 	} catch (e) {
 		console.error(`[probeSingleTask] failed for task ${task.id}:`, e)
@@ -241,7 +275,7 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 	const activeRows = await db
 		.selectDistinct({ userId: schema.tasks.userId })
 		.from(schema.tasks)
-		.where(inArray(schema.tasks.status, [...ACTIVE]))
+		.where(and(eq(schema.tasks.runtime, "sandbox"), inArray(schema.tasks.status, [...ACTIVE])))
 
 	const userIds = activeRows.map((r) => r.userId)
 	const sandboxCache = new Map<string, Sandbox>()
@@ -263,6 +297,7 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 		.from(schema.tasks)
 		.where(
 			and(
+				eq(schema.tasks.runtime, "sandbox"),
 				inArray(schema.tasks.status, [...ACTIVE]),
 				or(isNull(schema.tasks.heartbeatAt), lt(schema.tasks.heartbeatAt, staleBefore)),
 			),
@@ -346,21 +381,23 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 	}
 }
 
-async function insertReconcilerEvent(
+async function insertMaintenanceEvent(
 	db: Database,
 	taskId: string,
-	eventType: string,
-	payload: Record<string, unknown>,
+	params: {
+		kind?: "maintenance.probe" | "task.lost"
+		payload: Record<string, unknown>
+	},
 ) {
 	const eventId = crypto.randomUUID()
 	const occurredAt = new Date()
 	await db.insert(schema.taskEvents).values({
 		taskId,
 		eventId,
-		source: "reconciler",
-		kind: eventType as typeof schema.taskEvents.$inferInsert.kind,
+		source: "maintenance",
+		kind: params.kind ?? "maintenance.probe",
 		seq: null,
-		payload,
+		payload: params.payload,
 		occurredAt,
 	})
 }

@@ -1,4 +1,11 @@
-import type { ExecutionMode, RunnerKind, SpecialistKind, TaskStatus } from "@amby/db"
+import type {
+	ExecutionMode,
+	RunnerKind,
+	SpecialistKind,
+	TaskProvider,
+	TaskRuntime,
+	TaskStatus,
+} from "@amby/db"
 import type { BrowserTaskInput, BrowserTaskResult } from "./browser"
 import type { ArtifactRef, JsonValue, TaskIssue } from "./persistence"
 import type { SettingsTaskInput } from "./settings"
@@ -77,6 +84,7 @@ export type ExecutionTaskResult = {
 	artifacts?: ArtifactRef[]
 	issues?: TaskIssue[]
 	metrics?: ExecutionTaskMetrics
+	runtimeData?: Record<string, unknown>
 	traceRef: { traceId: string }
 	backgroundRef?: { taskId: string; traceId: string }
 }
@@ -109,10 +117,21 @@ export type QueryExecutionResult = {
 		summary: string | null
 		output?: JsonValue
 		traceId: string | null
+		runtime: TaskRuntime
+		provider: TaskProvider
+		runnerKind: RunnerKind | null
+		requiresBrowser: boolean
 		startedAt: string | null
 		completedAt: string | null
 		lastEventAt: string | null
 		artifacts?: ArtifactRef[]
+		recentEvents?: Array<{
+			kind: string
+			source: string
+			seq: number | null
+			occurredAt: string
+			payload?: JsonValue
+		}>
 	}>
 }
 

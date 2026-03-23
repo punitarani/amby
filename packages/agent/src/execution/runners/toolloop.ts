@@ -61,7 +61,12 @@ function parseArtifacts(value: unknown): ArtifactRef[] | undefined {
 	)
 }
 
-function mapOutput(task: ExecutionTask, output: unknown, traceId: string): ExecutionTaskResult {
+function mapOutput(
+	task: ExecutionTask,
+	output: unknown,
+	traceId: string,
+	runtimeData?: Record<string, unknown>,
+): ExecutionTaskResult {
 	const structured = (output ?? {}) as Partial<SpecialistResultShape> & {
 		requiresEscalation?: boolean
 	}
@@ -85,6 +90,7 @@ function mapOutput(task: ExecutionTask, output: unknown, traceId: string): Execu
 		data: structured.data,
 		artifacts: parseArtifacts(structured.artifacts) ?? structured.artifacts,
 		issues: parseIssues(structured.issues) ?? structured.issues,
+		runtimeData,
 		traceRef: { traceId },
 	}
 }
@@ -100,6 +106,7 @@ export async function runToolloopSpecialist(params: {
 	toolEvents: Array<{ kind: "tool_call" | "tool_result"; payload: Record<string, unknown> }>
 }> {
 	const definition = getSpecialistDefinition(params.task.specialist)
+	const modelId = definition.selectModel(params.config) ?? params.config.modelPolicy.defaultModelId
 	const tools = resolveVisibleTools(definition, params.config, params.toolGroups)
 	const telemetry = createTelemetrySettings({
 		functionId: `amby.specialist.${params.task.specialist}`,
@@ -108,7 +115,7 @@ export async function runToolloopSpecialist(params: {
 			conversation_id: params.config.request.conversationId,
 			request_mode: params.config.request.mode,
 			user_id: params.config.request.userId,
-			model_id: definition.selectModel(params.config) ?? params.config.modelPolicy.defaultModelId,
+			model_id: modelId,
 			agent_role: "specialist",
 			specialist_name: params.task.specialist,
 			task_id: params.task.id,
@@ -167,7 +174,9 @@ export async function runToolloopSpecialist(params: {
 	])
 
 	return {
-		result: mapOutput(params.task, result.output, params.trace.traceId),
+		result: mapOutput(params.task, result.output, params.trace.traceId, {
+			modelId,
+		}),
 		toolEvents,
 	}
 }

@@ -10,19 +10,21 @@ import {
 } from "drizzle-orm/pg-core"
 import { tasks } from "./tasks"
 
-export type TaskEventSource = "server" | "harness" | "codex_notify" | "reconciler"
+export type TaskEventSource = "server" | "runtime" | "backend" | "maintenance"
 export type TaskEventKind =
 	| "task.created"
 	| "task.started"
 	| "task.progress"
 	| "task.heartbeat"
 	| "task.completed"
+	| "task.partial"
+	| "task.escalated"
 	| "task.failed"
 	| "task.timed_out"
 	| "task.lost"
 	| "task.notification_sent"
-	| "codex.notify"
-	| "reconciler.probe"
+	| "backend.notify"
+	| "maintenance.probe"
 
 export const taskEvents = pgTable(
 	"task_events",
@@ -35,9 +37,8 @@ export const taskEvents = pgTable(
 		source: text("source").$type<TaskEventSource>().notNull(),
 		kind: text("kind").$type<TaskEventKind>().notNull(),
 		/**
-		 * Monotonic sequence for `source = 'harness'` events only; all non-harness events use
-		 * `null` so the durable log stays append-only and non-authoritative for external sources.
-		 * This includes `task.created`, `codex.notify`, and reconciler metadata events.
+		 * Monotonic sequence is used for callback-driven progress streams. Server-originated
+		 * create/complete events and maintenance events continue to use `null`.
 		 */
 		seq: integer("seq"),
 		payload: jsonb("payload").$type<Record<string, unknown>>(),

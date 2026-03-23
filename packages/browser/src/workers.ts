@@ -6,13 +6,16 @@ import { createWorkersAI } from "workers-ai-provider"
 import {
 	BrowserError,
 	BrowserService,
+	type BrowserTaskProgressEvent,
 	type BrowserTaskInput,
 	type BrowserTaskPage,
 	type BrowserTaskResult,
+	type BrowserTaskRunOptions,
 	type BrowserTaskStatus,
 	buildBrowserSummary,
 	DEFAULT_BROWSER_MAX_STEPS,
 	isBrowserEscalationSignal,
+	sanitizeBrowserStartUrl,
 	summarizePageArtifact,
 } from "./shared"
 
@@ -162,37 +165,101 @@ function summarizeText(mode: BrowserTaskInput["mode"], page: BrowserTaskPage, te
 	return buildBrowserSummary(mode, "completed", page, "Browser task completed.")
 }
 
+function normalizeAuxiliary(
+	value: unknown,
+	maxLength = 2_000,
+): BrowserTaskProgressEvent["auxiliary"] | undefined {
+	if (!value || typeof value !== "object") return undefined
+
+	const normalized = Object.fromEntries(
+		Object.entries(value as Record<string, unknown>).map(([key, entry]) => {
+			if (!entry || typeof entry !== "object") return [key, entry]
+			const record = entry as { value?: unknown; type?: unknown }
+			const raw = record.value
+			const text =
+				typeof raw === "string" ? raw : raw === undefined ? undefined : JSON.stringify(raw)
+			return [key, text && text.length > maxLength ? `${text.slice(0, maxLength)}...` : text]
+		}),
+	)
+
+	return Object.keys(normalized).length > 0 ? normalized : undefined
+}
+
+function shouldEmitProgress(entry: { category?: unknown; level?: unknown; message?: unknown }) {
+	if (typeof entry.message !== "string" || !entry.message.trim()) return false
+	const level = typeof entry.level === "number" ? entry.level : 1
+	if (level > 1) return false
+	if (typeof entry.category !== "string") return false
+	return ["agent", "action", "observation", "extraction", "act", "observe", "extract"].includes(
+		entry.category,
+	)
+}
+
 async function runBrowserTask(
 	settings: BrowserWorkerSettings,
 	input: BrowserTaskInput,
+	options?: BrowserTaskRunOptions,
 ): Promise<BrowserTaskResult> {
 	if (!settings.browserBinding) {
 		throw new BrowserError({ message: "Browser Rendering binding is not configured." })
 	}
 
 	const startedAt = Date.now()
+	let agentStepIndex = 0
 
 	if (settings.verbose) {
 		console.info(`[BrowserService] LLM: ${settings.model} via ${settings.providerLabel}`)
 	}
 
 	const { endpointURLString } = await import("@cloudflare/playwright")
-	const stagehandLogger = (entry: { level?: number; message: string; [key: string]: unknown }) => {
+	let stagehand: Stagehand | undefined
+	const stagehandLogger = async (entry: { level?: number; message: string; [key: string]: unknown }) => {
 		if (entry.message === "Custom LLM clients are currently not supported in API mode") {
 			return
 		}
 
 		if ((entry.level ?? 1) <= 0) {
 			console.warn(entry)
+		} else if (settings.verbose) {
+			console.info(entry)
+		}
+
+		if (!options?.onProgress || !shouldEmitProgress(entry)) {
 			return
 		}
 
-		if (settings.verbose) {
-			console.info(entry)
+		const category = typeof entry.category === "string" ? entry.category : undefined
+		if (category === "agent" && entry.message.startsWith("Agent calling tool:")) {
+			agentStepIndex += 1
+		}
+
+		const page =
+			stagehand && initialized
+				? await resolveBrowserPageTitle(stagehand).catch(() => ({ url: null, title: null }))
+				: { url: null, title: null }
+
+		try {
+			await options.onProgress({
+				phase:
+					category === "agent" && entry.message.startsWith("Agent calling tool:")
+						? "agent_step"
+						: category,
+				category,
+				message: entry.message,
+				level: entry.level,
+				stepIndex: agentStepIndex > 0 ? agentStepIndex : undefined,
+				page,
+				auxiliary: normalizeAuxiliary(entry.auxiliary),
+			})
+		} catch (error) {
+			console.warn(
+				"[BrowserService] Failed to persist browser progress event:",
+				error instanceof Error ? error.message : String(error),
+			)
 		}
 	}
 
-	const stagehand = new Stagehand({
+	stagehand = new Stagehand({
 		env: "LOCAL",
 		verbose: settings.verbose ? 2 : 1,
 		logger: stagehandLogger,
@@ -211,7 +278,7 @@ async function runBrowserTask(
 		const normalized = {
 			...input,
 			instruction: input.instruction.trim(),
-			startUrl: trim(input.startUrl) || undefined,
+			startUrl: sanitizeBrowserStartUrl(input.startUrl),
 			expectedOutcome: trim(input.expectedOutcome) || undefined,
 		}
 		const startUrl = trim(normalized.startUrl)
@@ -267,6 +334,11 @@ async function runBrowserTask(
 						steps: 1,
 						durationMs: Date.now() - startedAt,
 					},
+					runtimeData: {
+						model: settings.model,
+						providerLabel: settings.providerLabel,
+						mode: normalized.mode,
+					},
 				}
 			}
 			case "act": {
@@ -301,6 +373,11 @@ async function runBrowserTask(
 						steps: Array.isArray(result.actions) ? result.actions.length : 1,
 						durationMs: Date.now() - startedAt,
 						...mapUsage(result.usage),
+					},
+					runtimeData: {
+						model: settings.model,
+						providerLabel: settings.providerLabel,
+						mode: normalized.mode,
 					},
 				}
 			}
@@ -378,6 +455,12 @@ async function runBrowserTask(
 						durationMs: Date.now() - startedAt,
 						...mapUsage(result.usage),
 					},
+					runtimeData: {
+						model: settings.model,
+						providerLabel: settings.providerLabel,
+						mode: normalized.mode,
+						actionsCount: Array.isArray(result.actions) ? result.actions.length : 0,
+					},
 				}
 			}
 		}
@@ -399,6 +482,11 @@ async function runBrowserTask(
 				issues: [message],
 				metrics: {
 					durationMs: Date.now() - startedAt,
+				},
+				runtimeData: {
+					model: settings.model,
+					providerLabel: settings.providerLabel,
+					mode: input.mode,
 				},
 			}
 		}
@@ -434,9 +522,9 @@ export const makeBrowserServiceFromBindings = (bindings: BrowserWorkerBindings) 
 
 	return Layer.succeed(BrowserService, {
 		enabled: settings.enabled,
-		runTask: (input) =>
+		runTask: (input, options) =>
 			Effect.tryPromise({
-				try: () => runBrowserTask(settings, input),
+				try: () => runBrowserTask(settings, input, options),
 				catch: (cause) =>
 					cause instanceof BrowserError
 						? cause
