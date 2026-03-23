@@ -83,7 +83,10 @@ export async function ensureVolume(
 		// biome-ignore lint/style/noNonNullAssertion: upsert always returns a row
 		return rows[0]!
 	} catch (cause) {
-		// Mark row as error if it exists
+		// Mark existing row as error so the next attempt re-creates.
+		// On first-time creation failures there is no row yet — we cannot insert
+		// one without a valid daytonaVolumeId (NOT NULL constraint), so the
+		// failure is surfaced via VolumeError without a DB trace.
 		if (existing) {
 			await db
 				.update(schema.userVolumes)
@@ -104,6 +107,10 @@ export async function ensureVolume(
  * Soft-delete the active main sandbox row for a user.
  * Rows are never hard-deleted — status transitions to "deleted" instead.
  * Only affects rows that are not already marked deleted.
+ *
+ * The broad WHERE (userId + role='main' + status!='deleted') is intentional:
+ * the partial unique index guarantees at most one active main sandbox per user,
+ * so this always targets exactly zero or one row.
  */
 async function softDeleteMainSandboxRow(db: Database, userId: string) {
 	await db
@@ -342,86 +349,6 @@ export const ensureMainSandbox = (
 							message: `Failed to ensure sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
 							cause,
 						}),
-		})
-
-		return sandbox
-	})
-
-// ── Replace sandbox ─────────────────────────────────────────────────────
-
-export interface ReplaceSandboxParams {
-	daytona: Daytona
-	db: Database
-	userId: string
-	failedName: string
-	volumeRow: VolumeRow
-	isDev: boolean
-	cache: Map<string, Sandbox>
-}
-
-/**
- * Delete a broken sandbox and create a new one on the same volume.
- * Used when a sandbox is in an unrecoverable error state.
- */
-export const replaceSandbox = (
-	params: ReplaceSandboxParams,
-): Effect.Effect<Sandbox, SandboxError> =>
-	Effect.gen(function* () {
-		const { daytona, db, userId, failedName, volumeRow, isDev, cache } = params
-
-		// Best-effort delete failed sandbox from Daytona (ignore 404)
-		yield* Effect.either(
-			Effect.tryPromise({
-				try: async () => {
-					const failed = await tryGetSandboxByName(daytona, failedName)
-					if (failed) await daytona.delete(failed)
-				},
-				catch: () => new SandboxError({ message: "Failed to delete failed sandbox" }),
-			}),
-		)
-
-		// Soft-delete the failed main sandbox row before creating a replacement
-		yield* Effect.tryPromise({
-			try: () => softDeleteMainSandboxRow(db, userId),
-			catch: (cause) =>
-				new SandboxError({
-					message: `Failed to retire failed sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
-					cause,
-				}),
-		})
-
-		// Create new sandbox with same volume mount
-		const createSpec = {
-			...buildSandboxCreateParams(userId, isDev),
-			volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
-		}
-
-		const sandbox = yield* Effect.tryPromise({
-			try: async () => {
-				try {
-					return await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
-				} catch (cause) {
-					await upsertMainSandboxRow(db, userId, "pending", "error", volumeRow.id)
-					throw cause
-				}
-			},
-			catch: (cause) =>
-				cause instanceof SandboxError
-					? cause
-					: new SandboxError({
-							message: `Failed to create replacement sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
-		})
-
-		cache.set(userId, sandbox)
-		yield* Effect.tryPromise({
-			try: () => persistMainSandboxFromInstance(db, userId, sandbox, volumeRow.id, "running"),
-			catch: (cause) =>
-				new SandboxError({
-					message: `Failed to persist replacement sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
-					cause,
-				}),
 		})
 
 		return sandbox

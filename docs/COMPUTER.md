@@ -76,7 +76,7 @@ sandbox-config.ts         # lightweight re-export for provisioning workflow (avo
 
 sandbox/                  # Daytona sandbox lifecycle + agent tools
   resolve-sandbox.ts      # Shared sandbox utilities (create params, state transition retry, etc.)
-  resolve-volume.ts       # Volume-first ensure path (ensureVolume, ensureMainSandbox, replaceSandbox)
+  resolve-volume.ts       # Volume-first ensure path (ensureVolume, ensureMainSandbox)
   service.ts              # SandboxService (Effect service), config constants, sandbox image
   tools.ts                # execute_command, read_file, write_file tools
   cua-tools.ts            # Computer Use Agent GUI tools (screenshot, click, type, etc.)

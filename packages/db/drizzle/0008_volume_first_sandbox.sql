@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS "user_volumes" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" text NOT NULL,
 	"daytona_volume_id" text NOT NULL,
-	"status" text DEFAULT 'creating' NOT NULL,
+	"status" text DEFAULT 'ready' NOT NULL,
 	"auth_config" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,

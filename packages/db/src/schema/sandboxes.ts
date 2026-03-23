@@ -9,10 +9,7 @@ export const userVolumes = pgTable("user_volumes", {
 		.unique()
 		.references(() => users.id, { onDelete: "cascade" }),
 	daytonaVolumeId: text("daytona_volume_id").notNull().unique(),
-	status: text("status")
-		.$type<"creating" | "ready" | "error" | "deleted">()
-		.notNull()
-		.default("creating"),
+	status: text("status").$type<"ready" | "error" | "deleted">().notNull().default("ready"),
 	authConfig: jsonb("auth_config").$type<Record<string, unknown>>(),
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
