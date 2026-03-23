@@ -37,7 +37,7 @@ jobs:
     # Requires GitHub Actions secret `TURBO_TOKEN` and repository variable `TURBO_TEAM`.
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -53,7 +53,7 @@ jobs:
     # Requires GitHub Actions secret `TURBO_TOKEN` and repository variable `TURBO_TEAM`.
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
