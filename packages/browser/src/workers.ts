@@ -42,24 +42,6 @@ function withoutTrailingSlash(value: string): string {
 	return value.replace(/\/+$/, "")
 }
 
-function parseHttpUrl(value: string): string {
-	let url: URL
-
-	try {
-		url = new URL(value)
-	} catch {
-		throw new BrowserError({ message: `Invalid startUrl: ${value}` })
-	}
-
-	if (url.protocol !== "http:" && url.protocol !== "https:") {
-		throw new BrowserError({
-			message: `Invalid startUrl scheme (only http/https allowed): ${value}`,
-		})
-	}
-
-	return url.toString()
-}
-
 export function resolveBrowserWorkerSettings(
 	bindings: BrowserWorkerBindings,
 ): BrowserWorkerSettings {
@@ -114,14 +96,13 @@ async function runBrowserTask(
 	}
 
 	const llmClient = await createAISdkClient(settings)
-	const llmClient = await createAISdkClient(settings)
 	const { endpointURLString } = await import("@cloudflare/playwright")
 	const stagehand = new Stagehand({
 		env: "LOCAL",
 		verbose: 1,
 		llmClient,
 		localBrowserLaunchOptions: {
-			cdpUrl: endpointURLString(settings.browserBinding as any),
+			cdpUrl: endpointURLString(settings.browserBinding as BrowserWorker),
 		},
 	})
 
@@ -129,7 +110,9 @@ async function runBrowserTask(
 		const rawUrl = normalizeNonEmpty(startUrl)
 		if (rawUrl) {
 			if (!/^https?:\/\//i.test(rawUrl)) {
-				throw new BrowserError({ message: `Invalid startUrl scheme (only http/https allowed): ${rawUrl}` })
+				throw new BrowserError({
+					message: `Invalid startUrl scheme (only http/https allowed): ${rawUrl}`,
+				})
 			}
 			await stagehand.page.goto(rawUrl)
 		}
@@ -152,8 +135,6 @@ async function runBrowserTask(
 			finalUrl: currentUrl ? currentUrl.trim() : null,
 			title: title?.trim() || null,
 		}
-	} finally {
-		await stagehand.close().catch((error) => {
 	} finally {
 		await stagehand.close().catch((err) => {
 			console.warn("[BrowserService] stagehand.close() failed:", err)
