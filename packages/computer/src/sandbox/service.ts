@@ -1,4 +1,4 @@
-import { DbService } from "@amby/db"
+import { and, DbService, eq, ne, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Daytona } from "@daytonaio/sdk"
@@ -61,14 +61,59 @@ export const SandboxServiceLive = Layer.effect(
 		})
 		const cache = new Map<string, Sandbox>()
 		const isDev = env.NODE_ENV !== "production"
+		const PROVISION_WORKFLOW_THROTTLE_MS = 15_000
+		const kickOffSandboxProvision = (userId: string) =>
+			Effect.tryPromise({
+				try: async () => {
+					if (!env.SANDBOX_WORKFLOW) return
+
+					const row = await db
+						.select({
+							status: schema.sandboxes.status,
+							updatedAt: schema.sandboxes.updatedAt,
+						})
+						.from(schema.sandboxes)
+						.where(
+							and(
+								eq(schema.sandboxes.userId, userId),
+								eq(schema.sandboxes.role, "main"),
+								ne(schema.sandboxes.status, "deleted"),
+							),
+						)
+						.limit(1)
+						.then((rows) => rows[0] ?? null)
+
+					if (
+						row &&
+						(row.status === "volume_creating" || row.status === "creating") &&
+						row.updatedAt instanceof Date &&
+						Date.now() - row.updatedAt.getTime() < PROVISION_WORKFLOW_THROTTLE_MS
+					) {
+						return
+					}
+
+					await env.SANDBOX_WORKFLOW.create({ params: { userId } })
+				},
+				catch: (cause) =>
+					new SandboxError({
+						message: `Failed to start sandbox provisioning workflow: ${cause instanceof Error ? cause.message : String(cause)}`,
+						cause,
+					}),
+			}).pipe(
+				Effect.catchAll((error) =>
+					Effect.sync(() => {
+						console.error("[sandbox] Failed to start provisioning workflow:", error.message)
+					}),
+				),
+			)
 
 		return {
 			enabled: true,
 
 			ensure: (userId) =>
 				ensureMainSandbox({ daytona, db, userId, isDev, cache }).pipe(
-					Effect.catchTag("VolumeError", (e) =>
-						Effect.fail(new SandboxError({ message: e.message, cause: e.cause })),
+					Effect.tapError((error) =>
+						error.transient ? kickOffSandboxProvision(userId) : Effect.void,
 					),
 				),
 

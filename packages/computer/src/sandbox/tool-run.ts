@@ -2,7 +2,7 @@ import type { Sandbox } from "@daytonaio/sdk"
 import { Effect } from "effect"
 import type { SandboxError } from "../errors"
 
-export type SandboxToolChannel = "computer" | "cua"
+const LOG_PREFIX = "[sandbox]"
 
 /**
  * Runs `ensure` then `fn` for Vercel AI `tool().execute` handlers.
@@ -11,25 +11,30 @@ export type SandboxToolChannel = "computer" | "cua"
 export async function runWithEnsuredSandbox<T>(
 	ensure: Effect.Effect<Sandbox, SandboxError>,
 	fn: (sandbox: Sandbox) => Promise<T>,
-	options: { logPrefix: string; channel: SandboxToolChannel },
 ): Promise<T | string> {
+	const result = await Effect.runPromise(Effect.either(ensure))
+
+	if (result._tag === "Left") {
+		const err = result.left
+		if (err.transient) {
+			console.warn(`${LOG_PREFIX} ${err.message}`)
+			return err.message
+		} else {
+			console.error(`${LOG_PREFIX} Error: ${err.message}`)
+			if (err.stack) console.error(`${LOG_PREFIX} Stack: ${err.stack}`)
+			return `Sandbox error: ${err.message}. The sandbox may be temporarily unavailable. Try again in a moment.`
+		}
+	}
+
 	try {
-		const instance = await Effect.runPromise(ensure)
-		return await fn(instance)
+		return await fn(result.right)
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
 		const detail = err instanceof Error && err.cause ? ` | cause: ${err.cause}` : ""
-		console.error(`[${options.logPrefix}] Error: ${message}${detail}`)
-		if (options.channel === "computer" && err instanceof Error && err.stack) {
-			console.error(`[${options.logPrefix}] Stack: ${err.stack}`)
+		console.error(`${LOG_PREFIX} Error: ${message}${detail}`)
+		if (err instanceof Error && err.stack) {
+			console.error(`${LOG_PREFIX} Stack: ${err.stack}`)
 		}
-		if (message.includes("not configured")) {
-			return options.channel === "computer"
-				? "Computer access is not available — DAYTONA_API_KEY is not configured. Let the user know they can enable sandbox features by setting up a Daytona API key in their .env file (sign up at https://app.daytona.io)."
-				: "Computer access is not available — DAYTONA_API_KEY is not configured."
-		}
-		return options.channel === "computer"
-			? `Sandbox error: ${message}. The sandbox may be temporarily unavailable. Try again in a moment.`
-			: `CUA error: ${message}. Try again in a moment.`
+		return `Sandbox error: ${message}. The sandbox may be temporarily unavailable. Try again in a moment.`
 	}
 }

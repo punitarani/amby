@@ -1,96 +1,142 @@
 import type { Database } from "@amby/db"
-import { and, eq, schema } from "@amby/db"
+import { and, eq, ne, schema } from "@amby/db"
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
 import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
 import { Effect } from "effect"
 import {
-	SANDBOX_CREATE_TIMEOUT,
-	SANDBOX_START_TIMEOUT,
 	sandboxName,
+	VOLUME_CODEX_HOME,
+	VOLUME_DESKTOP_DIR,
+	VOLUME_DOCUMENTS_DIR,
+	VOLUME_DOWNLOADS_DIR,
 	VOLUME_MOUNT_PATH,
+	VOLUME_TASK_BASE,
 	volumeName,
 } from "../config"
 import { SandboxError, VolumeError } from "../errors"
 import {
-	buildSandboxCreateParams,
 	inferDbStatusFromSandbox,
-	isDuplicateSandboxNameError,
 	type SandboxDbStatus,
-	startSandboxIfNeeded,
 	tryGetSandboxByName,
+	waitForSandboxStarted,
 } from "./resolve-sandbox"
 
 type VolumeRow = typeof schema.userVolumes.$inferSelect
+type DaytonaVolume = Awaited<ReturnType<Daytona["volume"]["get"]>>
 
-// ── Volume lifecycle ────────────────────────────────────────────────────
+const ENV_SETUP_MESSAGE =
+	"Your computer environment is still being set up. Storage provisioning can take a few minutes, so please try again shortly."
+const SANDBOX_START_MESSAGE =
+	"Your computer is starting up. This usually takes a minute or two; please try again shortly."
+const DEFAULT_VOLUME_READY_TIMEOUT_MS = 20 * 60 * 1000
+const DEFAULT_VOLUME_POLL_INTERVAL_MS = 1_000
+const DEFAULT_SANDBOX_POLL_INTERVAL_MS = 1_000
 
-/**
- * Ensure a persistent volume exists for the user.
- * Creates the volume in Daytona (auto-create via `get`) and upserts the DB row.
- */
+const MOUNTED_HOME_DIRS = [
+	VOLUME_MOUNT_PATH,
+	VOLUME_DESKTOP_DIR,
+	VOLUME_DOCUMENTS_DIR,
+	VOLUME_DOWNLOADS_DIR,
+	VOLUME_CODEX_HOME,
+	VOLUME_TASK_BASE,
+]
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function mapVolumeStateToDbStatus(state: string): VolumeRow["status"] {
+	if (state === "ready") return "ready"
+	if (
+		state === "creating" ||
+		state === "pending_create" ||
+		state === "deleting" ||
+		state === "pending_delete"
+	) {
+		return "creating"
+	}
+	if (state === "deleted") return "deleted"
+	return "error"
+}
+
+function isVolumeReady(status: VolumeRow["status"]): boolean {
+	return status === "ready"
+}
+
+function isVolumeProvisioning(status: VolumeRow["status"]): boolean {
+	return status === "creating"
+}
+
+function isVolumeUnavailable(status: VolumeRow["status"]): boolean {
+	return status === "error" || status === "deleted"
+}
+
+async function tryGetVolumeByName(daytona: Daytona, name: string): Promise<DaytonaVolume | null> {
+	try {
+		return await daytona.volume.get(name)
+	} catch (cause) {
+		if (cause instanceof DaytonaNotFoundError) return null
+		if (cause instanceof DaytonaError && cause.statusCode === 404) return null
+		throw cause
+	}
+}
+
+async function safeDeleteVolume(daytona: Daytona, volume: DaytonaVolume): Promise<void> {
+	try {
+		await daytona.volume.delete(volume)
+	} catch (cause) {
+		if (cause instanceof DaytonaNotFoundError) return
+		if (cause instanceof DaytonaError && cause.statusCode === 404) return
+		throw cause
+	}
+}
+
+async function getOrCreateVolume(daytona: Daytona, name: string): Promise<DaytonaVolume> {
+	const existing = await tryGetVolumeByName(daytona, name)
+	if (existing) return existing
+	return await daytona.volume.create(name)
+}
+
+async function upsertVolumeRow(
+	db: Database,
+	userId: string,
+	daytonaVolumeId: string,
+	status: VolumeRow["status"],
+): Promise<VolumeRow> {
+	const rows = await db
+		.insert(schema.userVolumes)
+		.values({
+			userId,
+			daytonaVolumeId,
+			status,
+		})
+		.onConflictDoUpdate({
+			target: schema.userVolumes.userId,
+			set: {
+				daytonaVolumeId,
+				status,
+				updatedAt: new Date(),
+			},
+		})
+		.returning()
+
+	const row = rows[0]
+	if (!row) {
+		throw new Error(`Failed to upsert volume row for user ${userId}.`)
+	}
+	return row
+}
+
 export async function ensureVolume(
 	daytona: Daytona,
 	db: Database,
 	userId: string,
 	isDev: boolean,
 ): Promise<VolumeRow> {
-	const existing = await db
-		.select()
-		.from(schema.userVolumes)
-		.where(eq(schema.userVolumes.userId, userId))
-		.limit(1)
-		.then((rows) => rows[0])
-
-	if (existing?.status === "ready") {
-		try {
-			await daytona.volume.get(existing.daytonaVolumeId)
-			return existing
-		} catch (cause) {
-			// Only fall through to re-create on 404; propagate transient errors
-			if (cause instanceof DaytonaNotFoundError) {
-				/* volume gone — fall through to re-create */
-			} else if (cause instanceof DaytonaError && cause.statusCode === 404) {
-				/* volume gone — fall through to re-create */
-			} else {
-				throw cause
-			}
-		}
-	}
-
 	const name = volumeName(userId, isDev)
 
 	try {
-		// `get(name, true)` auto-creates if missing
-		const volume = await daytona.volume.get(name, true)
-
-		const rows = await db
-			.insert(schema.userVolumes)
-			.values({
-				userId,
-				daytonaVolumeId: volume.id,
-				status: "ready",
-			})
-			.onConflictDoUpdate({
-				target: schema.userVolumes.userId,
-				set: {
-					daytonaVolumeId: volume.id,
-					status: "ready" as const,
-					updatedAt: new Date(),
-				},
-			})
-			.returning()
-
-		// biome-ignore lint/style/noNonNullAssertion: upsert always returns a row
-		return rows[0]!
+		const volume = await getOrCreateVolume(daytona, name)
+		return await upsertVolumeRow(db, userId, volume.id, mapVolumeStateToDbStatus(volume.state))
 	} catch (cause) {
-		// Mark row as error if it exists
-		if (existing) {
-			await db
-				.update(schema.userVolumes)
-				.set({ status: "error" as const, updatedAt: new Date() })
-				.where(eq(schema.userVolumes.userId, userId))
-		}
-
 		throw new VolumeError({
 			message: `Failed to ensure volume for user ${userId}: ${cause instanceof Error ? cause.message : String(cause)}`,
 			cause,
@@ -98,9 +144,72 @@ export async function ensureVolume(
 	}
 }
 
-// ── Sandbox upsert (partial-unique-index aware) ─────────────────────────
+export async function ensureProvisionableVolume(
+	daytona: Daytona,
+	db: Database,
+	userId: string,
+	isDev: boolean,
+): Promise<VolumeRow> {
+	const name = volumeName(userId, isDev)
 
-/** Upsert the main sandbox row atomically. Works with the partial unique index on (userId, role='main'). */
+	try {
+		let volume = await tryGetVolumeByName(daytona, name)
+
+		if (volume && (volume.state === "error" || volume.state === "deleted")) {
+			await safeDeleteVolume(daytona, volume)
+			volume = null
+		}
+
+		if (!volume) {
+			volume = await daytona.volume.create(name)
+		}
+
+		return await upsertVolumeRow(db, userId, volume.id, mapVolumeStateToDbStatus(volume.state))
+	} catch (cause) {
+		throw new VolumeError({
+			message: `Failed to provision volume for user ${userId}: ${cause instanceof Error ? cause.message : String(cause)}`,
+			cause,
+		})
+	}
+}
+
+export async function waitForVolumeReady(
+	daytona: Daytona,
+	db: Database,
+	userId: string,
+	isDev: boolean,
+	options?: { timeoutMs?: number; pollIntervalMs?: number },
+): Promise<VolumeRow> {
+	const timeoutMs = options?.timeoutMs ?? DEFAULT_VOLUME_READY_TIMEOUT_MS
+	const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_VOLUME_POLL_INTERVAL_MS
+	const deadline = Date.now() + timeoutMs
+	let lastRow: VolumeRow | null = null
+
+	while (Date.now() < deadline) {
+		const row = await ensureProvisionableVolume(daytona, db, userId, isDev)
+		lastRow = row
+
+		if (isVolumeReady(row.status)) return row
+		await wait(pollIntervalMs)
+	}
+
+	throw new VolumeError({
+		message: `Timed out waiting for volume readiness for user ${userId}. Last known status: ${lastRow?.status ?? "unknown"}.`,
+	})
+}
+
+export function sandboxHasExpectedVolume(sandbox: Sandbox, daytonaVolumeId: string): boolean {
+	return (
+		sandbox.volumes?.some(
+			(volume) => volume.volumeId === daytonaVolumeId && volume.mountPath === VOLUME_MOUNT_PATH,
+		) ?? false
+	)
+}
+
+export async function ensureMountedHomeLayout(sandbox: Sandbox): Promise<void> {
+	await sandbox.process.executeCommand(`mkdir -p ${MOUNTED_HOME_DIRS.join(" ")}`)
+}
+
 export async function upsertMainSandboxRow(
 	db: Database,
 	userId: string,
@@ -108,38 +217,32 @@ export async function upsertMainSandboxRow(
 	status: SandboxDbStatus,
 	volumeId: string,
 ) {
-	await db.transaction(async (tx) => {
-		const existing = await tx
-			.select({ id: schema.sandboxes.id })
-			.from(schema.sandboxes)
-			.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
-			.limit(1)
-			.then((rows) => rows[0])
+	const now = new Date()
 
-		if (existing) {
-			await tx
-				.update(schema.sandboxes)
-				.set({
-					daytonaSandboxId,
-					status,
-					volumeId,
-					lastActivityAt: new Date(),
-					updatedAt: new Date(),
-				})
-				.where(eq(schema.sandboxes.id, existing.id))
-		} else {
-			await tx.insert(schema.sandboxes).values({
-				userId,
+	await db
+		.insert(schema.sandboxes)
+		.values({
+			userId,
+			daytonaSandboxId,
+			volumeId,
+			role: "main",
+			status,
+			lastActivityAt: now,
+			updatedAt: now,
+		})
+		.onConflictDoUpdate({
+			target: [schema.sandboxes.userId, schema.sandboxes.role],
+			targetWhere: and(eq(schema.sandboxes.role, "main"), ne(schema.sandboxes.status, "deleted")),
+			set: {
 				daytonaSandboxId,
-				status,
-				role: "main",
 				volumeId,
-			})
-		}
-	})
+				status,
+				lastActivityAt: now,
+				updatedAt: now,
+			},
+		})
 }
 
-/** Refresh metadata and persist sandbox row with volume link. */
 async function persistMainSandboxFromInstance(
 	db: Database,
 	userId: string,
@@ -148,11 +251,14 @@ async function persistMainSandboxFromInstance(
 	status?: SandboxDbStatus,
 ) {
 	await sandbox.refreshData()
-	const st = status ?? inferDbStatusFromSandbox(sandbox)
-	await upsertMainSandboxRow(db, userId, sandbox.id, st, volumeId)
+	await upsertMainSandboxRow(
+		db,
+		userId,
+		sandbox.id,
+		status ?? inferDbStatusFromSandbox(sandbox),
+		volumeId,
+	)
 }
-
-// ── Main ensure path ────────────────────────────────────────────────────
 
 export interface EnsureMainSandboxParams {
 	daytona: Daytona
@@ -162,243 +268,114 @@ export interface EnsureMainSandboxParams {
 	cache: Map<string, Sandbox>
 }
 
-/**
- * Single ensure path: volume → cache → get-by-name → create.
- * The volume is always ensured first; the sandbox is created with a volume mount.
- */
 export const ensureMainSandbox = (
 	params: EnsureMainSandboxParams,
-): Effect.Effect<Sandbox, SandboxError | VolumeError> =>
+): Effect.Effect<Sandbox, SandboxError> =>
 	Effect.gen(function* () {
 		const { daytona, db, userId, isDev, cache } = params
 		const name = sandboxName(userId, isDev)
 
-		// Step 1: ensure volume
 		const volumeRow = yield* Effect.tryPromise({
 			try: () => ensureVolume(daytona, db, userId, isDev),
 			catch: (cause) =>
-				cause instanceof VolumeError
-					? cause
-					: new VolumeError({
-							message: `Volume ensure failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
-		})
-
-		// Step 2: try cache
-		const cached = cache.get(userId)
-		if (cached) {
-			const fromCache = yield* Effect.either(
-				Effect.tryPromise({
-					try: async () => {
-						await cached.refreshData()
-						if (cached.state === "started") return cached as Sandbox | null
-						if (cached.state === "stopped" || cached.state === "error") {
-							await cached.start(SANDBOX_START_TIMEOUT)
-							await persistMainSandboxFromInstance(db, userId, cached, volumeRow.id, "running")
-							return cached as Sandbox | null
-						}
-						return null
-					},
-					catch: () => new SandboxError({ message: "Cache refresh failed" }),
-				}),
-			)
-			if (fromCache._tag === "Right" && fromCache.right) return fromCache.right
-			cache.delete(userId)
-		}
-
-		// Step 3: try get-by-name from Daytona
-		const existing = yield* Effect.tryPromise({
-			try: () => tryGetSandboxByName(daytona, name),
-			catch: (cause) =>
 				new SandboxError({
-					message: `Failed to resolve sandbox by name: ${cause instanceof Error ? cause.message : String(cause)}`,
+					message: `Failed to resolve volume record: ${cause instanceof Error ? cause.message : String(cause)}`,
 					cause,
 				}),
 		})
-		if (existing) {
-			yield* Effect.tryPromise({
+
+		const adoptSandbox = async (sandbox: Sandbox) => {
+			const readySandbox = await waitForSandboxStarted(sandbox, {
+				pollIntervalMs: DEFAULT_SANDBOX_POLL_INTERVAL_MS,
+			})
+			await ensureMountedHomeLayout(readySandbox)
+			cache.set(userId, readySandbox)
+			await persistMainSandboxFromInstance(db, userId, readySandbox, volumeRow.id, "running")
+			return readySandbox
+		}
+
+		if (isVolumeReady(volumeRow.status)) {
+			const cached = cache.get(userId)
+			if (cached) {
+				const fromCache = yield* Effect.either(
+					Effect.tryPromise({
+						try: async () => {
+							await cached.refreshData()
+							if (!sandboxHasExpectedVolume(cached, volumeRow.daytonaVolumeId)) return null
+							if (inferDbStatusFromSandbox(cached) === "error") return null
+							return await adoptSandbox(cached)
+						},
+						catch: () => new SandboxError({ message: "Cache refresh failed" }),
+					}),
+				)
+				if (fromCache._tag === "Right" && fromCache.right) return fromCache.right
+				cache.delete(userId)
+			}
+
+			const existing = yield* Effect.tryPromise({
 				try: async () => {
-					await startSandboxIfNeeded(existing)
-					cache.set(userId, existing)
-					await persistMainSandboxFromInstance(db, userId, existing, volumeRow.id, "running")
+					const sandbox = await tryGetSandboxByName(daytona, name)
+					if (!sandbox) return null
+					await sandbox.refreshData()
+					return sandbox
 				},
 				catch: (cause) =>
 					new SandboxError({
-						message: `Failed to start existing sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
+						message: `Failed to resolve sandbox by name: ${cause instanceof Error ? cause.message : String(cause)}`,
 						cause,
 					}),
 			})
-			return existing
+
+			if (
+				existing &&
+				sandboxHasExpectedVolume(existing, volumeRow.daytonaVolumeId) &&
+				inferDbStatusFromSandbox(existing) !== "error"
+			) {
+				return yield* Effect.tryPromise({
+					try: () => adoptSandbox(existing),
+					catch: (cause) =>
+						new SandboxError({
+							message: `Failed to start existing sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
+							cause,
+						}),
+				})
+			}
 		}
 
-		// Step 4: check DB for "creating" row — bail with user message
-		const record = yield* Effect.tryPromise({
-			try: () =>
-				db
-					.select({ status: schema.sandboxes.status })
-					.from(schema.sandboxes)
-					.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main")))
-					.limit(1)
-					.then((rows) => rows[0]),
-			catch: (cause) =>
-				new SandboxError({
-					message: `Failed to load sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
-					cause,
-				}),
-		})
-
-		if (record?.status === "creating") {
-			yield* Effect.fail(
-				new SandboxError({
-					message:
-						"Your sandbox is being set up — this usually takes a few minutes. Please try again shortly.",
-				}),
-			)
-		}
-
-		// Clear stale main sandbox DB row if present
-		if (record) {
-			yield* Effect.tryPromise({
-				try: () =>
-					db
-						.delete(schema.sandboxes)
-						.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main"))),
-				catch: (cause) =>
-					new SandboxError({
-						message: `Failed to clear stale sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
-						cause,
-					}),
-			})
-		}
-
-		// Step 5: Mark creating and create sandbox with volume mount
 		yield* Effect.tryPromise({
-			try: () => upsertMainSandboxRow(db, userId, "pending", "creating", volumeRow.id),
+			try: () =>
+				upsertMainSandboxRow(
+					db,
+					userId,
+					"pending",
+					isVolumeReady(volumeRow.status) ? "creating" : "volume_creating",
+					volumeRow.id,
+				),
 			catch: (cause) =>
 				new SandboxError({
-					message: `Failed to mark sandbox as creating: ${cause instanceof Error ? cause.message : String(cause)}`,
+					message: `Failed to update sandbox provisioning status: ${cause instanceof Error ? cause.message : String(cause)}`,
 					cause,
 				}),
 		})
 
-		const createSpec = {
-			...buildSandboxCreateParams(userId, isDev),
-			volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
-		}
-
-		const sandbox = yield* Effect.tryPromise({
-			try: async () => {
-				try {
-					const s = await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
-					cache.set(userId, s)
-					await persistMainSandboxFromInstance(db, userId, s, volumeRow.id, "running")
-					return s
-				} catch (cause) {
-					if (isDuplicateSandboxNameError(cause)) {
-						const recovered = await tryGetSandboxByName(daytona, name)
-						if (recovered) {
-							await startSandboxIfNeeded(recovered)
-							cache.set(userId, recovered)
-							await persistMainSandboxFromInstance(db, userId, recovered, volumeRow.id, "running")
-							return recovered
-						}
-					}
-					await upsertMainSandboxRow(db, userId, "pending", "error", volumeRow.id)
-					throw cause
-				}
-			},
-			catch: (cause) =>
-				cause instanceof SandboxError
-					? cause
-					: new SandboxError({
-							message: `Failed to ensure sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
-		})
-
-		return sandbox
-	})
-
-// ── Replace sandbox ─────────────────────────────────────────────────────
-
-export interface ReplaceSandboxParams {
-	daytona: Daytona
-	db: Database
-	userId: string
-	failedName: string
-	volumeRow: VolumeRow
-	isDev: boolean
-	cache: Map<string, Sandbox>
-}
-
-/**
- * Delete a broken sandbox and create a new one on the same volume.
- * Used when a sandbox is in an unrecoverable error state.
- */
-export const replaceSandbox = (
-	params: ReplaceSandboxParams,
-): Effect.Effect<Sandbox, SandboxError> =>
-	Effect.gen(function* () {
-		const { daytona, db, userId, failedName, volumeRow, isDev, cache } = params
-
-		// Best-effort delete failed sandbox from Daytona (ignore 404)
-		yield* Effect.either(
-			Effect.tryPromise({
-				try: async () => {
-					const failed = await tryGetSandboxByName(daytona, failedName)
-					if (failed) await daytona.delete(failed)
-				},
-				catch: () => new SandboxError({ message: "Failed to delete failed sandbox" }),
+		return yield* Effect.fail(
+			new SandboxError({
+				message:
+					isVolumeProvisioning(volumeRow.status) || isVolumeUnavailable(volumeRow.status)
+						? ENV_SETUP_MESSAGE
+						: SANDBOX_START_MESSAGE,
+				transient: true,
 			}),
 		)
-
-		// Delete main sandbox DB row (preserve secondary sandboxes)
-		yield* Effect.tryPromise({
-			try: () =>
-				db
-					.delete(schema.sandboxes)
-					.where(and(eq(schema.sandboxes.userId, userId), eq(schema.sandboxes.role, "main"))),
-			catch: (cause) =>
-				new SandboxError({
-					message: `Failed to clear sandbox record: ${cause instanceof Error ? cause.message : String(cause)}`,
-					cause,
-				}),
-		})
-
-		// Create new sandbox with same volume mount
-		const createSpec = {
-			...buildSandboxCreateParams(userId, isDev),
-			volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
-		}
-
-		const sandbox = yield* Effect.tryPromise({
-			try: async () => {
-				try {
-					return await daytona.create(createSpec, { timeout: SANDBOX_CREATE_TIMEOUT })
-				} catch (cause) {
-					await upsertMainSandboxRow(db, userId, "pending", "error", volumeRow.id)
-					throw cause
-				}
-			},
-			catch: (cause) =>
-				cause instanceof SandboxError
-					? cause
-					: new SandboxError({
-							message: `Failed to create replacement sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
-							cause,
-						}),
-		})
-
-		cache.set(userId, sandbox)
-		yield* Effect.tryPromise({
-			try: () => persistMainSandboxFromInstance(db, userId, sandbox, volumeRow.id, "running"),
-			catch: (cause) =>
-				new SandboxError({
-					message: `Failed to persist replacement sandbox: ${cause instanceof Error ? cause.message : String(cause)}`,
-					cause,
-				}),
-		})
-
-		return sandbox
 	})
+
+export async function getMainVolumeRow(db: Database, userId: string): Promise<VolumeRow | null> {
+	return (
+		(await db
+			.select()
+			.from(schema.userVolumes)
+			.where(eq(schema.userVolumes.userId, userId))
+			.limit(1)
+			.then((rows) => rows[0])) ?? null
+	)
+}

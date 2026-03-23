@@ -3,6 +3,7 @@ import { createMemoryState } from "@chat-adapter/state-memory"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import * as Sentry from "@sentry/cloudflare"
 import { Chat } from "chat"
+import { Effect } from "effect"
 import { makeRuntimeForConsumer } from "../queue/runtime"
 import { setTelegramScope } from "../sentry"
 import type { TelegramFrom } from "./utils"
@@ -80,11 +81,19 @@ async function routeIncomingMessage(
 			await runtime.runPromise(
 				handleCommand(parsedCommand, from, chatId, {
 					sandboxWorkflow: env.SANDBOX_WORKFLOW,
-				}),
+				}).pipe(
+					Effect.catchAllCause((cause) =>
+						Effect.sync(() => {
+							const err = cause.toJSON?.() ?? cause
+							Sentry.captureException(err)
+							console.error(
+								`[ChatSDK] Command ${parsedCommand.rawText} failed for chat ${chatId}:`,
+								err,
+							)
+						}),
+					),
+				),
 			)
-		} catch (err) {
-			Sentry.captureException(err)
-			console.error(`[ChatSDK] Command ${parsedCommand.rawText} failed for chat ${chatId}:`, err)
 		} finally {
 			await runtime.dispose()
 		}

@@ -4,18 +4,26 @@
 
 export const AGENT_HOME = "/home/agent"
 
-// Standard Mac-like user directories (all on the persistent volume)
+// Hidden mount root for the persistent volume. User-facing paths are symlinked into it.
+export const VOLUME_MOUNT_PATH = `${AGENT_HOME}/.persist`
+
+// Standard Mac-like user directories (all persisted via symlinks into the volume)
 export const DESKTOP_DIR = `${AGENT_HOME}/Desktop`
 export const DOCUMENTS_DIR = `${AGENT_HOME}/Documents`
 export const DOWNLOADS_DIR = `${AGENT_HOME}/Downloads`
+export const VOLUME_DESKTOP_DIR = `${VOLUME_MOUNT_PATH}/Desktop`
+export const VOLUME_DOCUMENTS_DIR = `${VOLUME_MOUNT_PATH}/Documents`
+export const VOLUME_DOWNLOADS_DIR = `${VOLUME_MOUNT_PATH}/Downloads`
 
-/** Default working directory — agent operates on the Desktop by default */
-export const AGENT_WORKDIR = DESKTOP_DIR
+/** Default working directory — keep this outside the mounted volume so first boot always works. */
+export const AGENT_WORKDIR = AGENT_HOME
 
-/** Internal task working dirs — hidden to keep Desktop clean */
+/** Internal task working dirs — hidden to keep Desktop clean and persisted via symlink. */
 export const TASK_BASE = `${AGENT_HOME}/.tasks`
+export const VOLUME_TASK_BASE = `${VOLUME_MOUNT_PATH}/.tasks`
 
 export const CODEX_HOME = `${AGENT_HOME}/.codex`
+export const VOLUME_CODEX_HOME = `${VOLUME_MOUNT_PATH}/.codex`
 export const MANIFEST_PATH = "/.amby/harnesses.json"
 export const CUA_LOCK_PATH = "/tmp/amby-cua.lock"
 
@@ -66,7 +74,6 @@ export { COMPUTER_SNAPSHOT } from "./computer-snapshot"
 
 // ── Volume ─────────────────────────────────────────────────────────────
 
-export const VOLUME_MOUNT_PATH = AGENT_HOME
 export const volumeName = (userId: string, isDev: boolean) =>
 	`amby-vol-${userId}${isDev ? "-dev" : ""}`
 

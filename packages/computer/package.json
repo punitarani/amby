@@ -16,7 +16,7 @@
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/connectors": "workspace:*",
-		"@daytonaio/sdk": "^0.151.0"
+		"@daytonaio/sdk": "^0.153.0"
 	},
 	"peerDependencies": {
 		"ai": "^6.0.116",

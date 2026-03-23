@@ -11,7 +11,14 @@ import {
 	sandboxName,
 } from "../config"
 
-export type SandboxDbStatus = "creating" | "running" | "stopped" | "archived" | "error"
+export type SandboxDbStatus =
+	| "volume_creating"
+	| "creating"
+	| "running"
+	| "stopped"
+	| "archived"
+	| "error"
+	| "deleted"
 
 /** Snapshot-based spec passed to `daytona.create` — shared by SandboxService and provision workflow */
 export function buildSandboxCreateParams(userId: string, isDev: boolean) {
@@ -25,6 +32,11 @@ export function buildSandboxCreateParams(userId: string, isDev: boolean) {
 		user: AGENT_USER,
 	}
 }
+
+const DEFAULT_SANDBOX_READY_TIMEOUT_MS = 10 * 60 * 1000
+const DEFAULT_SANDBOX_POLL_INTERVAL_MS = 1_000
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function isDuplicateSandboxNameError(cause: unknown): boolean {
 	const msg = cause instanceof Error ? cause.message : String(cause)
@@ -57,4 +69,33 @@ export async function startSandboxIfNeeded(sandbox: Sandbox): Promise<void> {
 	await sandbox.refreshData()
 	if (sandbox.state === "started") return
 	await sandbox.start(SANDBOX_START_TIMEOUT)
+}
+
+export async function waitForSandboxStarted(
+	sandbox: Sandbox,
+	options?: { timeoutMs?: number; pollIntervalMs?: number },
+): Promise<Sandbox> {
+	const timeoutMs = options?.timeoutMs ?? DEFAULT_SANDBOX_READY_TIMEOUT_MS
+	const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_SANDBOX_POLL_INTERVAL_MS
+	const deadline = Date.now() + timeoutMs
+
+	while (Date.now() < deadline) {
+		await sandbox.refreshData()
+
+		if (sandbox.state === "started") return sandbox
+
+		if (sandbox.state === "stopped" || sandbox.state === "archived") {
+			await sandbox.start(SANDBOX_START_TIMEOUT)
+			await wait(pollIntervalMs)
+			continue
+		}
+
+		if (sandbox.state === "error" || sandbox.state === "build_failed") {
+			throw new Error(`Sandbox entered ${sandbox.state} while waiting to start.`)
+		}
+
+		await wait(pollIntervalMs)
+	}
+
+	throw new Error(`Timed out waiting for sandbox ${sandbox.id} to reach started state.`)
 }
