@@ -9,12 +9,16 @@ import { runWithEnsuredSandbox } from "./tool-run"
 type SandboxOps = Context.Tag.Service<typeof SandboxService>
 
 const READ_ONLY_BLOCKLIST = [
-	/\b(?:rm|mv|cp|mkdir|touch|chmod|chown|truncate|dd|kill|pkill|nohup)\b/,
+	/\b(?:rm|mv|cp|mkdir|touch|chmod|chown|truncate|dd|kill|pkill|nohup|ln)\b/,
 	/\bsed\s+-i\b/,
 	/\bgit\s+(?:add|commit|reset|checkout|restore|clean|merge|rebase|pull|push)\b/,
 	/\b(?:npm|pnpm|yarn|bun)\s+(?:install|add|remove|update|upgrade)\b/,
 	/(^|[^\w])>/,
 	/\|\s*tee\b/,
+	/\|\s*(?:sh|bash|zsh|dash)\b/,
+	/\b(?:bash|sh|zsh)\s+-c\b/,
+	/\beval\b/,
+	/\bpython[23]?\s+-c\b/,
 ]
 
 function assertReadOnlyCommand(command: string) {

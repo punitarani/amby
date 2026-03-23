@@ -458,7 +458,8 @@ export async function buildExecutionPlan(params: {
 			].join("\n\n"),
 		})
 		return rewritePlanTaskIds(object as unknown as ExecutionPlan)
-	} catch {
+	} catch (error) {
+		console.warn("[planner] model planner failed, falling back to heuristic plan:", error)
 		return rewritePlanTaskIds(heuristicPlan)
 	}
 }

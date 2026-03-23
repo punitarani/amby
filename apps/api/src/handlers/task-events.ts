@@ -255,7 +255,10 @@ export const handleTaskEventPost = (request: Request) =>
 							message: body.message ?? null,
 							exitCode: body.exitCode ?? null,
 						}),
-					catch: () => undefined,
+					catch: (error) => {
+						console.error("[task-events] failed to append trace terminal event:", error)
+						return undefined
+					},
 				})
 			}
 		}
