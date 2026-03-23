@@ -4,13 +4,13 @@ import type { BrowserWorker } from "@cloudflare/playwright"
 import { Effect, Layer } from "effect"
 import { createWorkersAI } from "workers-ai-provider"
 import {
-	buildBrowserSummary,
 	BrowserError,
 	BrowserService,
 	type BrowserTaskInput,
 	type BrowserTaskPage,
 	type BrowserTaskResult,
 	type BrowserTaskStatus,
+	buildBrowserSummary,
 	DEFAULT_BROWSER_MAX_STEPS,
 	isBrowserEscalationSignal,
 	summarizePageArtifact,
@@ -107,7 +107,9 @@ function buildBrowserInstruction(input: BrowserTaskInput): string {
 	parts.push(`Side effect level: ${input.sideEffectLevel}.`)
 
 	if (input.sideEffectLevel === "read") {
-		parts.push("Prefer read-only page inspection. If the task cannot be completed without writes, return escalate.")
+		parts.push(
+			"Prefer read-only page inspection. If the task cannot be completed without writes, return escalate.",
+		)
 	}
 
 	if (input.sideEffectLevel === "hard-write") {
@@ -225,7 +227,11 @@ async function runBrowserTask(
 					extraction && typeof extraction === "object" && "data" in extraction
 						? ((extraction as { data?: unknown }).data as BrowserTaskResult["output"])
 						: (extraction as BrowserTaskResult["output"])
-				const summary = summarizeText("extract", pageInfo, "Structured data extracted from the page.")
+				const summary = summarizeText(
+					"extract",
+					pageInfo,
+					"Structured data extracted from the page.",
+				)
 
 				return {
 					status: "completed",
@@ -263,7 +269,9 @@ async function runBrowserTask(
 					status: escalated ? "escalate" : result.success === false ? "partial" : "completed",
 					summary,
 					page: pageInfo,
-					actions: Array.isArray(result.actions) ? (result.actions as BrowserTaskResult["actions"]) : [],
+					actions: Array.isArray(result.actions)
+						? (result.actions as BrowserTaskResult["actions"])
+						: [],
 					artifacts: summarizePageArtifact(pageInfo),
 					issues: result.success === false ? [summary] : [],
 					metrics: {
@@ -335,11 +343,15 @@ async function runBrowserTask(
 					summary,
 					page: pageInfo,
 					output,
-					actions: Array.isArray(result.actions) ? (result.actions as BrowserTaskResult["actions"]) : [],
+					actions: Array.isArray(result.actions)
+						? (result.actions as BrowserTaskResult["actions"])
+						: [],
 					artifacts: summarizePageArtifact(pageInfo),
 					issues: completed === false ? [summary, ...issues] : issues,
 					metrics: {
-						steps: Array.isArray(result.steps) ? result.steps.length : normalized.maxSteps ?? DEFAULT_BROWSER_MAX_STEPS,
+						steps: Array.isArray(result.steps)
+							? result.steps.length
+							: (normalized.maxSteps ?? DEFAULT_BROWSER_MAX_STEPS),
 						durationMs: Date.now() - startedAt,
 						...mapUsage(result.usage),
 					},
@@ -352,7 +364,10 @@ async function runBrowserTask(
 	} catch (cause) {
 		const message = cause instanceof Error ? cause.message : String(cause)
 		if (isBrowserEscalationSignal(message) || isBrowserEscalationSignal(cause)) {
-			const pageInfo = await resolveBrowserPageTitle(stagehand).catch(() => ({ url: null, title: null }))
+			const pageInfo = await resolveBrowserPageTitle(stagehand).catch(() => ({
+				url: null,
+				title: null,
+			}))
 			return {
 				status: "escalate",
 				summary: message,

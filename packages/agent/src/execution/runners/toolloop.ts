@@ -1,10 +1,14 @@
-import { Output, stepCountIs, ToolLoopAgent, type LanguageModel, type ToolSet } from "ai"
+import { type LanguageModel, Output, stepCountIs, ToolLoopAgent, type ToolSet } from "ai"
 import { Effect } from "effect"
+import type { AgentRunConfig } from "../../types/agent"
+import type {
+	ExecutionTask,
+	ExecutionTaskResult,
+	SpecialistResultShape,
+} from "../../types/execution"
+import type { ArtifactRef, TaskIssue } from "../../types/persistence"
 import type { TraceWriter } from "../ledger"
 import { getSpecialistDefinition, resolveVisibleTools, type ToolGroups } from "../registry"
-import type { AgentRunConfig } from "../../types/agent"
-import type { ExecutionTask, ExecutionTaskResult, SpecialistResultShape } from "../../types/execution"
-import type { ArtifactRef, TaskIssue } from "../../types/persistence"
 
 function buildPrompt(task: ExecutionTask): string {
 	const parts = [
@@ -42,7 +46,7 @@ function parseIssues(value: unknown): TaskIssue[] | undefined {
 		.map((item) => ({
 			code: item.code,
 			message: item.message,
-				metadata: item.metadata as Record<string, unknown> | undefined,
+			metadata: item.metadata as Record<string, unknown> | undefined,
 		}))
 }
 
@@ -71,7 +75,11 @@ function mapOutput(task: ExecutionTask, output: unknown, traceId: string): Execu
 		parentTaskId: task.parentTaskId,
 		depth: task.depth,
 		specialist: task.specialist,
-		status: structured.requiresEscalation ? "escalate" : structured.issues?.length ? "partial" : "completed",
+		status: structured.requiresEscalation
+			? "escalate"
+			: structured.issues?.length
+				? "partial"
+				: "completed",
 		summary,
 		data: structured.data,
 		artifacts: parseArtifacts(structured.artifacts) ?? structured.artifacts,
@@ -86,7 +94,10 @@ export async function runToolloopSpecialist(params: {
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
 	trace: TraceWriter
-}): Promise<{ result: ExecutionTaskResult; toolEvents: Array<{ kind: "tool_call" | "tool_result"; payload: Record<string, unknown> }> }> {
+}): Promise<{
+	result: ExecutionTaskResult
+	toolEvents: Array<{ kind: "tool_call" | "tool_result"; payload: Record<string, unknown> }>
+}> {
 	const definition = getSpecialistDefinition(params.task.specialist)
 	const tools = resolveVisibleTools(definition, params.config, params.toolGroups)
 	const agent = new ToolLoopAgent({

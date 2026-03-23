@@ -1,7 +1,7 @@
 import type { BrowserService } from "@amby/browser"
 import { Effect } from "effect"
-import type { TraceWriter } from "../ledger"
 import type { ExecutionTask, ExecutionTaskResult } from "../../types/execution"
+import type { TraceWriter } from "../ledger"
 
 export async function runBrowserSpecialist(params: {
 	task: ExecutionTask

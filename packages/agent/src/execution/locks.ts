@@ -52,14 +52,20 @@ export function locksConflict(leftRaw: string, rightRaw: string): boolean {
 		case "sandbox-workdir":
 			return pathsOverlap(left.scope, right.scope)
 		case "integration-write":
-			return left.scope === right.scope || left.scope.startsWith(`${right.scope}:`) || right.scope.startsWith(`${left.scope}:`)
+			return (
+				left.scope === right.scope ||
+				left.scope.startsWith(`${right.scope}:`) ||
+				right.scope.startsWith(`${left.scope}:`)
+			)
 		default:
 			return left.scope === right.scope
 	}
 }
 
 function taskConflicts(task: ExecutionTask, activeLocks: string[]): boolean {
-	return task.resourceLocks.some((lock) => activeLocks.some((active) => locksConflict(lock, active)))
+	return task.resourceLocks.some((lock) =>
+		activeLocks.some((active) => locksConflict(lock, active)),
+	)
 }
 
 export function buildReadyBatch(

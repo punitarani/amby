@@ -8,7 +8,12 @@ import {
 	timestamp,
 	uuid,
 } from "drizzle-orm/pg-core"
-import { conversationThreads, conversations, type RunnerKind, type SpecialistKind } from "./conversations"
+import {
+	conversations,
+	conversationThreads,
+	type RunnerKind,
+	type SpecialistKind,
+} from "./conversations"
 import { users } from "./users"
 
 export type TaskStatus =
@@ -41,8 +46,9 @@ export const tasks = pgTable(
 		input: jsonb("input").$type<unknown>(),
 		output: jsonb("output").$type<unknown>(),
 		artifacts: jsonb("artifacts").$type<unknown>(),
-		confirmationState: text("confirmation_state")
-			.$type<"not_required" | "required" | "confirmed" | "rejected">(),
+		confirmationState: text("confirmation_state").$type<
+			"not_required" | "required" | "confirmed" | "rejected"
+		>(),
 		prompt: text("prompt").notNull(),
 		// Stored as text "true"/"false" because Drizzle's boolean doesn't support
 		// the .$type<>() branded-text pattern used for other enum-like columns,

@@ -1,6 +1,6 @@
+import type { RunnerKind, SpecialistKind } from "@amby/db"
 import { HIGH_INTELLIGENCE_MODEL_ID } from "@amby/models"
 import type { FlexibleSchema, ToolSet } from "ai"
-import type { RunnerKind, SpecialistKind } from "@amby/db"
 import { buildSpecialistPrompt } from "../specialists/prompts"
 import {
 	browserTaskInputSchema,
@@ -30,10 +30,8 @@ const defaultModel = (config: AgentRunConfig) => config.modelPolicy.defaultModel
 const highReasoningModel = (config: AgentRunConfig) =>
 	config.modelPolicy.highReasoningModelId ?? HIGH_INTELLIGENCE_MODEL_ID
 
-const getBudget =
-	(kind: SpecialistKind, fallback: number) =>
-	(config: AgentRunConfig) =>
-		config.budgets.maxSubagentStepsByKind[kind] ?? fallback
+const getBudget = (kind: SpecialistKind, fallback: number) => (config: AgentRunConfig) =>
+	config.budgets.maxSubagentStepsByKind[kind] ?? fallback
 
 function specialist(
 	kind: SpecialistKind,
@@ -122,7 +120,10 @@ export function resolveVisibleTools(
 		).filter((group) => {
 			if (group === "integration" && !config.runtime.integrationEnabled) return false
 			if (group === "cua" && !config.runtime.cuaEnabled) return false
-			if ((group === "sandbox-read" || group === "sandbox-write") && !config.runtime.sandboxEnabled) {
+			if (
+				(group === "sandbox-read" || group === "sandbox-write") &&
+				!config.runtime.sandboxEnabled
+			) {
 				return false
 			}
 			return true

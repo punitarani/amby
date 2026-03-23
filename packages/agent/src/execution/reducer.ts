@@ -11,12 +11,17 @@ function collectBackgroundTasks(tasks: ExecutionTaskResult[]): Array<{
 	traceId: string
 	status: TaskStatus
 }> {
-	return tasks
-		.flatMap((task) =>
-			task.backgroundRef
-				? [{ taskId: task.backgroundRef.taskId, traceId: task.backgroundRef.traceId, status: "running" as const }]
-				: [],
-		)
+	return tasks.flatMap((task) =>
+		task.backgroundRef
+			? [
+					{
+						taskId: task.backgroundRef.taskId,
+						traceId: task.backgroundRef.traceId,
+						status: "running" as const,
+					},
+				]
+			: [],
+	)
 }
 
 export function buildExecutionSummary(params: {
@@ -29,7 +34,9 @@ export function buildExecutionSummary(params: {
 		: params.taskResults
 
 	const hasFailure = allTasks.some((task) => task.status === "failed")
-	const hasPartial = allTasks.some((task) => task.status === "partial" || task.status === "escalate")
+	const hasPartial = allTasks.some(
+		(task) => task.status === "partial" || task.status === "escalate",
+	)
 	const status = hasFailure ? "failed" : hasPartial ? "partial" : "completed"
 
 	const sideEffects = {
@@ -40,7 +47,9 @@ export function buildExecutionSummary(params: {
 				return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []
 			}),
 		scheduledJobs: allTasks
-			.filter((task) => task.specialist === "settings" && task.data && typeof task.data === "object")
+			.filter(
+				(task) => task.specialist === "settings" && task.data && typeof task.data === "object",
+			)
 			.flatMap((task) => {
 				const ids = (task.data as Record<string, unknown>).scheduledJobIds
 				return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []

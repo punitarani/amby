@@ -2,19 +2,19 @@ import { BrowserService } from "@amby/browser"
 import type { Platform } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
 import { ConnectorsService, createConnectorManagementTools } from "@amby/connectors"
-import { DbService, eq, schema } from "@amby/db"
+import { DbService, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { createMemoryTools, MemoryService } from "@amby/memory"
 import { HIGH_INTELLIGENCE_MODEL_ID, ModelService } from "@amby/models"
-import { stepCountIs, tool, ToolLoopAgent, type ToolSet } from "ai"
+import { stepCountIs, ToolLoopAgent, type ToolSet, tool } from "ai"
 import { Context, Effect, Layer } from "effect"
 import { z } from "zod"
 import { prepareConversationContext } from "./context/builder"
+import { AgentError } from "./errors"
 import { executeRequestPlan } from "./execution/coordinator"
 import { createRootTrace, type TraceWriter } from "./execution/ledger"
 import { queryExecution } from "./execution/query-execution"
 import type { ToolGroups } from "./execution/registry"
-import { AgentError } from "./errors"
 import { type ResolveThreadResult, resolveThread } from "./router"
 import {
 	synopsisCurrentThreadIfOverflowsAfterSave,
@@ -30,7 +30,12 @@ const CONVERSATION_MAX_STEPS = 8
 function toErrorMessage(error: unknown): string {
 	if (error instanceof AgentError) return error.message
 	if (error instanceof Error) return error.message
-	if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
+	if (
+		typeof error === "object" &&
+		error !== null &&
+		"message" in error &&
+		typeof error.message === "string"
+	) {
 		return error.message
 	}
 	return String(error)
@@ -128,7 +133,10 @@ function buildExecutionToolSummary(
 	if ("executions" in result) {
 		if (result.executions.length === 0) return "No matching background executions found."
 		return result.executions
-			.map((execution) => `${execution.taskId}: ${execution.status}${execution.summary ? ` — ${execution.summary}` : ""}`)
+			.map(
+				(execution) =>
+					`${execution.taskId}: ${execution.status}${execution.summary ? ` — ${execution.summary}` : ""}`,
+			)
 			.join("\n")
 	}
 
@@ -149,7 +157,8 @@ function buildConversationPrepareStep() {
 	return ({ steps }: { steps: Array<{ toolCalls: Array<{ toolName: string }> }> }) => {
 		const usedExecutionBoundary = steps.some((step) =>
 			step.toolCalls.some(
-				(toolCall) => toolCall.toolName === "execute_plan" || toolCall.toolName === "query_execution",
+				(toolCall) =>
+					toolCall.toolName === "execute_plan" || toolCall.toolName === "query_execution",
 			),
 		)
 		if (usedExecutionBoundary) {
@@ -161,12 +170,15 @@ function buildConversationPrepareStep() {
 	}
 }
 
-async function flushConversationToolEvents(result: {
-	steps?: Array<{
-		toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown }>
-		toolResults: Array<{ toolCallId: string; toolName: string; output: unknown }>
-	}>
-}, trace: TraceWriter) {
+async function flushConversationToolEvents(
+	result: {
+		steps?: Array<{
+			toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown }>
+			toolResults: Array<{ toolCallId: string; toolName: string; output: unknown }>
+		}>
+	},
+	trace: TraceWriter,
+) {
 	const events = (result.steps ?? []).flatMap((step) => [
 		...step.toolCalls.map((toolCall) => ({
 			kind: "tool_call" as const,
@@ -289,8 +301,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				onPart?: (part: StreamPart) => void
 			}) => {
 				let rootTraceRef: TraceWriter | undefined
-				return (
-				Effect.gen(function* () {
+				return Effect.gen(function* () {
 					const inboundText = requestMessages.map((message) => message.content).join("\n\n")
 					const threadCtx = yield* resolveThread(query, conversationId, inboundText, baseModel)
 
@@ -308,16 +319,16 @@ export const makeAgentServiceLive = (userId: string) =>
 						userId,
 						conversationId,
 						threadId: threadCtx.threadId,
-							mode,
-							modelId: models.defaultModelId,
-							userTimezone: prepared.userTimezone,
+						mode,
+						modelId: models.defaultModelId,
+						userTimezone: prepared.userTimezone,
 						sharedPromptContext: prepared.sharedPromptContext,
-							runtime: {
-								sandboxEnabled: sandbox.enabled,
-								cuaEnabled: env.ENABLE_CUA && sandbox.enabled,
-								integrationEnabled: connectors.isEnabled(),
-								streamingEnabled: Boolean(onPart || onTextDelta),
-								browserEnabled: browserService.enabled,
+						runtime: {
+							sandboxEnabled: sandbox.enabled,
+							cuaEnabled: env.ENABLE_CUA && sandbox.enabled,
+							integrationEnabled: connectors.isEnabled(),
+							streamingEnabled: Boolean(onPart || onTextDelta),
+							browserEnabled: browserService.enabled,
 						},
 					})
 
@@ -336,24 +347,17 @@ export const makeAgentServiceLive = (userId: string) =>
 						...createJobTools(db, userId, prepared.userTimezone),
 						...(sandbox.enabled ? createCodexAuthTools(taskSupervisor, userId) : {}),
 					}
-					const integrationTools =
-						connectors.isEnabled()
-							? ({
-									...(createConnectorManagementTools(connectors, userId) ?? {}),
-									...((yield* connectors.getAgentTools(userId).pipe(
-										Effect.catchAll(() => Effect.succeed(undefined)),
-									)) ?? {}),
-								} as ToolSet)
-							: undefined
-					const cuaTools =
-						config.runtime.cuaEnabled
-							? createCuaTools(
-									sandbox,
-									userId,
-									conversationId,
-									computer.getSandbox,
-								).tools
-							: undefined
+					const integrationTools = connectors.isEnabled()
+						? ({
+								...(createConnectorManagementTools(connectors, userId) ?? {}),
+								...((yield* connectors
+									.getAgentTools(userId)
+									.pipe(Effect.catchAll(() => Effect.succeed(undefined)))) ?? {}),
+							} as ToolSet)
+						: undefined
+					const cuaTools = config.runtime.cuaEnabled
+						? createCuaTools(sandbox, userId, conversationId, computer.getSandbox).tools
+						: undefined
 
 					const toolGroups: ToolGroups = {
 						"memory-read": { search_memories: memoryTools.search_memories },
@@ -383,7 +387,9 @@ export const makeAgentServiceLive = (userId: string) =>
 								})
 								.strict(),
 							async execute({ request, context }) {
-								const composed = context?.trim() ? `${request}\n\nAdditional context:\n${context}` : request
+								const composed = context?.trim()
+									? `${request}\n\nAdditional context:\n${context}`
+									: request
 								const summary = await executeRequestPlan({
 									request: composed,
 									query,
@@ -481,7 +487,10 @@ export const makeAgentServiceLive = (userId: string) =>
 
 					const messages = [
 						...prepared.history,
-						...requestMessages.map((message) => ({ role: "user" as const, content: message.content })),
+						...requestMessages.map((message) => ({
+							role: "user" as const,
+							content: message.content,
+						})),
 					]
 
 					const result = yield* Effect.tryPromise({
@@ -549,24 +558,23 @@ export const makeAgentServiceLive = (userId: string) =>
 						requestMessages.length + 1,
 					)
 
-					const execution =
-						state.execution
-							? {
-									mode: state.execution.mode,
-									rootTraceId: rootTrace.traceId,
-									tasks: state.execution.taskResults,
-									backgroundTasks: state.execution.backgroundTasks,
-								}
-							: {
-									mode: "direct" as const,
-									rootTraceId: rootTrace.traceId,
-									tasks: [],
-									backgroundTasks: state.queryResult?.executions.map((execution) => ({
-										taskId: execution.taskId,
-										traceId: execution.traceId ?? "",
-										status: execution.status,
-									})),
-								}
+					const execution = state.execution
+						? {
+								mode: state.execution.mode,
+								rootTraceId: rootTrace.traceId,
+								tasks: state.execution.taskResults,
+								backgroundTasks: state.execution.backgroundTasks,
+							}
+						: {
+								mode: "direct" as const,
+								rootTraceId: rootTrace.traceId,
+								tasks: [],
+								backgroundTasks: state.queryResult?.executions.map((execution) => ({
+									taskId: execution.taskId,
+									traceId: execution.traceId ?? "",
+									status: execution.status,
+								})),
+							}
 
 					const agentResult: AgentRunResult = {
 						status: state.execution?.status ?? "completed",
@@ -609,7 +617,6 @@ export const makeAgentServiceLive = (userId: string) =>
 							)
 						}),
 					),
-				)
 				)
 			}
 
@@ -671,16 +678,20 @@ export const makeAgentServiceLive = (userId: string) =>
 						Effect.mapError(
 							(cause) =>
 								new AgentError({
-									message:
-										cause instanceof Error ? cause.message : "Failed to ensure conversation",
+									message: cause instanceof Error ? cause.message : "Failed to ensure conversation",
 									cause,
 								}),
 						),
 					),
 
-				shutdown: () => taskSupervisor.shutdown().pipe(
-					Effect.mapError((cause) => new AgentError({ message: "Failed to shut down agent", cause })),
-				),
+				shutdown: () =>
+					taskSupervisor
+						.shutdown()
+						.pipe(
+							Effect.mapError(
+								(cause) => new AgentError({ message: "Failed to shut down agent", cause }),
+							),
+						),
 			}
 		}),
 	)

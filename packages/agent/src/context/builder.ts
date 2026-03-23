@@ -1,5 +1,5 @@
-import { buildMemoriesText, deduplicateMemories, type MemoryService } from "@amby/memory"
 import { eq, schema } from "@amby/db"
+import { buildMemoriesText, deduplicateMemories, type MemoryService } from "@amby/memory"
 import { Effect } from "effect"
 import {
 	formatArtifactRecap,
@@ -7,9 +7,9 @@ import {
 	loadThreadArtifacts,
 	loadThreadTail,
 } from "../context"
-import { type ResolveThreadResult } from "../router"
-import { buildConversationPrompt } from "../specialists/prompts"
 import { AgentError } from "../errors"
+import type { ResolveThreadResult } from "../router"
+import { buildConversationPrompt } from "../specialists/prompts"
 
 type QueryFn = <T>(
 	fn: (db: import("@amby/db").Database) => Promise<T>,
@@ -42,11 +42,13 @@ export function prepareConversationContext(params: {
 						.where(eq(schema.users.id, userId))
 						.limit(1),
 				),
-				memory.getProfile(userId).pipe(
-					Effect.mapError(
-						(cause) => new AgentError({ message: "Failed to load memory profile", cause }),
+				memory
+					.getProfile(userId)
+					.pipe(
+						Effect.mapError(
+							(cause) => new AgentError({ message: "Failed to load memory profile", cause }),
+						),
 					),
-				),
 			],
 			{ concurrency: 2 },
 		)

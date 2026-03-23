@@ -1,13 +1,13 @@
 import {
 	and,
-	desc,
-	eq,
-	inArray,
-	schema,
 	type Database,
 	type DbError,
+	desc,
 	type ExecutionMode,
+	eq,
+	inArray,
 	type SpecialistKind,
+	schema,
 	type TaskStatus,
 	type TraceEventKind,
 } from "@amby/db"
@@ -26,7 +26,10 @@ export type TraceWriter = {
 	setMode: (mode: ExecutionMode) => Effect.Effect<void, DbError>
 	updateMetadata: (metadata: Record<string, unknown>) => Effect.Effect<void, DbError>
 	linkMessage: (messageId?: string) => Effect.Effect<void, DbError>
-	complete: (status: "completed" | "failed", metadata?: Record<string, unknown>) => Effect.Effect<void, DbError>
+	complete: (
+		status: "completed" | "failed",
+		metadata?: Record<string, unknown>,
+	) => Effect.Effect<void, DbError>
 }
 
 type CreateTraceParams = {
@@ -67,17 +70,11 @@ function makeTraceWriter(query: QueryFn, traceId: string): TraceWriter {
 		appendMany: insertEvents,
 		setMode: (mode) =>
 			query((db) =>
-				db
-					.update(schema.traces)
-					.set({ mode })
-					.where(eq(schema.traces.id, traceId)),
+				db.update(schema.traces).set({ mode }).where(eq(schema.traces.id, traceId)),
 			).pipe(Effect.asVoid),
 		updateMetadata: (metadata) =>
 			query((db) =>
-				db
-					.update(schema.traces)
-					.set({ metadata })
-					.where(eq(schema.traces.id, traceId)),
+				db.update(schema.traces).set({ metadata }).where(eq(schema.traces.id, traceId)),
 			).pipe(Effect.asVoid),
 		linkMessage: (messageId) =>
 			query((db) =>
@@ -174,7 +171,7 @@ export function listRecentBackgroundTasks(
 	conversationId: string,
 	limit: number,
 	includeCompleted: boolean,
-): Effect.Effect<typeof schema.tasks.$inferSelect[], DbError> {
+): Effect.Effect<(typeof schema.tasks.$inferSelect)[], DbError> {
 	const nonTerminal: TaskStatus[] = ["pending", "awaiting_auth", "preparing", "running"]
 	return query((db) => {
 		const where = includeCompleted
@@ -183,7 +180,12 @@ export function listRecentBackgroundTasks(
 					eq(schema.tasks.conversationId, conversationId),
 					inArray(schema.tasks.status, nonTerminal),
 				)
-		return db.select().from(schema.tasks).where(where).orderBy(desc(schema.tasks.createdAt)).limit(limit)
+		return db
+			.select()
+			.from(schema.tasks)
+			.where(where)
+			.orderBy(desc(schema.tasks.createdAt))
+			.limit(limit)
 	})
 }
 
@@ -191,9 +193,9 @@ export function getBackgroundTaskById(
 	query: QueryFn,
 	taskId: string,
 ): Effect.Effect<typeof schema.tasks.$inferSelect | null, DbError> {
-	return query((db) => db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1)).pipe(
-		Effect.map((rows) => rows[0] ?? null),
-	)
+	return query((db) =>
+		db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1),
+	).pipe(Effect.map((rows) => rows[0] ?? null))
 }
 
 export function appendTraceLifecycleEvent(

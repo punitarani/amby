@@ -1,7 +1,7 @@
 import type { ExecutionMode, RunnerKind, SpecialistKind, TaskStatus } from "@amby/db"
 import type { BrowserTaskInput, BrowserTaskResult } from "./browser"
-import type { SettingsTaskInput } from "./settings"
 import type { ArtifactRef, JsonObject, JsonValue, TaskIssue } from "./persistence"
+import type { SettingsTaskInput } from "./settings"
 
 export type ToolGroupKey =
 	| "memory-read"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
-import { buildReadyBatch, locksConflict } from "./locks"
 import type { ExecutionTask } from "../types/execution"
+import { buildReadyBatch, locksConflict } from "./locks"
 
 function makeTask(partial: Partial<ExecutionTask> & Pick<ExecutionTask, "id">): ExecutionTask {
 	return {
@@ -36,9 +36,18 @@ describe("execution locks", () => {
 	it("batches only non-conflicting ready tasks", () => {
 		const pending = [
 			makeTask({ id: "research-a", resourceLocks: [] }),
-			makeTask({ id: "browser-a", specialist: "browser", runnerKind: "browser_service", resourceLocks: [] }),
+			makeTask({
+				id: "browser-a",
+				specialist: "browser",
+				runnerKind: "browser_service",
+				resourceLocks: [],
+			}),
 			makeTask({ id: "builder-a", specialist: "builder", resourceLocks: ["fs-write:/repo/app"] }),
-			makeTask({ id: "builder-b", specialist: "builder", resourceLocks: ["fs-write:/repo/app/src"] }),
+			makeTask({
+				id: "builder-b",
+				specialist: "builder",
+				resourceLocks: ["fs-write:/repo/app/src"],
+			}),
 			makeTask({ id: "computer-a", specialist: "computer", resourceLocks: ["computer-desktop"] }),
 		]
 

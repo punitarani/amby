@@ -18,10 +18,8 @@ CREATE INDEX "traces_runner_kind_idx" ON "traces" USING btree ("runner_kind");
 --> statement-breakpoint
 CREATE INDEX "traces_mode_idx" ON "traces" USING btree ("mode");
 --> statement-breakpoint
-
 ALTER TABLE "task_events" RENAME COLUMN "event_type" TO "kind";
 --> statement-breakpoint
-
 ALTER TABLE "tasks" ADD COLUMN "thread_id" uuid;
 --> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "trace_id" uuid;

@@ -1,11 +1,11 @@
-import { generateObject, type LanguageModel } from "ai"
 import type { SpecialistKind } from "@amby/db"
-import { getSpecialistDefinition } from "./registry"
+import { generateObject, type LanguageModel } from "ai"
 import { executionPlanSchema } from "../specialists/schemas"
 import type { AgentRunConfig } from "../types/agent"
 import type { BrowserTaskInput } from "../types/browser"
 import type { ExecutionPlan, ExecutionTaskInput, PlannedTask } from "../types/execution"
 import type { SettingsTaskInput } from "../types/settings"
+import { getSpecialistDefinition } from "./registry"
 
 type CodexAuthAction = Extract<SettingsTaskInput, { kind: "codex_auth" }>["action"]
 
@@ -16,7 +16,8 @@ type PlannerInput = {
 
 const URL_RE = /https?:\/\/[^\s)]+/g
 const INTEGRATION_RE = /\b(gmail|google calendar|calendar|notion|slack|drive|google drive)\b/i
-const SETTINGS_RE = /\b(timezone|remind|reminder|schedule|every day|every week|codex|api key|auth)\b/i
+const SETTINGS_RE =
+	/\b(timezone|remind|reminder|schedule|every day|every week|codex|api key|auth)\b/i
 const MEMORY_RE = /\b(remember this|remember that|don't forget|save this|keep this in mind)\b/i
 const COMPUTER_RE =
 	/\b(desktop|computer|upload|download|file picker|native dialog|captcha|mfa|multi-tab|popup|screenshot)\b/i
@@ -24,7 +25,8 @@ const BROWSER_RE = /\b(browser|website|web page|site|open the page|visit)\b/i
 const BUILDER_RE =
 	/\b(implement|refactor|rewrite|fix|patch|edit|modify|create file|write code|build|test)\b/i
 const RESEARCH_RE = /\b(research|investigate|look up|analyze|inspect|summarize|read|compare)\b/i
-const BACKGROUND_RE = /\b(background|autonomous|take your time|long-running|work on this over time)\b/i
+const BACKGROUND_RE =
+	/\b(background|autonomous|take your time|long-running|work on this over time)\b/i
 const HARD_WRITE_RE = /\b(send|post|submit|purchase|buy|delete|update|create event|email)\b/i
 
 function contains(text: string, pattern: RegExp) {
@@ -118,22 +120,25 @@ function createBackgroundTask(prompt: string, needsBrowser: boolean): PlannedTas
 }
 
 function browserParallelPlan(request: string, urls: string[]): ExecutionPlan {
-	const tasks = urls.map((url, index) =>
-		createBrowserTask({
-			instruction: `Open ${url} and extract the information needed for this request: ${request}`,
-			startUrl: url,
-			outputMode: "extract",
-			sideEffectLevel: "read",
-			expectedOutcome: "Return the relevant findings in structured form when possible.",
-		}),
-	).map((task, index) => ({
-		...task,
-		inputBindings: { urlIndex: index },
-	}))
+	const tasks = urls
+		.map((url) =>
+			createBrowserTask({
+				instruction: `Open ${url} and extract the information needed for this request: ${request}`,
+				startUrl: url,
+				outputMode: "extract",
+				sideEffectLevel: "read",
+				expectedOutcome: "Return the relevant findings in structured form when possible.",
+			}),
+		)
+		.map((task, index) => ({
+			...task,
+			inputBindings: { urlIndex: index },
+		}))
 
 	return {
 		strategy: "parallel",
-		rationale: "The request references multiple independent URLs that can be inspected concurrently.",
+		rationale:
+			"The request references multiple independent URLs that can be inspected concurrently.",
 		tasks,
 		reducer: "conversation",
 	}
@@ -184,7 +189,9 @@ function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 	}
 
 	if (wantsSettings) {
-		const settingsTask: { kind: "settings"; task: SettingsTaskInput } = normalized.includes("timezone")
+		const settingsTask: { kind: "settings"; task: SettingsTaskInput } = normalized.includes(
+			"timezone",
+		)
 			? {
 					kind: "settings" as const,
 					task: {
@@ -334,7 +341,9 @@ function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 					{
 						dependencies: ["task-0"],
 						resourceLocks:
-							pathHints.length > 0 ? pathHints.map((path) => `fs-write:${path}`) : ["sandbox-workdir:/"],
+							pathHints.length > 0
+								? pathHints.map((path) => `fs-write:${path}`)
+								: ["sandbox-workdir:/"],
 						mutates: true,
 						requiresValidation: true,
 					},
@@ -358,7 +367,9 @@ function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 					},
 					{
 						resourceLocks:
-							pathHints.length > 0 ? pathHints.map((path) => `fs-write:${path}`) : ["sandbox-workdir:/"],
+							pathHints.length > 0
+								? pathHints.map((path) => `fs-write:${path}`)
+								: ["sandbox-workdir:/"],
 						mutates: true,
 						requiresValidation: true,
 					},
@@ -407,13 +418,15 @@ function shouldUseModelPlanner(request: string, heuristicPlan: ExecutionPlan) {
 function rewritePlanTaskIds(plan: ExecutionPlan): ExecutionPlan {
 	return {
 		...plan,
-		tasks: plan.tasks.map((task, index) => {
+		tasks: plan.tasks.map((task) => {
 			const dependencyMap = new Map(
 				plan.tasks.map((_, sourceIndex) => [`task-${sourceIndex}`, `task-${sourceIndex}`]),
 			)
 			return {
 				...task,
-				dependencies: task.dependencies.map((dependency) => dependencyMap.get(dependency) ?? dependency),
+				dependencies: task.dependencies.map(
+					(dependency) => dependencyMap.get(dependency) ?? dependency,
+				),
 			}
 		}),
 	}

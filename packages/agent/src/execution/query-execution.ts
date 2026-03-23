@@ -10,7 +10,9 @@ function parseArtifacts(value: unknown): QueryExecutionResult["executions"][numb
 	if (!Array.isArray(value)) return undefined
 	return value.filter(
 		(item): item is { kind: string; title?: string; uri?: string } =>
-			typeof item === "object" && item !== null && typeof (item as { kind?: unknown }).kind === "string",
+			typeof item === "object" &&
+			item !== null &&
+			typeof (item as { kind?: unknown }).kind === "string",
 	)
 }
 
@@ -34,7 +36,10 @@ export function queryExecution(params: {
 	userId: string
 	conversationId: string
 	input: QueryExecutionInput
-}): Effect.Effect<QueryExecutionResult, import("@amby/db").DbError | import("@amby/computer").SandboxError> {
+}): Effect.Effect<
+	QueryExecutionResult,
+	import("@amby/db").DbError | import("@amby/computer").SandboxError
+> {
 	const { query, supervisor, userId, conversationId, input } = params
 
 	if (input.kind === "by-id") {
@@ -55,7 +60,12 @@ export function queryExecution(params: {
 					eq(schema.tasks.userId, userId),
 					inArray(schema.tasks.status, [...activeStatuses]),
 				)
-		return db.select().from(schema.tasks).where(where).orderBy(desc(schema.tasks.createdAt)).limit(limit)
+		return db
+			.select()
+			.from(schema.tasks)
+			.where(where)
+			.orderBy(desc(schema.tasks.createdAt))
+			.limit(limit)
 	}).pipe(
 		Effect.map((rows) => ({
 			executions: rows.map(mapTaskRow),

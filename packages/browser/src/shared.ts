@@ -1,5 +1,5 @@
 import { Context, Data, type Effect } from "effect"
-import { z } from "zod"
+import type { z } from "zod"
 
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | { [key: string]: JsonValue } | JsonValue[]

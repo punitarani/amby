@@ -258,7 +258,11 @@ export const handleTaskEventPost = (request: Request) =>
 			void casResult
 
 			const traceId = task.traceId
-			if (statusOk && traceId && (body.eventType === "task.completed" || body.eventType === "task.failed")) {
+			if (
+				statusOk &&
+				traceId &&
+				(body.eventType === "task.completed" || body.eventType === "task.failed")
+			) {
 				yield* Effect.tryPromise({
 					try: () =>
 						appendLinkedTraceEvent({
