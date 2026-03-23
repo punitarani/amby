@@ -94,7 +94,7 @@
         "@amby/memory": "workspace:*",
         "@amby/models": "workspace:*",
         "@braintrust/otel": "^0.2.0",
-        "@daytonaio/sdk": "^0.151.0",
+        "@daytonaio/sdk": "^0.153.0",
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/context-async-hooks": "^2.2.0",
         "@opentelemetry/core": "^2.2.0",
@@ -139,7 +139,7 @@
         "@amby/connectors": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
-        "@daytonaio/sdk": "^0.151.0",
+        "@daytonaio/sdk": "^0.153.0",
       },
       "peerDependencies": {
         "ai": "^6.0.116",
@@ -401,11 +401,11 @@
 
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
 
-    "@daytonaio/api-client": ["@daytonaio/api-client@0.151.0", "", { "dependencies": { "axios": "^1.6.1" } }, "sha512-Ahu7bjunHbJEEAEkcEFjjdazN+1hML/lLZwOyul2WFaCTh9q5dmufhr0qKAKCIs3ccTY+Is0fO5UtPpo/fig+A=="],
+    "@daytonaio/api-client": ["@daytonaio/api-client@0.153.0", "", { "dependencies": { "axios": "^1.6.1" } }, "sha512-xNEZBatocdaxlnUwlwOfQfsHo9bVAdwzAAllbjBrBL5wADfxE+rxuZmufp7+xudVYEcipPJ+KH3KoNmRKGF2ag=="],
 
-    "@daytonaio/sdk": ["@daytonaio/sdk@0.151.0", "", { "dependencies": { "@aws-sdk/client-s3": "^3.787.0", "@aws-sdk/lib-storage": "^3.798.0", "@daytonaio/api-client": "0.151.0", "@daytonaio/toolbox-api-client": "0.151.0", "@iarna/toml": "^2.2.5", "@opentelemetry/api": "^1.9.0", "@opentelemetry/exporter-trace-otlp-http": "^0.207.0", "@opentelemetry/instrumentation-http": "^0.207.0", "@opentelemetry/otlp-exporter-base": "0.207.0", "@opentelemetry/resources": "2.2.0", "@opentelemetry/sdk-node": "^0.207.0", "@opentelemetry/sdk-trace-base": "^2.2.0", "@opentelemetry/semantic-conventions": "^1.37.0", "axios": "^1.13.5", "busboy": "^1.0.0", "dotenv": "^17.0.1", "expand-tilde": "^2.0.2", "fast-glob": "^3.3.0", "form-data": "^4.0.4", "isomorphic-ws": "^5.0.0", "pathe": "^2.0.3", "shell-quote": "^1.8.2", "tar": "^7.5.7" } }, "sha512-wd4x9Bipt1KmTD+0GXTVEQtgXBmyy/gAmCjdOJllwo5Ya5RbGu/CZeitBCIEKhDM8TnkxefVxdpxBCfi/Wg9xA=="],
+    "@daytonaio/sdk": ["@daytonaio/sdk@0.153.0", "", { "dependencies": { "@aws-sdk/client-s3": "^3.787.0", "@aws-sdk/lib-storage": "^3.798.0", "@daytonaio/api-client": "0.153.0", "@daytonaio/toolbox-api-client": "0.153.0", "@iarna/toml": "^2.2.5", "@opentelemetry/api": "^1.9.0", "@opentelemetry/exporter-trace-otlp-http": "^0.207.0", "@opentelemetry/instrumentation-http": "^0.207.0", "@opentelemetry/otlp-exporter-base": "0.207.0", "@opentelemetry/resources": "2.2.0", "@opentelemetry/sdk-node": "^0.207.0", "@opentelemetry/sdk-trace-base": "^2.2.0", "@opentelemetry/semantic-conventions": "^1.37.0", "axios": "^1.13.5", "busboy": "^1.0.0", "dotenv": "^17.0.1", "expand-tilde": "^2.0.2", "fast-glob": "^3.3.0", "form-data": "^4.0.4", "isomorphic-ws": "^5.0.0", "pathe": "^2.0.3", "shell-quote": "^1.8.2", "tar": "^7.5.11" } }, "sha512-XqmoWdjbuABAu/QCyY0uoncGDN+PmyxueE734d8iS8LMrc48cHmsyCtmJzSIsQgwM450Haoy4k6a9CbEpu9zNg=="],
 
-    "@daytonaio/toolbox-api-client": ["@daytonaio/toolbox-api-client@0.151.0", "", { "dependencies": { "axios": "^1.6.1" } }, "sha512-63n/wBNnZh1r8dUypzwNeenoA4okWNEWzsE6kZ8b047y5zBYT0cI63cGRn25nSrepLlGKpX4MJnVjjz50+bVqA=="],
+    "@daytonaio/toolbox-api-client": ["@daytonaio/toolbox-api-client@0.153.0", "", { "dependencies": { "axios": "^1.6.1" } }, "sha512-9IuPz8OeCrkdm7EtsWxtYDhKiGr/rDziR18HhXpeDgL9VmbdfsJjYQGNG05vwDcRBjR4+5GcoaKieflzcM9zmg=="],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 
