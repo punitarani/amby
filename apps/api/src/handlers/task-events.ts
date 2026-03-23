@@ -1,4 +1,5 @@
 import {
+	appendTaskTraceTerminalEvent,
 	CALLBACK_HEARTBEAT_INTERVAL_MS,
 	hashSecret,
 	isLegalTransition,
@@ -8,7 +9,7 @@ import {
 	verifyHmacSignature,
 } from "@amby/computer"
 import type { TaskEventKind, TaskEventSource, TaskStatus } from "@amby/db"
-import { and, DbService, desc, eq, lt, schema } from "@amby/db"
+import { and, DbService, eq, lt, schema } from "@amby/db"
 import { Effect } from "effect"
 
 type TaskEventBody = {
@@ -49,37 +50,6 @@ function mapHarnessEventToStatus(eventType: string): TaskStatus | undefined {
 		default:
 			return undefined
 	}
-}
-
-async function appendLinkedTraceEvent(params: {
-	db: import("@amby/db").Database
-	traceId: string
-	kind: "delegation_end" | "error"
-	payload: Record<string, unknown>
-	status: "completed" | "failed"
-}) {
-	const lastRows = await params.db
-		.select({ seq: schema.traceEvents.seq })
-		.from(schema.traceEvents)
-		.where(eq(schema.traceEvents.traceId, params.traceId))
-		.orderBy(desc(schema.traceEvents.seq))
-		.limit(1)
-		.catch(() => [])
-
-	const nextSeq = (lastRows[0]?.seq ?? -1) + 1
-	await params.db.insert(schema.traceEvents).values({
-		traceId: params.traceId,
-		seq: nextSeq,
-		kind: params.kind,
-		payload: params.payload,
-	})
-	await params.db
-		.update(schema.traces)
-		.set({
-			status: params.status,
-			completedAt: new Date(),
-		})
-		.where(eq(schema.traces.id, params.traceId))
 }
 
 export const handleTaskEventPost = (request: Request) =>
@@ -277,17 +247,13 @@ export const handleTaskEventPost = (request: Request) =>
 			) {
 				yield* Effect.tryPromise({
 					try: () =>
-						appendLinkedTraceEvent({
+						appendTaskTraceTerminalEvent({
 							db,
 							traceId,
-							kind: body.eventType === "task.completed" ? "delegation_end" : "error",
-							payload: {
-								taskId: task.id,
-								status: nextStatus,
-								message: body.message ?? null,
-								exitCode: body.exitCode ?? null,
-							},
-							status: body.eventType === "task.completed" ? "completed" : "failed",
+							taskId: task.id,
+							status: nextStatus ?? (body.eventType === "task.completed" ? "succeeded" : "failed"),
+							message: body.message ?? null,
+							exitCode: body.exitCode ?? null,
 						}),
 					catch: () => undefined,
 				})

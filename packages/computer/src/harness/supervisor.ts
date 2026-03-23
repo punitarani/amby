@@ -35,6 +35,7 @@ import { CodexProvider } from "./codex-provider"
 import { probeSingleTask } from "./reconciliation"
 import { collectTaskExecutionData, previewTaskOutput } from "./task-execution-data"
 import { isTerminal, TERMINAL_STATUSES } from "./task-state"
+import { appendTaskTraceTerminalEvent } from "./task-trace"
 
 type TaskRecord = typeof schema.tasks.$inferSelect
 const CODEX_AUTH_FILE = `${CODEX_HOME}/auth.json`
@@ -48,6 +49,7 @@ const ANSI_RE = /\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*(?:\x07|\x1b\\))/g
 
 interface ActiveTask {
 	taskId: string
+	traceId?: string | null
 	sandbox: Sandbox
 	sessionId: string
 	commandId: string
@@ -386,15 +388,23 @@ export const TaskSupervisorLive = Layer.scoped(
 					)
 
 					if (task.consecutiveFailures >= MAX_HEARTBEAT_FAILURES) {
+						const lostNow = new Date()
 						await db
 							.update(schema.tasks)
-							.set({ status: "lost", updatedAt: new Date() })
+							.set({ status: "lost", completedAt: lostNow, updatedAt: lostNow })
 							.where(
 								and(
 									eq(schema.tasks.id, task.taskId),
 									notInArray(schema.tasks.status, TERMINAL_STATUSES),
 								),
 							)
+						await appendTaskTraceTerminalEvent({
+							db,
+							traceId: task.traceId,
+							taskId: task.taskId,
+							status: "lost",
+							reason: "heartbeat_failures",
+						}).catch(() => undefined)
 						activeTasks.delete(task.taskId)
 					}
 				}
@@ -405,11 +415,12 @@ export const TaskSupervisorLive = Layer.scoped(
 			if (!activeTasks.has(task.taskId)) return
 
 			const rows = await db
-				.select({ status: schema.tasks.status })
+				.select({ status: schema.tasks.status, traceId: schema.tasks.traceId })
 				.from(schema.tasks)
 				.where(eq(schema.tasks.id, task.taskId))
 				.limit(1)
 			const current = rows[0]?.status as TaskStatus | undefined
+			const traceId = rows[0]?.traceId
 			if (current && isTerminal(current)) {
 				await deletePendingSession(task.sandbox, task.sessionId)
 				activeTasks.delete(task.taskId)
@@ -452,6 +463,14 @@ export const TaskSupervisorLive = Layer.scoped(
 				.where(
 					and(eq(schema.tasks.id, task.taskId), notInArray(schema.tasks.status, TERMINAL_STATUSES)),
 				)
+			await appendTaskTraceTerminalEvent({
+				db,
+				traceId: task.traceId ?? traceId,
+				taskId: task.taskId,
+				status: exitCode === 0 ? "succeeded" : "failed",
+				message: result.summary,
+				exitCode,
+			}).catch(() => undefined)
 
 			await deletePendingSession(task.sandbox, task.sessionId)
 			activeTasks.delete(task.taskId)
@@ -471,6 +490,13 @@ export const TaskSupervisorLive = Layer.scoped(
 				.where(
 					and(eq(schema.tasks.id, task.taskId), notInArray(schema.tasks.status, TERMINAL_STATUSES)),
 				)
+			await appendTaskTraceTerminalEvent({
+				db,
+				traceId: task.traceId,
+				taskId: task.taskId,
+				status: "timed_out",
+				reason: "task_timeout",
+			}).catch(() => undefined)
 
 			activeTasks.delete(task.taskId)
 		}
@@ -501,7 +527,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							lte(schema.tasks.createdAt, preparingStaleBefore),
 						),
 					)
-					.returning({ id: schema.tasks.id })
+					.returning({ id: schema.tasks.id, traceId: schema.tasks.traceId })
 				for (const row of lostPreparing) {
 					const eventId = crypto.randomUUID()
 					try {
@@ -514,6 +540,13 @@ export const TaskSupervisorLive = Layer.scoped(
 							payload: { reason: "preparing_timeout" },
 							occurredAt: new Date(),
 						})
+						await appendTaskTraceTerminalEvent({
+							db,
+							traceId: row.traceId,
+							taskId: row.id,
+							status: "lost",
+							reason: "preparing_timeout",
+						})
 					} catch (e) {
 						console.error(`[TaskSupervisor] recovery: failed to insert task.lost for ${row.id}:`, e)
 					}
@@ -524,10 +557,18 @@ export const TaskSupervisorLive = Layer.scoped(
 
 			for (const task of running) {
 				if (!task.sandboxId || !task.sessionId || !task.commandId) {
+					const lostNow = new Date()
 					await db
 						.update(schema.tasks)
-						.set({ status: "lost", updatedAt: new Date() })
+						.set({ status: "lost", completedAt: lostNow, updatedAt: lostNow })
 						.where(eq(schema.tasks.id, task.id))
+					await appendTaskTraceTerminalEvent({
+						db,
+						traceId: task.traceId,
+						taskId: task.id,
+						status: "lost",
+						reason: "missing_session",
+					}).catch(() => undefined)
 					continue
 				}
 
@@ -537,6 +578,7 @@ export const TaskSupervisorLive = Layer.scoped(
 
 					activeTasks.set(task.id, {
 						taskId: task.id,
+						traceId: task.traceId,
 						sandbox,
 						sessionId: task.sessionId,
 						commandId: task.commandId,
@@ -546,10 +588,18 @@ export const TaskSupervisorLive = Layer.scoped(
 						hasCallbacks: Boolean(task.callbackSecretHash),
 					})
 				} catch {
+					const lostNow = new Date()
 					await db
 						.update(schema.tasks)
-						.set({ status: "lost", updatedAt: new Date() })
+						.set({ status: "lost", completedAt: lostNow, updatedAt: lostNow })
 						.where(eq(schema.tasks.id, task.id))
+					await appendTaskTraceTerminalEvent({
+						db,
+						traceId: task.traceId,
+						taskId: task.id,
+						status: "lost",
+						reason: "sandbox_recovery_failed",
+					}).catch(() => undefined)
 				}
 			}
 		}
@@ -968,6 +1018,7 @@ export const TaskSupervisorLive = Layer.scoped(
 
 								activeTasks.set(insertedTaskId, {
 									taskId: insertedTaskId,
+									traceId,
 									sandbox,
 									sessionId,
 									commandId: execResult.cmdId,
@@ -1075,6 +1126,7 @@ export const TaskSupervisorLive = Layer.scoped(
 										await finalizeTask(
 											{
 												taskId: taskRef.id,
+												traceId: taskRef.traceId,
 												sandbox,
 												sessionId,
 												commandId,
@@ -1090,6 +1142,7 @@ export const TaskSupervisorLive = Layer.scoped(
 									// Still running — re-register for heartbeat tracking
 									activeTasks.set(taskRef.id, {
 										taskId: taskRef.id,
+										traceId: taskRef.traceId,
 										sandbox,
 										sessionId,
 										commandId,

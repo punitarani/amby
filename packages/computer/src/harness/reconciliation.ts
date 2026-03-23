@@ -6,6 +6,7 @@ import { CodexProvider } from "./codex-provider"
 import { parseReplyTarget } from "./reply-target"
 import { collectTaskExecutionData } from "./task-execution-data"
 import { isTerminal, TERMINAL_STATUSES } from "./task-state"
+import { appendTaskTraceTerminalEvent } from "./task-trace"
 
 type TaskRow = typeof schema.tasks.$inferSelect
 
@@ -83,6 +84,13 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 			.update(schema.tasks)
 			.set({ status: "lost", completedAt: now, updatedAt: now })
 			.where(nonTerminalTaskWhere(task.id))
+		await appendTaskTraceTerminalEvent({
+			db,
+			traceId: task.traceId,
+			taskId: task.id,
+			status: "lost",
+			reason: "missing_session",
+		}).catch(() => undefined)
 		await insertReconcilerEvent(db, task.id, "task.lost", { reason: "missing_session" })
 		return
 	}
@@ -129,6 +137,14 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 				.where(nonTerminalTaskWhere(task.id))
 				.returning({ id: schema.tasks.id })
 			if (updated.length > 0) {
+				await appendTaskTraceTerminalEvent({
+					db,
+					traceId: task.traceId,
+					taskId: task.id,
+					status: nextStatus,
+					message: result.summary,
+					exitCode: cmd.exitCode,
+				}).catch(() => undefined)
 				await insertReconcilerEvent(db, task.id, "reconciler.probe", {
 					exitCode: cmd.exitCode,
 					source: "session_command",
@@ -170,6 +186,14 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 				.where(nonTerminalTaskWhere(task.id))
 				.returning({ id: schema.tasks.id })
 			if (updated.length > 0) {
+				await appendTaskTraceTerminalEvent({
+					db,
+					traceId: task.traceId,
+					taskId: task.id,
+					status: nextStatus,
+					message: result.summary,
+					exitCode: statusJson.exitCode ?? (success ? 0 : 1),
+				}).catch(() => undefined)
 				await insertReconcilerEvent(db, task.id, "reconciler.probe", {
 					source: "status_json",
 					statusJson,
