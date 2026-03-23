@@ -25,7 +25,7 @@ export const sandboxes = pgTable(
 		userId: text("user_id")
 			.notNull()
 			.references(() => users.id, { onDelete: "cascade" }),
-		daytonaSandboxId: text("daytona_sandbox_id").notNull(),
+		daytonaSandboxId: text("daytona_sandbox_id"),
 		volumeId: uuid("volume_id")
 			.notNull()
 			.references(() => userVolumes.id, { onDelete: "restrict" }),

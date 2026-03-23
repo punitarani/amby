@@ -71,7 +71,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 		}
 
 		const upsertMainSandbox = async (
-			daytonaSandboxId: string,
+			daytonaSandboxId: string | null,
 			status: "volume_creating" | "creating" | "running" | "stopped" | "archived" | "error",
 			volumeId: string,
 			snapshot?: string | null,
@@ -159,7 +159,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 		)
 
 		if (volumeRow.status !== "ready") {
-			await upsertMainSandbox("pending", "volume_creating", volumeRow.id)
+			await upsertMainSandbox(null, "volume_creating", volumeRow.id)
 			const volumeWorkflow = env.VOLUME_WORKFLOW
 			if (!volumeWorkflow) {
 				throw new Error("VOLUME_WORKFLOW binding is not configured.")
@@ -237,7 +237,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 					}
 				}
 
-				await upsertMainSandbox("pending", "creating", volumeRow.id, COMPUTER_SNAPSHOT)
+				await upsertMainSandbox(null, "creating", volumeRow.id, COMPUTER_SNAPSHOT)
 
 				const createFreshSandbox = async () => {
 					const sandbox = await daytona.create(createSpec, { timeout: 300 })
@@ -264,7 +264,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 						}
 					}
 
-					await upsertMainSandbox("pending", "error", volumeRow.id)
+					await upsertMainSandbox(null, "error", volumeRow.id)
 					throw cause
 				}
 			},

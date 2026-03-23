@@ -51,7 +51,11 @@ DROP INDEX IF EXISTS "sandboxes_user_main_idx";
 CREATE UNIQUE INDEX "sandboxes_user_main_idx" ON "sandboxes" ("user_id", "role") WHERE role = 'main' AND status != 'deleted';
 
 --> statement-breakpoint
--- 6. Drop columns moved to user_volumes
+-- 6. Make daytona_sandbox_id nullable (NULL = no sandbox provisioned yet)
+ALTER TABLE "sandboxes" ALTER COLUMN "daytona_sandbox_id" DROP NOT NULL;
+
+--> statement-breakpoint
+-- 7. Drop columns moved to user_volumes
 ALTER TABLE "sandboxes" DROP COLUMN IF EXISTS "auth_config";
 --> statement-breakpoint
 ALTER TABLE "sandboxes" DROP COLUMN IF EXISTS "daytona_volume_id";

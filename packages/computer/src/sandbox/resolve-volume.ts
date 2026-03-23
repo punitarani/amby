@@ -214,7 +214,7 @@ export async function ensureMountedHomeLayout(sandbox: Sandbox): Promise<void> {
 export async function upsertMainSandboxRow(
 	db: Database,
 	userId: string,
-	daytonaSandboxId: string,
+	daytonaSandboxId: string | null,
 	status: SandboxDbStatus,
 	volumeId: string,
 	snapshot?: string | null,
@@ -360,7 +360,7 @@ export const ensureMainSandbox = (
 				upsertMainSandboxRow(
 					db,
 					userId,
-					"pending",
+					null,
 					isVolumeReady(volumeRow.status) ? "creating" : "volume_creating",
 					volumeRow.id,
 				),
