@@ -365,6 +365,11 @@ export async function executeRequestPlan(params: {
 			),
 		}))
 
+		const firstRunnable = runnable[0]
+		if (!firstRunnable) {
+			throw new Error("Execution plan is blocked by unresolved dependencies or conflicting locks.")
+		}
+
 		const results =
 			plan.strategy === "parallel"
 				? await Promise.all(
@@ -383,7 +388,7 @@ export async function executeRequestPlan(params: {
 					)
 				: [
 						await runTaskWithTrace({
-							task: runnable[0] as ExecutionTask,
+							task: firstRunnable,
 							query: params.query,
 							config: params.config,
 							getModel: params.getModel,
