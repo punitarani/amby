@@ -29,7 +29,6 @@
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",
-		"@amby/models": "workspace:*",
 		"@chat-adapter/state-memory": "^4.20.2",
 		"@chat-adapter/telegram": "^4.20.2",
 		"@sentry/cloudflare": "^10.44.0",

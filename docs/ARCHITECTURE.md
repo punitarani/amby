@@ -104,11 +104,10 @@ graph BT
     auth["@amby/auth"] --> env
     auth --> db
     memory["@amby/memory"] --> db
-    models["@amby/models"] --> env
     computer["@amby/computer"] --> env
     channels["@amby/channels"] --> env
     agent["@amby/agent"] --> memory
-    agent --> models
+    agent --> env
     agent --> computer
     agent --> channels
     agent --> db
@@ -122,11 +121,10 @@ graph BT
 | `@amby/env`      | Type-safe environment variables via T3 Env        | `@t3-oss/env-core`, `zod`              |
 | `@amby/db`       | Drizzle ORM, schemas, migrations, Supabase client | `drizzle-orm`, `postgres`, `@amby/env` |
 | `@amby/auth`     | BetterAuth configuration and user authentication  | `better-auth`, `@amby/db`, `@amby/env` |
-| `@amby/models`   | OpenRouter-backed model registry and model selection | `ai`, `@openrouter/ai-sdk-provider`, `@amby/env` |
 | `@amby/memory`   | Memory storage, retrieval, and LLM injection      | `@amby/db`, `ai`                       |
 | `@amby/computer` | Daytona sandbox lifecycle and command execution   | `@daytonaio/sdk`, `@amby/env`          |
 | `@amby/channels` | Channel interface and adapters (CLI for MVP)      | `@amby/env`                            |
-| `@amby/agent`    | Core agent orchestration, tools, jobs             | `ai`, all `@amby/*` packages           |
+| `@amby/agent`    | Core agent orchestration, tools, jobs, and model selection | `ai`, `@openrouter/ai-sdk-provider`, all `@amby/*` packages |
 
 ***
 
@@ -200,12 +198,12 @@ defined, but there is no HTTP server to serve auth routes yet.
 
 ***
 
-### @amby/models
+### @amby/agent
 
-Manages runtime model selection. It builds the OpenRouter-backed Vercel AI SDK registry and defines interfaces for
-future TTS/STT providers.
+Owns runtime model selection alongside the agent loop. It builds the OpenRouter-backed Vercel AI SDK registry and
+exposes the shared model layer used by the CLI and API runtimes.
 
-**Exports:** `getModel(id)`, `defaultModelId`, and `TTSProvider` / `STTProvider` (interfaces, future).
+**Exports:** `ModelService`, `ModelServiceLive`, `DEFAULT_MODEL_ID`, `HIGH_INTELLIGENCE_MODEL_ID`.
 
 #### Provider registry
 
@@ -213,20 +211,11 @@ The runtime uses `createOpenRouter()` from `@openrouter/ai-sdk-provider`:
 
 ```
 google/gemini-3.1-flash-lite-preview  → default model
-nvidia/nemotron-3-super-120b-a12b     → higher-intelligence override
+google/gemini-3-flash-preview         → higher-intelligence override
 ```
 
 `OPENROUTER_API_KEY` powers the agent runtime. `OPENAI_API_KEY` remains useful for Codex running inside user
 sandboxes, but it is not the primary application model provider.
-
-#### TTS / STT (future — MVP is text-only)
-
-Interfaces defined now, implementations later:
-
-* **TTS default:** Cartesia Sonic 3 (~$0.005/1000 chars, ~90ms first byte)
-* **STT default:** OpenAI Whisper API ($0.006/min, lowest flat rate)
-* Both are swappable via provider interface
-* LiveKit for real-time voice transport when voice is added
 
 ***
 
@@ -850,8 +839,8 @@ The CLI app (`apps/cli`) is the thin entry point that wires all packages togethe
 ```
 1. Load environment          →  @amby/env
 2. Connect to database       →  @amby/db
-3. Build model registry       →  @amby/models
-4. Create agent instance      →  @amby/agent (wires memory, models, computer, channels)
+3. Build agent model service  →  @amby/agent
+4. Create agent instance      →  @amby/agent (wires memory, model service, computer, channels)
 5. Register CLI channel       →  @amby/channels
 6. Start job runner           →  setInterval polling for pending jobs
 7. Start REPL                 →  readline loop, each input → agent.handleMessage()
@@ -890,7 +879,7 @@ Want me to prepare anything for these?
 * CLI channel — interactive REPL for testing
 * Agent core — system prompt, tool loop, message handling
 * Memory — Phase 1 from MEMORY.md (store, retrieve, inject, dedupe)
-* Models — OpenRouter-backed Vercel AI SDK provider registry
+* Agent model runtime — OpenRouter-backed Vercel AI SDK provider registry
 * Computer — Daytona sandbox create/start/stop/execute
 * DB — full schema, Drizzle migrations, Supabase local
 * Env — all env vars typed and validated
@@ -914,7 +903,7 @@ Want me to prepare anything for these?
 ## Future Roadmap
 
 **Voice.** LiveKit for real-time audio transport. Cartesia Sonic 3 for TTS. OpenAI Whisper API for STT. Agent gets
-`listen` and `speak` capabilities. Swappable providers via the TTS/STT interfaces defined in `@amby/models`.
+`listen` and `speak` capabilities when voice work is added.
 
 **Web & mobile channels.** WebSocket-based real-time connection. Push notifications for proactive messages. Shared
 conversation history and memory across all devices. The channel abstraction makes adding these straightforward.

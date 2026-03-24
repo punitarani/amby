@@ -1,6 +1,7 @@
 export * from "./agent"
 export * from "./errors"
 export * from "./jobs"
+export * from "./models"
 export * from "./router"
 export * from "./synopsis"
 export * from "./tools/messaging"

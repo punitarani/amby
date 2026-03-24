@@ -1,3 +1,4 @@
+import { ModelServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
@@ -5,7 +6,6 @@ import { ConnectorsServiceLive } from "@amby/connectors"
 import { makeDbServiceFromHyperdrive } from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
 import { MemoryServiceLive } from "@amby/memory"
-import { ModelServiceLive } from "@amby/models"
 import { Layer, ManagedRuntime } from "effect"
 import { TelegramSenderLite } from "../telegram"
 
