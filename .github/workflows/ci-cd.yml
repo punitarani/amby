@@ -68,6 +68,7 @@ jobs:
           npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps
           test -f dist-worker/worker.js
           test -f dist-worker/worker.js.map
+          npx wrangler deploy dist-worker/worker.js --no-bundle --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA" --dry-run
       - name: Validate deploy tooling
         run: |
           # @sentry/cli: local devDep of apps/api — must use scoped name with npx
@@ -265,16 +266,29 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      - name: Verify Workflows
+      - name: Verify Workflow Resources
         run: |
-          cd apps/api
-          npx wrangler workflows describe sandbox-provision
-          npx wrangler workflows describe volume-provision
-          npx wrangler workflows describe agent-execution
+          set -euo pipefail
+          while IFS='=' read -r workflow class_name; do
+            [ -n "$workflow" ] || continue
+            response=$(curl --fail --silent --show-error \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workflows/$workflow")
+            echo "$response" | jq -e --arg workflow "$workflow" --arg class_name "$class_name" '
+              .success == true and
+              .result.name == $workflow and
+              .result.script_name == "amby-api" and
+              .result.class_name == $class_name
+            ' >/dev/null
+            echo "Verified workflow resource: $workflow"
+          done <<'EOF'
+          sandbox-provision=SandboxProvisionWorkflow
+          volume-provision=VolumeProvisionWorkflow
+          agent-execution=AgentExecutionWorkflow
+          EOF
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
       - name: Log deployment
         run: |
           echo "Deployed worker amby-api"
