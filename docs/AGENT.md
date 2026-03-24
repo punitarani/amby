@@ -6,14 +6,14 @@ The user never sees the delegation layer. They interact with one assistant.
 
 ## High-Level Flow
 
-```
-Inbound message
-  → resolve thread
-  → load thread-aware context
-  → run orchestrator
-  → optionally delegate to subagents
-  → save visible transcript
-  → persist execution traces
+```mermaid
+flowchart TD
+    A[Inbound message] --> B[Resolve thread]
+    B --> C[Load thread-aware context]
+    C --> D[Run orchestrator]
+    D --> E[Optionally delegate to subagents]
+    E --> F[Save visible transcript]
+    F --> G[Persist execution traces]
 ```
 
 ## Orchestrator, Direct Tools, and Subagents
@@ -78,8 +78,11 @@ Current CLI and Telegram flows use the derived path. The resolver API already su
 
 ### Thread lifecycle
 
-```
-new → open → archived
+```mermaid
+stateDiagram-v2
+    [*] --> new
+    new --> open
+    open --> archived
 ```
 
 Synopsis generation happens when:

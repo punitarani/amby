@@ -18,41 +18,29 @@ The user interacts with one agent. Under the hood, work is split across three ex
 
 **Future**: additional sandboxes sharing the same volume (N sandboxes : 1 volume : 1 user).
 
-```
-User ──> Channel ──> AgentService.handleMessage()
-                          │
-            LLM calls delegate_task with target
-                    │            │              │
-                    │            │              └── target="sandbox" + get_task
-                    │            │                          │
-                    │            │                ┌─────────┴──────────┐
-                    │            │                │  TaskSupervisor     │
-                    │            │                │  (state machine,    │
-                    │            │                │   session lifecycle,│
-                    │            │                │   heartbeat)        │
-                    │            │                └─────────┬──────────┘
-                    │            │                          │
-                    │            └── target="computer"      │
-                    │                    │                  │
-                    │                Daytona CUA            │
-                    │                                       │
-                    └── target="browser"                    │
-                             │                              │
-               Cloudflare Browser Rendering                 │
-               + Stagehand + AI Gateway                     │
-                                                            │
-                                       ┌────────────────────┴────────────────────┐
-                                       │       Daytona Sandbox (per-user)        │
-                                       │                                          │
-                                       │  /home/agent/workspace/tasks/{taskId}/  │
-                                       │    workspace/   (cwd)                   │
-                                       │    artifacts/   (outputs)               │
-                                       │    AGENTS.md                             │
-                                       │    prompt.txt                            │
-                                       │                                          │
-                                       │  Session: task-{taskId}                  │
-                                       │  $ codex exec --full-auto                │
-                                       └──────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    User --> Channel --> Agent["AgentService.handleMessage()"]
+    Agent -->|"LLM calls delegate_task"| Router{target?}
+    Router -->|"browser"| Browser["Cloudflare Browser Rendering\n+ Stagehand + AI Gateway"]
+    Router -->|"computer"| CUA["Daytona CUA"]
+    Router -->|"sandbox"| Supervisor
+
+    subgraph Supervisor["TaskSupervisor"]
+        direction TB
+        SM["State machine\nSession lifecycle\nHeartbeat"]
+    end
+
+    Supervisor --> Sandbox
+
+    subgraph Sandbox["Daytona Sandbox (per-user)"]
+        direction TB
+        Tasks["/home/agent/workspace/tasks/{taskId}/"]
+        WS["workspace/ (cwd)"]
+        Art["artifacts/ (outputs)"]
+        Files["AGENTS.md, prompt.txt"]
+        Cmd["Session: task-{taskId}\n$ codex exec --full-auto"]
+    end
 ```
 
 ***
@@ -329,18 +317,15 @@ This keeps ordinary website automation fast and direct when the browser target e
 
 `TaskSupervisorLive` depends on `SandboxService`, `DbService`, and `EnvService`. It must be composed **above** `SandboxServiceLive`:
 
-```
-AgentService, JobRunnerService
-  │
-  ├── MemoryServiceLive
-  ├── TaskSupervisorLive    ← needs SandboxService
-  ├── ModelServiceLive
-  │
-  └── SandboxServiceLive    ← provided below TaskSupervisorLive
-      │
-      └── DbServiceLive
-          │
-          └── EnvServiceLive
+```mermaid
+graph BT
+    Env["EnvServiceLive"] --> Db["DbServiceLive"]
+    Db --> Sandbox["SandboxServiceLive"]
+    Sandbox --> Task["TaskSupervisorLive"]
+    Sandbox --> Memory["MemoryServiceLive"]
+    Task --> Top["AgentService, JobRunnerService"]
+    Memory --> Top
+    Model["ModelServiceLive"] --> Top
 ```
 
 ***

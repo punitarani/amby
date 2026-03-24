@@ -494,68 +494,77 @@ Amby now separates visible transcript from execution state. This provides:
 
 **Schema:**
 
-```plain text
-conversations {
-  id:          uuid
-  userId:      string
-  platform:    'cli' | 'telegram' | 'slack' | 'discord'
-  workspaceKey: string
-  externalConversationKey: string
-  title:       string (nullable)
-  metadata:    jsonb
-  createdAt:   timestamp
-  updatedAt:   timestamp
-}
+```mermaid
+erDiagram
+    conversations {
+        uuid id PK
+        string userId
+        string platform
+        string workspaceKey
+        string externalConversationKey
+        string title
+        jsonb metadata
+        timestamp createdAt
+        timestamp updatedAt
+    }
 
-conversation_threads {
-  id:               uuid
-  conversationId:   string
-  source:           'native' | 'reply_chain' | 'derived' | 'manual'
-  externalThreadKey: string (nullable)
-  label:            string (nullable)
-  synopsis:         text (nullable)
-  keywords:         text[] (nullable)
-  isDefault:        boolean
-  status:           'open' | 'archived'
-  lastActiveAt:     timestamp
-  createdAt:        timestamp
-}
+    conversation_threads {
+        uuid id PK
+        string conversationId FK
+        string source
+        string externalThreadKey
+        string label
+        text synopsis
+        text_arr keywords
+        boolean isDefault
+        string status
+        timestamp lastActiveAt
+        timestamp createdAt
+    }
 
-messages {
-  id:             uuid
-  conversationId: string
-  threadId:       string (nullable, FK to conversation_threads)
-  role:           'user' | 'assistant'
-  content:        text
-  metadata:       jsonb
-  createdAt:      timestamp
-}
+    messages {
+        uuid id PK
+        string conversationId FK
+        string threadId FK
+        string role
+        text content
+        jsonb metadata
+        timestamp createdAt
+    }
+
+    conversations ||--o{ conversation_threads : has
+    conversations ||--o{ messages : contains
+    conversation_threads ||--o{ messages : scopes
 ```
 
-```plain text
-traces {
-  id:            uuid
-  conversationId: uuid
-  threadId:      uuid (nullable)
-  messageId:     uuid (nullable)
-  parentTraceId: uuid (nullable)
-  rootTraceId:   uuid (nullable)
-  agentName:     text
-  status:        'running' | 'completed' | 'failed'
-  startedAt:     timestamp
-  completedAt:   timestamp (nullable)
-  durationMs:    integer (nullable)
-  metadata:      jsonb (nullable)
-}
+```mermaid
+erDiagram
+    traces {
+        uuid id PK
+        uuid conversationId FK
+        uuid threadId FK
+        uuid messageId FK
+        uuid parentTraceId FK
+        uuid rootTraceId FK
+        text agentName
+        string status
+        timestamp startedAt
+        timestamp completedAt
+        integer durationMs
+        jsonb metadata
+    }
 
-trace_events {
-  id:          uuid
-  traceId:     uuid
-  seq:         integer
-  kind:        'tool_call' | 'tool_result' | ...
-  payload:     jsonb
-  createdAt:   timestamp
-}
+    trace_events {
+        uuid id PK
+        uuid traceId FK
+        integer seq
+        string kind
+        jsonb payload
+        timestamp createdAt
+    }
+
+    traces ||--o{ trace_events : contains
+    traces ||--o{ traces : "parent-child"
 ```
 
 **Thread routing:** `resolveThread()` always ensures a default thread, then routes by cheap derived heuristics with a model fallback. The resolver API also supports native thread keys, though current CLI and Telegram flows use the derived path.
@@ -645,219 +654,3 @@ flowchart TD
 **Multi-message batching:** When a user sends several messages in quick succession, the DO buffers them during the 3s debounce window. The workflow receives the batch and uses `handleBatchedMessages` to present each as a separate user turn to the LLM.
 
 **User interrupts (Phase 4):** If a message arrives while the agent is processing, the DO forwards it to the running workflow via `sendEvent`. The workflow checks for these between LLM rounds via `waitForEvent`.
-
----
-
-## Project Structure
-
-#### `apps/`
-
-```plain text
-apps/
-├── api/                        ← Production API (Cloudflare Workers)
-│   ├── wrangler.toml           ← Queue, DO, Workflow bindings
-│   └── src/
-│       ├── worker.ts           ← Worker entrypoint
-│       ├── index.ts            ← Local dev server
-│       ├── queue/
-│       │   ├── consumer.ts     ← Queue batch handler
-│       │   └── runtime.ts      ← Shared Effect runtime factory
-│       ├── durable-objects/
-│       │   └── conversation-session.ts
-│       ├── workflows/
-│       │   └── agent-execution.ts
-│       └── telegram/
-│           ├── index.ts
-│           └── utils.ts
-└── cli/                        ← MVP CLI runner
-    └── src/
-        └── index.ts            ← REPL + job runner entry point
-```
-
-#### `packages/env`, `packages/db`
-
-```plain text
-packages/
-├── env/
-│   └── src/
-│       ├── shared.ts           ← Env interface + service tag
-│       ├── local.ts            ← Local Bun/Node env loader
-│       └── workers.ts          ← Cloudflare Workers env loader
-└── db/
-    ├── drizzle.config.ts
-    └── src/
-        ├── client.ts           ← Drizzle client
-        └── schema/             ← All table definitions
-            ├── users.ts
-            ├── sessions.ts
-            ├── accounts.ts
-            ├── conversations.ts
-            ├── channels.ts
-            ├── documents.ts
-            ├── chunks.ts
-            ├── spaces.ts
-            ├── memory-entries.ts
-            ├── memory-sources.ts
-            ├── documents-to-spaces.ts
-            ├── jobs.ts
-            └── sandboxes.ts
-```
-
-#### `packages/auth`, `packages/models`
-
-```plain text
-packages/
-├── auth/
-│   └── src/
-│       ├── server.ts           ← BetterAuth server config
-│       ├── client.ts           ← BetterAuth client (future)
-│       └── index.ts
-└── models/
-    └── src/
-        ├── registry.ts         ← OpenRouter model registry
-        ├── errors.ts
-        ├── providers/
-        │   ├── tts.ts          ← TTS interface (future)
-        │   └── stt.ts          ← STT interface (future)
-        └── index.ts
-```
-
-#### `packages/memory`, `packages/computer`, `packages/channels`
-
-```plain text
-packages/
-├── memory/
-│   └── src/
-│       ├── types.ts
-│       ├── repository.ts
-│       ├── store.ts
-│       ├── search.ts
-│       ├── conversations.ts
-│       ├── cache.ts
-│       ├── dedupe.ts
-│       ├── prompt-builder.ts
-│       ├── middleware.ts
-│       ├── vercel.ts
-│       └── index.ts
-├── computer/
-│   └── src/
-│       ├── sandbox/
-│       ├── harness/
-│       ├── config.ts
-│       └── index.ts
-└── channels/
-    └── src/
-        ├── types.ts
-        ├── registry.ts
-        ├── adapters/
-        │   └── cli.ts
-        └── index.ts
-```
-
-#### `packages/agent`
-
-```plain text
-packages/
-└── agent/
-    └── src/
-        ├── agent.ts
-        ├── router.ts
-        ├── subagents/
-        │   ├── definitions.ts
-        │   ├── tool-groups.ts
-        │   ├── spawner.ts
-        │   └── index.ts
-        ├── tools/
-        │   ├── codex-auth.ts
-        │   ├── delegation.ts
-        │   ├── messaging.ts
-        │   └── index.ts
-        ├── context.ts
-        ├── synopsis.ts
-        ├── traces.ts
-        ├── jobs/
-        │   ├── scheduler.ts
-        │   ├── runner.ts
-        │   └── index.ts
-        ├── prompts/
-        │   └── system.ts
-        └── index.ts
-```
-
-#### Root
-
-```plain text
-amby/
-├── docker/
-│   └── sandbox/
-│       └── Dockerfile
-├── supabase/
-│   └── config.toml
-├── docs/
-│   ├── AGENT.md
-│   ├── ARCHITECTURE.md
-│   ├── COMPUTER.md
-│   ├── MARKET.md
-│   ├── MEMORY.md
-│   └── MISSION.md
-├── package.json
-├── turbo.json
-├── tsconfig.base.json
-└── .env.example
-```
-
----
-
-## CLI MVP: How It All Comes Together
-
-The CLI app (`apps/cli`) is the thin entry point that wires all packages together:
-
-```mermaid
-flowchart TD
-    E["1. Load environment → @amby/env"] --> D["2. Connect to database → @amby/db"]
-    D --> M["3. Build model registry → @amby/models"]
-    M --> A["4. Create agent instance → @amby/agent"]
-    A --> Ch["5. Register CLI channel → @amby/channels"]
-    Ch --> J["6. Start job runner → setInterval polling"]
-    J --> R["7. Start REPL → readline loop"]
-```
-
----
-
-## MVP Scope
-
-### In Scope
-
-- CLI channel — interactive REPL for testing
-- Agent core — system prompt, tool loop, message handling
-- Memory — Phase 1 from MEMORY.md (store, retrieve, inject, dedupe)
-- Models — OpenRouter-backed Vercel AI SDK provider registry
-- Computer — Daytona sandbox create/start/stop/execute
-- DB — full schema, Drizzle migrations, Supabase local
-- Env — all env vars typed and validated
-- Auth — BetterAuth config defined (not serving HTTP yet)
-- Jobs — basic scheduling with in-process polling
-- Conversation persistence — all messages stored
-
-### Out of Scope (Future)
-
-- Web, mobile, SMS, iMessage channels
-- Voice (TTS/STT via Cartesia + Whisper, LiveKit transport)
-- Tests
-- Production deployment
-- User dashboard / admin UI
-- Advanced memory (versioning, forgetting, compression — phases 2-3 of MEMORY.md)
-- Multi-user / multi-tenant
-- Rate limiting, billing, usage tracking
-
----
-
-## Future Roadmap
-
-**Voice.** LiveKit for real-time audio transport. Cartesia Sonic 3 for TTS. OpenAI Whisper API for STT. Agent gets `listen` and `speak` capabilities. Swappable providers via the TTS/STT interfaces defined in `@amby/models`.
-
-**Web & mobile channels.** WebSocket-based real-time connection. Push notifications for proactive messages. Shared conversation history and memory across all devices. The channel abstraction makes adding these straightforward.
-
-**Production infra.** Supabase hosted. Proper worker processes for job execution. pg_cron + pg_net for webhook-based job triggers. BetterAuth serving HTTP for user sign-up/login. Deployment to a long-running cloud compute environment.
-
-**Trust features.** Clear audit trails for all agent actions. Permission-based action approval (the agent asks before acting). Memory visibility and editing for users. Transparent sandbox activity logs. These are not optional polish — they are core to the mission. See MISSION.md.

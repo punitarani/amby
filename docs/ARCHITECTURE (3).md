@@ -494,68 +494,77 @@ Amby now separates visible transcript from execution state. This provides:
 
 **Schema:**
 
-```plain text
-conversations {
-  id:          uuid
-  userId:      string
-  platform:    'cli' | 'telegram' | 'slack' | 'discord'
-  workspaceKey: string
-  externalConversationKey: string
-  title:       string (nullable)
-  metadata:    jsonb
-  createdAt:   timestamp
-  updatedAt:   timestamp
-}
+```mermaid
+erDiagram
+    conversations {
+        uuid id PK
+        string userId
+        string platform
+        string workspaceKey
+        string externalConversationKey
+        string title
+        jsonb metadata
+        timestamp createdAt
+        timestamp updatedAt
+    }
 
-conversation_threads {
-  id:               uuid
-  conversationId:   string
-  source:           'native' | 'reply_chain' | 'derived' | 'manual'
-  externalThreadKey: string (nullable)
-  label:            string (nullable)
-  synopsis:         text (nullable)
-  keywords:         text[] (nullable)
-  isDefault:        boolean
-  status:           'open' | 'archived'
-  lastActiveAt:     timestamp
-  createdAt:        timestamp
-}
+    conversation_threads {
+        uuid id PK
+        string conversationId FK
+        string source
+        string externalThreadKey
+        string label
+        text synopsis
+        text_arr keywords
+        boolean isDefault
+        string status
+        timestamp lastActiveAt
+        timestamp createdAt
+    }
 
-messages {
-  id:             uuid
-  conversationId: string
-  threadId:       string (nullable, FK to conversation_threads)
-  role:           'user' | 'assistant'
-  content:        text
-  metadata:       jsonb
-  createdAt:      timestamp
-}
+    messages {
+        uuid id PK
+        string conversationId FK
+        string threadId FK
+        string role
+        text content
+        jsonb metadata
+        timestamp createdAt
+    }
+
+    conversations ||--o{ conversation_threads : has
+    conversations ||--o{ messages : contains
+    conversation_threads ||--o{ messages : scopes
 ```
 
-```plain text
-traces {
-  id:            uuid
-  conversationId: uuid
-  threadId:      uuid (nullable)
-  messageId:     uuid (nullable)
-  parentTraceId: uuid (nullable)
-  rootTraceId:   uuid (nullable)
-  agentName:     text
-  status:        'running' | 'completed' | 'failed'
-  startedAt:     timestamp
-  completedAt:   timestamp (nullable)
-  durationMs:    integer (nullable)
-  metadata:      jsonb (nullable)
-}
+```mermaid
+erDiagram
+    traces {
+        uuid id PK
+        uuid conversationId FK
+        uuid threadId FK
+        uuid messageId FK
+        uuid parentTraceId FK
+        uuid rootTraceId FK
+        text agentName
+        string status
+        timestamp startedAt
+        timestamp completedAt
+        integer durationMs
+        jsonb metadata
+    }
 
-trace_events {
-  id:          uuid
-  traceId:     uuid
-  seq:         integer
-  kind:        'tool_call' | 'tool_result' | ...
-  payload:     jsonb
-  createdAt:   timestamp
-}
+    trace_events {
+        uuid id PK
+        uuid traceId FK
+        integer seq
+        string kind
+        jsonb payload
+        timestamp createdAt
+    }
+
+    traces ||--o{ trace_events : contains
+    traces ||--o{ traces : "parent-child"
 ```
 
 **Thread routing:** `resolveThread()` always ensures a default thread, then routes by cheap derived heuristics with a model fallback. The resolver API also supports native thread keys, though current CLI and Telegram flows use the derived path.
@@ -650,32 +659,32 @@ flowchart TD
 
 ## Project Structure
 
-#### `apps/`
-
+### `apps/`
 ```plain text
 apps/
 ├── api/                        ← Production API (Cloudflare Workers)
 │   ├── wrangler.toml           ← Queue, DO, Workflow bindings
 │   └── src/
-│       ├── worker.ts           ← Worker entrypoint
-│       ├── index.ts            ← Local dev server
+│       ├── worker.ts           ← Worker entrypoint (webhook + queue handler)
+│       ├── index.ts            ← Local dev server (synchronous fallback)
 │       ├── queue/
 │       │   ├── consumer.ts     ← Queue batch handler
 │       │   └── runtime.ts      ← Shared Effect runtime factory
 │       ├── durable-objects/
-│       │   └── conversation-session.ts
+│       │   └── conversation-session.ts  ← Per-chat debouncing
 │       ├── workflows/
-│       │   └── agent-execution.ts
+│       │   └── agent-execution.ts       ← Durable agent execution
 │       └── telegram/
-│           ├── index.ts
-│           └── utils.ts
+│           ├── index.ts        ← TelegramBot service tag + layers
+│           └── utils.ts        ← Extracted Telegram utilities
 └── cli/                        ← MVP CLI runner
+    ├── package.json
+    ├── tsconfig.json
     └── src/
         └── index.ts            ← REPL + job runner entry point
 ```
 
-#### `packages/env`, `packages/db`
-
+### `packages/env, packages/db`
 ```plain text
 packages/
 ├── env/
@@ -687,24 +696,24 @@ packages/
     ├── drizzle.config.ts
     └── src/
         ├── client.ts           ← Drizzle client
-        └── schema/             ← All table definitions
-            ├── users.ts
-            ├── sessions.ts
-            ├── accounts.ts
-            ├── conversations.ts
-            ├── channels.ts
-            ├── documents.ts
-            ├── chunks.ts
-            ├── spaces.ts
-            ├── memory-entries.ts
-            ├── memory-sources.ts
-            ├── documents-to-spaces.ts
-            ├── jobs.ts
-            └── sandboxes.ts
+        ├── schema/             ← All table definitions
+        │   ├── users.ts
+        │   ├── sessions.ts
+        │   ├── accounts.ts
+        │   ├── conversations.ts
+        │   ├── channels.ts
+        │   ├── documents.ts
+        │   ├── chunks.ts
+        │   ├── spaces.ts
+        │   ├── memory-entries.ts
+        │   ├── memory-sources.ts
+        │   ├── documents-to-spaces.ts
+        │   ├── jobs.ts
+        │   └── sandboxes.ts
+        └── index.ts
 ```
 
-#### `packages/auth`, `packages/models`
-
+### `packages/auth, packages/models`
 ```plain text
 packages/
 ├── auth/
@@ -714,85 +723,82 @@ packages/
 │       └── index.ts
 └── models/
     └── src/
-        ├── registry.ts         ← OpenRouter model registry
+        ├── registry.ts         ← OpenRouter-backed model registry
         ├── errors.ts
         ├── providers/
-        │   ├── tts.ts          ← TTS interface (future)
-        │   └── stt.ts          ← STT interface (future)
+        │   ├── tts.ts          ← TTS interface + Cartesia (future)
+        │   └── stt.ts          ← STT interface + Whisper (future)
         └── index.ts
 ```
 
-#### `packages/memory`, `packages/computer`, `packages/channels`
-
+### `packages/memory, packages/computer, packages/channels`
 ```plain text
 packages/
 ├── memory/
 │   └── src/
-│       ├── types.ts
-│       ├── repository.ts
-│       ├── store.ts
-│       ├── search.ts
-│       ├── conversations.ts
-│       ├── cache.ts
-│       ├── dedupe.ts
-│       ├── prompt-builder.ts
-│       ├── middleware.ts
-│       ├── vercel.ts
+│       ├── types.ts            ← Public types
+│       ├── repository.ts       ← MemoryRepository interface
+│       ├── store.ts            ← addMemory
+│       ├── search.ts           ← searchMemories
+│       ├── conversations.ts    ← addConversation
+│       ├── cache.ts            ← MemoryCache
+│       ├── dedupe.ts           ← deduplicateMemories
+│       ├── prompt-builder.ts   ← buildMemoriesText, formatMemoriesForPrompt
+│       ├── middleware.ts       ← injectMemoriesIntoParams, transformParams
+│       ├── vercel.ts           ← withMemory wrapper
 │       └── index.ts
 ├── computer/
 │   └── src/
-│       ├── sandbox/
-│       ├── harness/
+│       ├── sandbox/            ← Sandbox lifecycle + tools
+│       ├── harness/            ← Codex task harness + supervisor
 │       ├── config.ts
 │       └── index.ts
 └── channels/
     └── src/
-        ├── types.ts
-        ├── registry.ts
+        ├── types.ts            ← Channel interface
+        ├── registry.ts         ← ChannelRegistry
         ├── adapters/
-        │   └── cli.ts
+        │   └── cli.ts          ← CLI adapter (MVP)
         └── index.ts
 ```
 
-#### `packages/agent`
-
+### `packages/agent`
 ```plain text
 packages/
 └── agent/
     └── src/
-        ├── agent.ts
-        ├── router.ts
+        ├── agent.ts            ← Orchestrator wiring, trace persistence
+        ├── router.ts           ← Thread routing, synopsis, archival
         ├── subagents/
-        │   ├── definitions.ts
-        │   ├── tool-groups.ts
-        │   ├── spawner.ts
+        │   ├── definitions.ts  ← Subagent types and 5 definitions
+        │   ├── tool-groups.ts  ← Tool grouping and resolution
+        │   ├── spawner.ts      ← Factory that creates delegate_* tools
         │   └── index.ts
         ├── tools/
-        │   ├── codex-auth.ts
-        │   ├── delegation.ts
-        │   ├── messaging.ts
+        │   ├── codex-auth.ts   ← Codex auth status + setup tools
+        │   ├── delegation.ts   ← Sandbox task delegation tools
+        │   ├── messaging.ts    ← send_message, schedule_job, set_timezone
         │   └── index.ts
-        ├── context.ts
-        ├── synopsis.ts
-        ├── traces.ts
+        ├── context.ts          ← Thread-tail loading + artifact recap
+        ├── synopsis.ts         ← Thread synopsis lifecycle
+        ├── traces.ts           ← Trace persistence + replay formatting
         ├── jobs/
-        │   ├── scheduler.ts
-        │   ├── runner.ts
+        │   ├── scheduler.ts    ← Job scheduling logic
+        │   ├── runner.ts       ← Job polling and execution
         │   └── index.ts
         ├── prompts/
-        │   └── system.ts
+        │   └── system.ts       ← System prompt templates
         └── index.ts
 ```
 
-#### Root
-
+### Root
 ```plain text
 amby/
 ├── docker/
 │   └── sandbox/
-│       └── Dockerfile
+│       └── Dockerfile              ← Custom Daytona snapshot image
 ├── supabase/
-│   └── config.toml
+│   └── config.toml                 ← Supabase local config
 ├── docs/
 │   ├── AGENT.md
 │   ├── ARCHITECTURE.md
@@ -800,16 +806,15 @@ amby/
 │   ├── MARKET.md
 │   ├── MEMORY.md
 │   └── MISSION.md
-├── package.json
-├── turbo.json
-├── tsconfig.base.json
+├── package.json                    ← Workspace root (Bun)
+├── turbo.json                      ← Turborepo pipeline config
+├── tsconfig.base.json              ← Shared TypeScript config
 └── .env.example
 ```
 
 ---
 
 ## CLI MVP: How It All Comes Together
-
 The CLI app (`apps/cli`) is the thin entry point that wires all packages together:
 
 ```mermaid
@@ -822,12 +827,35 @@ flowchart TD
     J --> R["7. Start REPL → readline loop"]
 ```
 
+A single CLI session looks like:
+
+```plain text
+$ amby
+
+📦 Connecting to database...
+✓ Connected to Supabase (local)
+
+🤖 Amby is ready. Type a message or Ctrl+C to exit.
+
+> What meetings do I have tomorrow?
+
+[Agent loads memory context]
+[Agent calls tools if needed]
+[Agent responds with meeting prep]
+
+You have 3 meetings tomorrow:
+1. 9:00 AM — Standup with engineering (recurring)
+2. 11:00 AM — 1:1 with Sarah (she mentioned wanting to discuss the Q2 roadmap)
+3. 2:00 PM — Client call with Acme Corp (prep: review the proposal you drafted last week)
+
+Want me to prepare anything for these?
+```
+
 ---
 
 ## MVP Scope
 
 ### In Scope
-
 - CLI channel — interactive REPL for testing
 - Agent core — system prompt, tool loop, message handling
 - Memory — Phase 1 from MEMORY.md (store, retrieve, inject, dedupe)
@@ -840,7 +868,6 @@ flowchart TD
 - Conversation persistence — all messages stored
 
 ### Out of Scope (Future)
-
 - Web, mobile, SMS, iMessage channels
 - Voice (TTS/STT via Cartesia + Whisper, LiveKit transport)
 - Tests
@@ -853,11 +880,15 @@ flowchart TD
 ---
 
 ## Future Roadmap
+**Voice.** LiveKit for real-time audio transport. Cartesia Sonic 3 for TTS. OpenAI Whisper API for STT. Agent gets
+`listen` and `speak` capabilities. Swappable providers via the TTS/STT interfaces defined in `@amby/models`.
 
-**Voice.** LiveKit for real-time audio transport. Cartesia Sonic 3 for TTS. OpenAI Whisper API for STT. Agent gets `listen` and `speak` capabilities. Swappable providers via the TTS/STT interfaces defined in `@amby/models`.
+**Web & mobile channels.** WebSocket-based real-time connection. Push notifications for proactive messages. Shared
+conversation history and memory across all devices. The channel abstraction makes adding these straightforward.
 
-**Web & mobile channels.** WebSocket-based real-time connection. Push notifications for proactive messages. Shared conversation history and memory across all devices. The channel abstraction makes adding these straightforward.
+**Production infra.** Supabase hosted. Proper worker processes for job execution. pg*cron + pg*net for webhook-based job
+triggers. BetterAuth serving HTTP for user sign-up/login. Deployment to a long-running cloud compute environment.
 
-**Production infra.** Supabase hosted. Proper worker processes for job execution. pg_cron + pg_net for webhook-based job triggers. BetterAuth serving HTTP for user sign-up/login. Deployment to a long-running cloud compute environment.
-
-**Trust features.** Clear audit trails for all agent actions. Permission-based action approval (the agent asks before acting). Memory visibility and editing for users. Transparent sandbox activity logs. These are not optional polish — they are core to the mission. See MISSION.md.
+**Trust features.** Clear audit trails for all agent actions. Permission-based action approval (the agent asks before
+acting). Memory visibility and editing for users. Transparent sandbox activity logs. These are not optional polish —
+they are core to the mission. See MISSION.md.

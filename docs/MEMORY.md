@@ -54,7 +54,7 @@ Those can exist elsewhere. This package should stay boring and sharp.
 
 A clean setup in Turborepo looks like this:
 
-```txt
+```plain text
 packages/
   db/
     src/
@@ -147,7 +147,7 @@ For prompt building, split memories into categories:
 
 Then deduplicate in this priority order:
 
-```txt
+```plain text
 static > dynamic > searchResults
 ```
 
@@ -712,7 +712,7 @@ export function deduplicateMemories(
 
 Priority order:
 
-```txt
+```plain text
 static > dynamic > searchResults
 ```
 
@@ -1411,7 +1411,7 @@ Auto-saving everything by default is how you accumulate nonsense.
 
 ### Prompt template default
 
-```txt
+```plain text
 User Memories:
 ## Static Profile
 - ...
@@ -1424,7 +1424,7 @@ Search results for the user's recent message:
 
 ### Conversation custom ID
 
-```txt
+```plain text
 conversation:{conversationId}
 ```
 
