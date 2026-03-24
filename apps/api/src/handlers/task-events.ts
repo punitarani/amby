@@ -5,8 +5,8 @@ import {
 	isLegalTransition,
 	isTerminal,
 	isTimestampValid,
-	TERMINAL_STATUSES,
 	TaskSupervisor,
+	TERMINAL_STATUSES,
 	verifyHmacSignature,
 } from "@amby/computer"
 import type { TaskEventKind, TaskEventSource, TaskStatus } from "@amby/db"
@@ -160,12 +160,11 @@ export const handleTaskEventPost = (request: Request) =>
 		const occurredAt = body.sentAt ? new Date(body.sentAt) : new Date()
 		const source = sourceFromEventType(body.eventType)
 		const kind = normalizeEventKind(body.eventType)
-		const eventPayload =
-			body.payload ?? {
-				status: body.status,
-				message: body.message,
-				exitCode: body.exitCode,
-			}
+		const eventPayload = body.payload ?? {
+			status: body.status,
+			message: body.message,
+			exitCode: body.exitCode,
+		}
 
 		if (kind === "backend.notify") {
 			const inserted = yield* Effect.promise(async () => {

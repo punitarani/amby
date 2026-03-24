@@ -108,7 +108,7 @@ const ACT_HINTS = [
 	/\bcheckout\b/i,
 ]
 
-const LEADING_URL_WRAPPERS_RE = /^[<({\["'`]+/
+const LEADING_URL_WRAPPERS_RE = /^[<({["'`]+/
 const TRAILING_URL_WRAPPERS_RE = /[>)}\]"'`]+$/
 const TRAILING_URL_PUNCTUATION_RE = /[.,!?;:]+$/
 

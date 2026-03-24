@@ -124,7 +124,7 @@ export async function persistTaskCompleted(
 				output: result.data,
 				artifacts: result.artifacts,
 				summary: result.summary,
-				error: result.status === "failed" ? result.issues?.[0]?.message ?? result.summary : null,
+				error: result.status === "failed" ? (result.issues?.[0]?.message ?? result.summary) : null,
 				runtimeData: result.runtimeData ?? null,
 				payload: {
 					status: result.status,

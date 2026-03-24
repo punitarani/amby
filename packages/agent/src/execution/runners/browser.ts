@@ -21,7 +21,9 @@ function buildBrowserTaskData(browserResult: BrowserTaskResult): ExecutionTaskRe
 	}
 }
 
-function buildBrowserRuntimeData(browserResult: BrowserTaskResult): Record<string, unknown> | undefined {
+function buildBrowserRuntimeData(
+	browserResult: BrowserTaskResult,
+): Record<string, unknown> | undefined {
 	const runtimeData = browserResult.runtimeData ?? {}
 	return {
 		...runtimeData,

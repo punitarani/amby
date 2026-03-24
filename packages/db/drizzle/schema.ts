@@ -573,10 +573,7 @@ export const tasks = pgTable(
 			"btree",
 			table.rootTaskId.asc().nullsLast().op("uuid_ops"),
 		),
-		index("tasks_specialist_idx").using(
-			"btree",
-			table.specialist.asc().nullsLast().op("text_ops"),
-		),
+		index("tasks_specialist_idx").using("btree", table.specialist.asc().nullsLast().op("text_ops")),
 		index("tasks_runner_kind_idx").using(
 			"btree",
 			table.runnerKind.asc().nullsLast().op("text_ops"),

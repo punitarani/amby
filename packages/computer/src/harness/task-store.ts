@@ -1,8 +1,8 @@
 import {
 	and,
-	desc,
 	type Database,
 	type DbError,
+	desc,
 	eq,
 	lt,
 	notInArray,
@@ -19,7 +19,13 @@ import { TERMINAL_STATUSES } from "./task-state"
 export type TaskQueryFn = <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, DbError>
 export type TaskRecord = typeof schema.tasks.$inferSelect
 export type TaskProgressKind = "task.started" | "task.progress" | "task.heartbeat"
-export type TaskTerminalStatus = "succeeded" | "partial" | "escalated" | "failed" | "timed_out" | "lost"
+export type TaskTerminalStatus =
+	| "succeeded"
+	| "partial"
+	| "escalated"
+	| "failed"
+	| "timed_out"
+	| "lost"
 export type TaskRecordInsert = typeof schema.tasks.$inferInsert
 export type TaskRecordUpdate = Partial<typeof schema.tasks.$inferInsert>
 
@@ -44,13 +50,13 @@ export function isSandboxTask(task: Pick<TaskRecord, "runtime" | "provider">): b
 	return task.runtime === "sandbox" && task.provider === "codex"
 }
 
-export function readTaskRuntimeData(task: Pick<TaskRecord, "runtimeData">): Record<string, unknown> {
+export function readTaskRuntimeData(
+	task: Pick<TaskRecord, "runtimeData">,
+): Record<string, unknown> {
 	return asRecord(task.runtimeData)
 }
 
-export function readSandboxRuntimeData(
-	task: Pick<TaskRecord, "runtime" | "runtimeData">,
-): {
+export function readSandboxRuntimeData(task: Pick<TaskRecord, "runtime" | "runtimeData">): {
 	authMode?: "api_key" | "chatgpt_account"
 	sandboxId?: string
 	sessionId?: string
@@ -93,7 +99,6 @@ export function deriveRuntimeForRunner(params: {
 				provider: "codex",
 				requiresBrowser: Boolean(params.requiresBrowser),
 			}
-		case "toolloop":
 		default:
 			return {
 				runtime: "in_process",
@@ -141,13 +146,17 @@ export function createTaskRecord(
 		eventPayload?: Record<string, unknown>
 	},
 ): Effect.Effect<void, DbError> {
-	const { eventPayload, ...taskValues } = params
+	const { eventPayload, id, ...taskValues } = params
+	const taskId = id ?? crypto.randomUUID()
 	return query(async (db) => {
 		const createdAt = new Date()
 		await db.transaction(async (tx) => {
-			await tx.insert(schema.tasks).values(taskValues)
+			await tx.insert(schema.tasks).values({
+				...taskValues,
+				id: taskId,
+			})
 			await tx.insert(schema.taskEvents).values({
-				taskId: taskValues.id!,
+				taskId,
 				eventId: crypto.randomUUID(),
 				source: "server",
 				kind: "task.created",

@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test"
 import type { BrowserService, BrowserTaskResult } from "@amby/browser"
 import { Effect } from "effect"
-import { describe, expect, it } from "bun:test"
 import type { ExecutionTask } from "../../types/execution"
 import { runBrowserSpecialist } from "./browser"
 

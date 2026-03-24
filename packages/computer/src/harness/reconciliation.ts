@@ -7,7 +7,12 @@ import { CodexProvider } from "./codex-provider"
 import { parseReplyTarget } from "./reply-target"
 import { collectTaskExecutionData } from "./task-execution-data"
 import { isTerminal, TERMINAL_STATUSES } from "./task-state"
-import { completeTaskRecord, isSandboxTask, readSandboxRuntimeData, type TaskQueryFn } from "./task-store"
+import {
+	completeTaskRecord,
+	isSandboxTask,
+	readSandboxRuntimeData,
+	type TaskQueryFn,
+} from "./task-store"
 import { appendTaskTraceTerminalEvent } from "./task-trace"
 
 type TaskRow = typeof schema.tasks.$inferSelect
@@ -111,7 +116,10 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 	}
 
 	try {
-		const cmd = await sandbox.process.getSessionCommand(runtimeData.sessionId, runtimeData.commandId)
+		const cmd = await sandbox.process.getSessionCommand(
+			runtimeData.sessionId,
+			runtimeData.commandId,
+		)
 		if (cmd.exitCode != null) {
 			if (shouldSkipProbeFinalize(task)) {
 				const skipNow = new Date()

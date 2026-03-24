@@ -6,9 +6,9 @@ import { createWorkersAI } from "workers-ai-provider"
 import {
 	BrowserError,
 	BrowserService,
-	type BrowserTaskProgressEvent,
 	type BrowserTaskInput,
 	type BrowserTaskPage,
+	type BrowserTaskProgressEvent,
 	type BrowserTaskResult,
 	type BrowserTaskRunOptions,
 	type BrowserTaskStatus,
@@ -213,7 +213,11 @@ async function runBrowserTask(
 
 	const { endpointURLString } = await import("@cloudflare/playwright")
 	let stagehand: Stagehand | undefined
-	const stagehandLogger = async (entry: { level?: number; message: string; [key: string]: unknown }) => {
+	const stagehandLogger = async (entry: {
+		level?: number
+		message: string
+		[key: string]: unknown
+	}) => {
 		if (entry.message === "Custom LLM clients are currently not supported in API mode") {
 			return
 		}

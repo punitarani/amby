@@ -1,6 +1,6 @@
 import { getTelegramChatId } from "@amby/connectors"
 import type { RunnerKind, SpecialistKind, TaskStatus } from "@amby/db"
-import { and, DbService, eq, inArray, lte, notInArray, schema } from "@amby/db"
+import { and, DbService, eq, inArray, lte, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Context, Effect, Layer } from "effect"
@@ -34,9 +34,8 @@ import { CodexInstaller } from "./codex-installer"
 import { CodexProvider } from "./codex-provider"
 import { probeSingleTask } from "./reconciliation"
 import { collectTaskExecutionData, previewTaskOutput } from "./task-execution-data"
-import { isTerminal, TERMINAL_STATUSES } from "./task-state"
+import { isTerminal } from "./task-state"
 import {
-	appendTaskEvent,
 	completeTaskRecord,
 	createTaskRecord,
 	isSandboxTask,
@@ -583,7 +582,10 @@ export const TaskSupervisorLive = Layer.scoped(
 							reason: "preparing_timeout",
 						})
 					} catch (e) {
-						console.error(`[TaskSupervisor] recovery: failed to append trace terminal event for ${row.id}:`, e)
+						console.error(
+							`[TaskSupervisor] recovery: failed to append trace terminal event for ${row.id}:`,
+							e,
+						)
 					}
 				}
 			} catch (e) {
