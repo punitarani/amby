@@ -65,10 +65,9 @@ jobs:
         run: |
           cd apps/api
           rm -rf dist-worker
-          npx wrangler versions upload --dry-run --outdir dist-worker
+          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps
           test -f dist-worker/worker.js
-          npx wrangler versions upload dist-worker/worker.js --no-bundle --upload-source-maps --dry-run
-
+          test -f dist-worker/worker.js.map
       - name: Validate deploy tooling
         run: |
           # @sentry/cli: local devDep of apps/api — must use scoped name with npx
@@ -196,8 +195,9 @@ jobs:
         run: |
           cd apps/api
           rm -rf dist-worker
-          npx wrangler versions upload --dry-run --outdir dist-worker --var SENTRY_RELEASE:"$GITHUB_SHA"
+          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA"
           test -f dist-worker/worker.js
+          test -f dist-worker/worker.js.map
         env:
           GITHUB_SHA: ${{ github.sha }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -209,7 +209,7 @@ jobs:
             set -euo pipefail
             cd apps/api
             # PostHog inject intentionally mutates the built worker.js bundle to stamp chunk IDs.
-            # The injected dist-worker artifact is the exact bundle deployed below with --no-bundle.
+            # The injected dist-worker artifact is the exact bundle deployed below with `wrangler deploy --no-bundle`.
             npx @posthog/cli sourcemap inject \
               --directory dist-worker \
               --release-name amby-api \
@@ -245,48 +245,37 @@ jobs:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
           GITHUB_SHA: ${{ github.sha }}
 
-      - name: Upload Worker Version
-        id: upload
+      - name: Deploy Worker
         run: |
           cd apps/api
           test -f dist-worker/worker.js
-          OUTPUT=$(npx wrangler versions upload dist-worker/worker.js \
+          test -f dist-worker/worker.js.map
+          # `wrangler versions upload --no-bundle` publishes only the prebuilt script artifact and
+          # skips the config-driven deployment shape that registers Workflows declared in wrangler.toml.
+          # Deploy the PostHog-injected bundle through `wrangler deploy` so workflow resources and
+          # bindings are applied from config while preserving the exact artifact we uploaded source maps for.
+          npx wrangler deploy dist-worker/worker.js \
             --no-bundle \
             --upload-source-maps \
             --var SENTRY_RELEASE:"$GITHUB_SHA" \
             --message "${{ steps.metadata.outputs.message }}" \
-            --tag "${{ steps.metadata.outputs.tag }}" 2>&1)
-          echo "$OUTPUT"
-          echo "command-output<<EOF" >> $GITHUB_OUTPUT
-          echo "$OUTPUT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+            --tag "${{ steps.metadata.outputs.tag }}"
         env:
           GITHUB_SHA: ${{ github.sha }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      - name: Extract Version ID
-        id: version
-        env:
-          UPLOAD_OUTPUT: ${{ steps.upload.outputs.command-output }}
-        run: |
-          VERSION_ID=$(echo "$UPLOAD_OUTPUT" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -n1)
-          if [ -z "$VERSION_ID" ]; then
-            echo "Failed to extract version ID"
-            echo "$UPLOAD_OUTPUT"
-            exit 1
-          fi
-          echo "version_id=${VERSION_ID}" >> $GITHUB_OUTPUT
-
-      - name: Deploy Worker Version
+      - name: Verify Workflows
         run: |
           cd apps/api
-          npx wrangler versions deploy ${{ steps.version.outputs.version_id }} --percentage 100 --yes
+          npx wrangler workflows describe sandbox-provision
+          npx wrangler workflows describe volume-provision
+          npx wrangler workflows describe agent-execution
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Log deployment
         run: |
-          echo "Deployed version ${{ steps.version.outputs.version_id }}"
+          echo "Deployed worker amby-api"
           echo "Tag: ${{ steps.metadata.outputs.tag }}"
