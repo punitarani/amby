@@ -7,12 +7,6 @@ import { Effect } from "effect"
 
 export type TraceRequestMode = "message" | "batched-message" | "stream-message"
 
-export type AgentConfig = {
-	userId: string
-	modelId: string
-	cuaEnabled: boolean
-}
-
 export type RequestTraceMetadata = {
 	request_id: string
 	conversation_id: string
@@ -25,13 +19,9 @@ export type RequestTraceMetadata = {
 export type AgentTraceMetadata = RequestTraceMetadata & {
 	user_id: string
 	model_id: string
-	cua_enabled: boolean
-	agent_role: "orchestrator" | "subagent"
-	agent_name: string
-	parent_agent_name?: string
-	delegation_tool?: string
-	agent_invocation_id?: string
-	agent_invocation_index?: number
+	agent_role: "conversation" | "specialist"
+	specialist_name?: string
+	task_id?: string
 }
 
 type TelemetryState = {

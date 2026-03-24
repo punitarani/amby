@@ -37,9 +37,9 @@ export interface WorkerBindings {
 	POSTHOG_HOST?: string
 	CF_VERSION_METADATA?: { id?: string }
 	BROWSER?: unknown
-	/** Workers AI binding — required for Stagehand browser agent (`@amby/browser/workers`). */
+	/** Workers AI binding — used by the Stagehand browser worker. */
 	AI?: unknown
-	/** AI Gateway id for `workers-ai-provider`. */
+	/** Optional AI Gateway id for Workers AI browser runs. */
 	CLOUDFLARE_AI_GATEWAY_ID?: string
 
 	// Cloudflare primitives — typed structurally for portability

@@ -1,0 +1,134 @@
+import { eq, schema } from "@amby/db"
+import { buildMemoriesText, deduplicateMemories, type MemoryService } from "@amby/memory"
+import { Effect } from "effect"
+import {
+	formatArtifactRecap,
+	loadOtherThreadSummaries,
+	loadThreadArtifacts,
+	loadThreadTail,
+} from "../context"
+import { AgentError } from "../errors"
+import type { ResolveThreadResult } from "../router"
+import { buildConversationPrompt } from "../specialists/prompts"
+
+type QueryFn = <T>(
+	fn: (db: import("@amby/db").Database) => Promise<T>,
+) => Effect.Effect<T, import("@amby/db").DbError>
+
+export type PreparedConversationContext = {
+	history: Array<{ role: "user" | "assistant"; content: string }>
+	systemPrompt: string
+	sharedPromptContext: string
+	userTimezone: string
+	formattedNow: string
+}
+
+export function prepareConversationContext(params: {
+	query: QueryFn
+	userId: string
+	conversationId: string
+	threadCtx: ResolveThreadResult
+	memory: import("effect").Context.Tag.Service<typeof MemoryService>
+}): Effect.Effect<PreparedConversationContext, AgentError | import("@amby/db").DbError> {
+	const { query, userId, conversationId, threadCtx, memory } = params
+
+	return Effect.gen(function* () {
+		const [userRows, profile] = yield* Effect.all(
+			[
+				query((db) =>
+					db
+						.select({ timezone: schema.users.timezone })
+						.from(schema.users)
+						.where(eq(schema.users.id, userId))
+						.limit(1),
+				),
+				memory
+					.getProfile(userId)
+					.pipe(
+						Effect.mapError(
+							(cause) => new AgentError({ message: "Failed to load memory profile", cause }),
+						),
+					),
+			],
+			{ concurrency: 2 },
+		)
+
+		const userTimezone = userRows[0]?.timezone ?? "UTC"
+		const formattedNow = new Intl.DateTimeFormat("en-US", {
+			timeZone: userTimezone,
+			dateStyle: "full",
+			timeStyle: "long",
+		}).format(new Date())
+
+		const deduped = deduplicateMemories(profile.static, profile.dynamic)
+		const memoryContext = buildMemoriesText(deduped)
+
+		const [threadRows, history, otherThreads, artifactRows] = yield* Effect.all(
+			[
+				query((db) =>
+					db
+						.select({
+							label: schema.conversationThreads.label,
+							synopsis: schema.conversationThreads.synopsis,
+						})
+						.from(schema.conversationThreads)
+						.where(eq(schema.conversationThreads.id, threadCtx.threadId))
+						.limit(1),
+				),
+				loadThreadTail(
+					query,
+					conversationId,
+					threadCtx.threadId,
+					undefined,
+					threadCtx.threadId === threadCtx.defaultThreadId,
+				),
+				loadOtherThreadSummaries(query, conversationId, threadCtx.threadId),
+				loadThreadArtifacts(
+					query,
+					conversationId,
+					threadCtx.threadId,
+					threadCtx.threadId === threadCtx.defaultThreadId,
+				),
+			],
+			{ concurrency: 4 },
+		)
+
+		const threadLabel = threadRows[0]?.label ?? null
+		const threadSynopsis = threadRows[0]?.synopsis?.trim() ?? ""
+		const artifactRecap = formatArtifactRecap(artifactRows, threadLabel)
+
+		const extraContext = [
+			otherThreads,
+			threadCtx.threadWasDormant && threadSynopsis
+				? `## Resumed thread synopsis\n${threadSynopsis}`
+				: "",
+			artifactRecap,
+		]
+			.filter(Boolean)
+			.join("\n\n")
+
+		const sharedPromptContext = [
+			memoryContext ? `# User Memory Context\n${memoryContext}` : "",
+			extraContext,
+			`# Current Date/Time\n${formattedNow} (${userTimezone})`,
+		]
+			.filter(Boolean)
+			.join("\n\n")
+
+		const systemPrompt = [
+			buildConversationPrompt(formattedNow, userTimezone),
+			memoryContext ? `# User Memory Context\n${memoryContext}` : "",
+			extraContext,
+		]
+			.filter(Boolean)
+			.join("\n\n")
+
+		return {
+			history,
+			systemPrompt,
+			sharedPromptContext,
+			userTimezone,
+			formattedNow,
+		}
+	})
+}
