@@ -2,7 +2,7 @@
 
 This document describes the sandbox compute layer (`@amby/computer`) and the task delegation system that lets Amby's agent spawn autonomous background workers.
 
-***
+---
 
 ## Overview
 
@@ -18,44 +18,32 @@ The user interacts with one agent. Under the hood, work is split across three ex
 
 **Future**: additional sandboxes sharing the same volume (N sandboxes : 1 volume : 1 user).
 
-```
-User ──> Channel ──> AgentService.handleMessage()
-                          │
-            LLM calls delegate_task with target
-                    │            │              │
-                    │            │              └── target="sandbox" + get_task
-                    │            │                          │
-                    │            │                ┌─────────┴──────────┐
-                    │            │                │  TaskSupervisor     │
-                    │            │                │  (state machine,    │
-                    │            │                │   session lifecycle,│
-                    │            │                │   heartbeat)        │
-                    │            │                └─────────┬──────────┘
-                    │            │                          │
-                    │            └── target="computer"      │
-                    │                    │                  │
-                    │                Daytona CUA            │
-                    │                                       │
-                    └── target="browser"                    │
-                             │                              │
-               Cloudflare Browser Rendering                 │
-               + Stagehand + AI Gateway                     │
-                                                            │
-                                       ┌────────────────────┴────────────────────┐
-                                       │       Daytona Sandbox (per-user)        │
-                                       │                                          │
-                                       │  /home/agent/workspace/tasks/{taskId}/  │
-                                       │    workspace/   (cwd)                   │
-                                       │    artifacts/   (outputs)               │
-                                       │    AGENTS.md                             │
-                                       │    prompt.txt                            │
-                                       │                                          │
-                                       │  Session: task-{taskId}                  │
-                                       │  $ codex exec --full-auto                │
-                                       └──────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    User --> Channel --> Agent["AgentService.handleMessage()"]
+    Agent -->|"LLM calls delegate_task"| Router{target?}
+    Router -->|"browser"| Browser["Cloudflare Browser Rendering\n+ Stagehand + AI Gateway"]
+    Router -->|"computer"| CUA["Daytona CUA"]
+    Router -->|"sandbox"| Supervisor
+
+    subgraph Supervisor["TaskSupervisor"]
+        direction TB
+        SM["State machine\nSession lifecycle\nHeartbeat"]
+    end
+
+    Supervisor --> Sandbox
+
+    subgraph Sandbox["Daytona Sandbox (per-user)"]
+        direction TB
+        Tasks["/home/agent/workspace/tasks/{taskId}/"]
+        WS["workspace/ (cwd)"]
+        Art["artifacts/ (outputs)"]
+        Files["AGENTS.md, prompt.txt"]
+        Cmd["Session: task-{taskId}\n$ codex exec --full-auto"]
+    end
 ```
 
-***
+---
 
 ## Key Decisions
 
@@ -72,7 +60,7 @@ User ──> Channel ──> AgentService.handleMessage()
 | Heartbeat | **Required** | Daytona auto-stop kills processes after 15 min. `refreshActivity()` every 60s keeps sandbox alive. |
 | Ordinary website automation | **Direct browser target when available** | Same-tab headless browsing prefers `delegate_task target="browser"`. When that target is unavailable (for example in local Bun runtimes), sandbox tasks can fall back to `needsBrowser: true`. |
 
-***
+---
 
 ## Module Layout
 
@@ -118,7 +106,7 @@ codex-auth.ts             # Codex auth status + setup tools
 tasks.ts                  # tasks table
 ```
 
-***
+---
 
 ## Task Lifecycle
 
@@ -155,7 +143,7 @@ stateDiagram-v2
 | `lost` | Supervisor restarted but session/sandbox gone |
 | `awaiting_auth` | Waiting for user auth (future ChatGPT account mode) |
 
-***
+---
 
 ## Architecture Detail
 
@@ -234,7 +222,7 @@ interface TaskProvider {
 * If reachable → re-register in active map
 * If gone → mark as `lost`
 
-***
+---
 
 ## Agent Tools
 
@@ -269,7 +257,7 @@ Output: { taskId, status, outputSummary, error, exitCode, startedAt, completedAt
 
 `get_task`, `probe_task`, and `get_task_artifacts` apply only to `delegate_task target="sandbox"` tasks.
 
-***
+---
 
 ## DB Schema: `tasks`
 
@@ -298,7 +286,7 @@ Output: { taskId, status, outputSummary, error, exitCode, startedAt, completedAt
 
 **What is NOT stored:** MCP config (lives in `.codex/config.toml`), logs (in `artifacts/stderr.log`), full result (in `artifacts/result.md`).
 
-***
+---
 
 ## Auth Flow
 
@@ -309,7 +297,7 @@ Codex auth now follows the official Codex CLI model instead of a custom OAuth im
 * **Persistence**: Store auth state and pending device-login metadata in `user_volumes.auth_config` (survives sandbox replacement), while the actual credentials stay in the sandbox filesystem via the mounted volume.
 * **Fallback**: If device auth is unavailable, import a trusted `~/.codex/auth.json` from another machine rather than implementing a custom OAuth callback flow.
 
-***
+---
 
 ## Browser Delegation
 
@@ -323,27 +311,24 @@ Single-tab browser work now runs outside the sandbox task system.
 
 This keeps ordinary website automation fast and direct when the browser target exists, while preserving a sandbox fallback in runtimes that do not expose it.
 
-***
+---
 
 ## Layer Composition
 
 `TaskSupervisorLive` depends on `SandboxService`, `DbService`, and `EnvService`. It must be composed **above** `SandboxServiceLive`:
 
-```
-AgentService, JobRunnerService
-  │
-  ├── MemoryServiceLive
-  ├── TaskSupervisorLive    ← needs SandboxService
-  ├── ModelServiceLive
-  │
-  └── SandboxServiceLive    ← provided below TaskSupervisorLive
-      │
-      └── DbServiceLive
-          │
-          └── EnvServiceLive
+```mermaid
+graph BT
+    Env["EnvServiceLive"] --> Db["DbServiceLive"]
+    Db --> Sandbox["SandboxServiceLive"]
+    Sandbox --> Task["TaskSupervisorLive"]
+    Sandbox --> Memory["MemoryServiceLive"]
+    Task --> Top["AgentService, JobRunnerService"]
+    Memory --> Top
+    Model["ModelServiceLive"] --> Top
 ```
 
-***
+---
 
 ## Sandbox Filesystem Layout
 
@@ -368,7 +353,7 @@ AgentService, JobRunnerService
   harnesses.json                   # Installer cache manifest (survives sandbox stop/start)
 ```
 
-***
+---
 
 ## Future
 

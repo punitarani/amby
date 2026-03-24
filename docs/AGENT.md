@@ -1,177 +1,260 @@
-# Agent Architecture
+# Agent
 
-Amby uses one orchestrator agent plus a small set of specialized subagents. The orchestrator owns the user experience. Subagents do scoped work and return concise summaries.
+Amby's agent is a conversation-first coordinator with a separate execution runtime.
 
-The user never sees the delegation layer. They interact with one assistant.
+That distinction matters.
 
-## High-Level Flow
+The user talks to one assistant. Internally, the system does **not** stuff all work into one flat tool loop anymore. It:
+1. resolves the active thread,
+2. builds thread-aware context,
+3. runs the conversation loop,
+4. optionally plans specialist execution,
+5. persists both the visible response and the hidden execution record.
 
-```
-Inbound message
-  → resolve thread
-  → load thread-aware context
-  → run orchestrator
-  → optionally delegate to subagents
-  → save visible transcript
-  → persist execution traces
-```
+## Core responsibilities
 
-## Orchestrator, Direct Tools, and Subagents
+The conversation agent owns:
+- thread resolution,
+- context assembly,
+- direct answering,
+- deciding when specialist execution is needed,
+- synthesis of final user-facing text,
+- linking transcript rows to execution traces.
 
-All delegated agents are AI SDK v6 `ToolLoopAgent` instances. The orchestrator keeps coordination tools plus a small set of direct capabilities. Heavy work is delegated.
+The execution runtime owns:
+- specialist planning,
+- task dependency ordering,
+- lock-aware batching,
+- background handoff,
+- validation when required,
+- durable task persistence.
 
-| Agent | Tool groups | Role |
-|---|---|---|
-| `research` | `memory-read`, `computer-read` | Read files, inspect state, gather information |
-| `builder` | `memory-read`, `computer-read`, `computer-write` | Create or change files, run code |
-| `planner` | none | Pure reasoning and decomposition |
-| `integration` | `integration` | Connected-app work via Composio tools |
-| `computer` | `cua` | GUI automation when CUA is enabled |
-| `memory_manager` | `memory-read`, `memory-write` | Save and organize memories |
+## Current mental model
 
-Subagents are exposed to the orchestrator as tools such as `delegate_research` and `delegate_builder`.
+The cleanest way to document the current design is this:
 
-The orchestrator also gets a few direct tools that are not subagents:
+> The top-level agent is a conversation orchestrator. When work exceeds a direct answer, it calls the internal execution runtime, which plans and runs specialist tasks.
 
-- `delegate_task` for unified browser/computer/sandbox delegation
-- `get_task` and related sandbox task inspection tools for background Codex tasks
-- reply/job/memory tools
+That is more accurate than describing the system as a loose bag of exposed subagent delegation tools.
 
-## Request Lifecycle
+## Request lifecycle
 
-1. `resolveThread()` chooses the active thread for the inbound message.
-2. `prepareContext()` loads:
-   - the active thread tail
-   - other open-thread summaries
-   - recent thread artifact summaries
-   - a resumed-thread synopsis when needed
-   - user memory and formatted current time
-3. The orchestrator runs with direct access to:
-   - `search_memories`
-   - `delegate_task` when at least one delegated execution target is enabled
-   - job tools
-   - reply tools
-   - Codex auth tools when sandbox support is available
-   - background task tools when sandbox support is available
-   - delegated subagent tools
-4. A delegated subagent returns `{ summary, toolsUsed? }`.
-5. The orchestrator synthesizes the final user-facing response.
-6. User and assistant messages are saved on `messages` with the resolved `threadId`.
-7. Execution is persisted as a trace tree rooted at the orchestrator run.
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant Ch as Channel / Workflow
+    participant A as AgentService
+    participant R as Thread Router
+    participant Ctx as Context Builder
+    participant X as Execution Runtime
+    participant DB as Database
 
-## Thread Routing
+    U->>Ch: Send message
+    Ch->>A: handleMessage / handleBatchedMessages
+    A->>R: resolveThread(conversationId, inboundText)
+    R-->>A: threadId + routing decision
+    A->>Ctx: prepareConversationContext(...)
+    Ctx-->>A: history + system prompt + shared context
+    A->>DB: create root trace
+    A->>A: run conversation ToolLoopAgent
 
-Threading is internal. A single platform conversation can contain multiple derived topic threads.
-
-### Resolution order
-
-1. Ensure the conversation has a default thread.
-2. Archive stale open threads older than 24 hours.
-3. If a channel provides a native thread key, resolve through that.
-4. Otherwise use the derived router:
-   - continue when the last message was under 2 minutes ago
-   - switch when a thread label matches by word boundary
-   - switch when at least 2 stored keywords match
-   - fall back to a structured `generateObject()` routing call for `continue`, `switch`, or `new`
-
-Current CLI and Telegram flows use the derived path. The resolver API already supports native thread keys, but callers do not pass them yet.
-
-### Thread lifecycle
-
-```
-new → open → archived
+    alt direct answer
+        A->>DB: save user + assistant messages
+        A->>DB: complete trace
+        A-->>Ch: final response
+    else specialist execution needed
+        A->>X: execute_plan(request, context?)
+        X-->>A: execution summary
+        A->>DB: save user + assistant messages
+        A->>DB: complete trace
+        A-->>Ch: synthesized response
+    end
 ```
 
-Synopsis generation happens when:
+## Current direct tools
 
-- the agent switches away from a thread that has been idle for more than 1 hour
-- a thread is archived after more than 24 hours of inactivity
-- the active thread would overflow the 20-message replay tail
+Document these as the actual direct tools of the conversation loop:
 
-The default thread includes legacy rows with `NULL thread_id`, so pre-threading history is still visible.
-
-## Context Replay
-
-The prompt is thread-aware, not conversation-wide.
-
-`loadThreadTail()` loads the recent message tail for the active thread. For the last 4 assistant messages, the loader appends lightweight annotations built from recent `tool_result` trace events:
-
-```
-[Tools used: delegate_builder: Created auth middleware]
-```
-
-`loadThreadArtifacts()` separately turns recent trace summaries into a compact `Thread context` block for the system prompt. This gives the model artifact awareness without replaying full raw tool payloads.
-
-## Trace Model
-
-Visible transcript and execution state are stored separately.
-
-### `messages`
-
-`messages` stores only the user-visible transcript:
-
-- `conversationId`
-- `threadId`
-- `role`
-- `content`
-- `metadata`
-
-### `traces`
-
-`traces` stores the execution tree:
-
-- one root trace for the orchestrator
-- child traces for delegated subagents
-- `conversationId`, `threadId`, `messageId`
-- `parentTraceId`, `rootTraceId`
-- `agentName`, `status`, timing, metadata
-
-### `trace_events`
-
-`trace_events` stores ordered execution events per trace. The current persistence path writes `tool_call` and `tool_result` events with a monotonic `seq`.
-
-This split keeps prompt replay cheap while preserving full execution fidelity for debugging and follow-up context.
-
-## Tool Grouping
-
-Subagent tool access is defined by named groups in `packages/agent/src/subagents/tool-groups.ts`.
-
-| Group | Tools |
+| Tool | Purpose |
 |---|---|
-| `memory-read` | `search_memories` |
-| `memory-write` | `save_memory` |
-| `computer-read` | `execute_command`, `read_file` |
-| `computer-write` | `write_file` |
-| `integration` | connector management + user-scoped connector session tools |
-| `cua` | desktop automation tools |
+| `search_memories` | Read user memory before or during response generation |
+| `send_message` | Emit short progress updates in runtimes that support incremental replies |
+| `execute_plan` | Hand work to the internal execution runtime |
+| `query_execution` | Inspect durable execution state for work that is running or recently completed |
 
-The research agent uses the same `execute_command` tool as the builder, but its prompt constrains it to read-only operations.
+That is the authoritative surface in the current code.
 
-## Routing Rules
+## Agent configuration policy
 
-The orchestrator chooses among three execution paths:
+The current runtime policy is intentionally constrained:
 
-- Connected apps like Gmail, Calendar, Notion, Slack, and Drive go to `delegate_integration`.
-- Ordinary same-tab website work goes to `delegate_task` with `target="browser"` when browser support is enabled.
-- If direct browser delegation is unavailable in the runtime, website work can fall back to `delegate_task` with `target="sandbox"` and `needsBrowser: true`.
-- Real desktop tasks go to `delegate_task` with `target="computer"` when the flow needs a screen, native dialogs, file pickers, uploads/downloads, CAPTCHA/MFA, popups/new tabs, or other non-browser UI.
-- Long-running autonomous background Codex work goes to `delegate_task` with `target="sandbox"`.
+- direct answers are allowed,
+- background tasks are allowed only when sandbox execution is enabled,
+- memory writes are allowed,
+- external writes are allowed,
+- write confirmation is required,
+- max specialist depth is currently **1**,
+- max conversation steps is **8**,
+- max parallel agents is **3**,
+- max tool calls per run is **32**.
 
-## Design Choices
+Those settings are important because they define the actual operational envelope.
 
-- Orchestrator-only delegation keeps control flow simple.
-- Memory writes are isolated behind `delegate_memory_manager`.
-- Shared prompt context is assembled once and passed into subagents at spawn time.
-- Trace metadata is intentionally low-PII. Memories and formatted timestamps stay in prompts, not in telemetry metadata.
+## Thread-aware context model
 
-## Key Files
+The agent is not replaying one giant flat transcript.
 
-| File | Purpose |
+The context builder currently composes:
+- active thread history,
+- user timezone,
+- formatted current time,
+- deduplicated user memory profile,
+- summaries of other threads,
+- resumed-thread synopsis when coming back to a dormant thread,
+- artifact recap for recent thread execution outputs.
+
+That means the effective context window is already thread-aware and execution-aware.
+
+## Thread routing model
+
+The resolver has four conceptual stages:
+1. ensure a default thread exists,
+2. archive stale threads,
+3. resolve native platform thread identity when available,
+4. otherwise use derived routing with heuristics first and a model fallback second.
+
+### Current derived routing rules
+
+These are real, not aspirational:
+- continue the last active thread when the gap is under 2 minutes,
+- switch when a thread label matches clearly,
+- switch when at least 2 stored keywords match,
+- otherwise ask a model to choose `continue`, `switch`, or `new`.
+
+### Current lifecycle thresholds
+
+- dormant thread threshold: **1 hour**
+- stale archive threshold: **24 hours**
+- recent tail budget: **20 messages**
+
+## Internal execution runtime
+
+The execution runtime is the actual backbone for specialist work.
+
+It has four core parts:
+
+### 1. Planner
+The planner decides whether the request should be:
+- `direct`
+- `sequential`
+- `parallel`
+- `background`
+
+It uses heuristics first and falls back to model planning only when warranted.
+
+### 2. Specialist registry
+The current specialist set is:
+- `conversation`
+- `planner`
+- `research`
+- `builder`
+- `integration`
+- `computer`
+- `browser`
+- `memory`
+- `settings`
+- `validator`
+
+Each specialist has:
+- a runner kind,
+- a model policy,
+- a max step budget,
+- allowed tool groups,
+- input and result schema.
+
+### 3. Coordinator
+The coordinator:
+- materializes task IDs and dependency IDs,
+- computes ready batches,
+- honors dependency failures,
+- executes tasks inline or in parallel when safe,
+- persists traces and durable tasks,
+- runs validator work when required.
+
+### 4. Reducer / summary synthesis
+Execution returns a structured summary that the conversation agent turns into the final user-facing answer.
+
+## Specialist tool groups
+
+The current group model is the right abstraction to document:
+
+| Group | Meaning |
 |---|---|
-| `packages/agent/src/agent.ts` | Main request flow, context assembly, persistence |
-| `packages/agent/src/router.ts` | Thread resolution, archival, synopsis generation |
-| `packages/agent/src/context.ts` | Thread-tail loading, artifact recap, replay annotations |
-| `packages/agent/src/synopsis.ts` | Dormancy and overflow synopsis updates |
-| `packages/agent/src/traces.ts` | Trace persistence and tool annotation formatting |
-| `packages/agent/src/subagents/spawner.ts` | `delegate_*` tool creation |
-| `packages/agent/src/subagents/tool-groups.ts` | Tool-group definitions and resolution |
+| `memory-read` | Search/retrieve memory |
+| `memory-write` | Save memory |
+| `sandbox-read` | Read files / inspect sandbox state |
+| `sandbox-write` | Modify files / sandbox state |
+| `settings` | Scheduling, timezone, Codex auth, related settings actions |
+| `cua` | Desktop-computer tools |
+| `integration` | Connected-app tools |
+
+This is cleaner and more future-proof than documenting per-subagent tool names as the main architecture.
+
+## Execution modes
+
+```mermaid
+flowchart TD
+    Request[Inbound user request] --> Decide{Can answer directly?}
+    Decide -->|Yes| Direct[Direct answer]
+    Decide -->|No| Plan[Build execution plan]
+
+    Plan --> Strategy{Strategy}
+    Strategy -->|sequential| Seq[Run tasks in order]
+    Strategy -->|parallel| Par[Run independent tasks concurrently]
+    Strategy -->|background| Bg[Create durable background task]
+
+    Seq --> Reduce[Build execution summary]
+    Par --> Reduce
+    Bg --> Reduce
+    Reduce --> Final[Conversation agent synthesizes final response]
+```
+
+## Persistence contract
+
+The agent now writes to three different categories of state:
+
+### Transcript state
+- `messages`
+
+### Execution trace state
+- `traces`
+- `trace_events`
+
+### Durable work state
+- `tasks`
+- `task_events`
+
+This split should be documented explicitly. It is one of the biggest improvements in the current system.
+
+## Clear statements to include
+
+- `messages` contains only user-visible transcript.
+- Tool calls and tool results are not flattened into `messages`.
+- Orchestrator execution is represented by a root trace.
+- Specialist execution is represented by child traces and, when durable, task rows.
+- Background handoff is a first-class execution mode, not a hack around synchronous chat.
+
+## Near-future direction
+
+The current abstractions already support the next step cleanly:
+- deeper specialist nesting,
+- better validation passes,
+- richer execution retry/resume,
+- better surfaced progress updates,
+- more structured user-visible approvals before write actions.
+
+## Open questions
+
+1. Should `execute_plan` remain a single execution boundary tool, or should the conversation loop eventually expose narrower internal tools for planning vs execution vs validation?
+2. Should the validator become mandatory for all mutating specialist plans, or remain conditional?
+3. Should thread routing move to a dedicated service boundary once more channels with native threading are live?
