@@ -27,8 +27,8 @@
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",
-		"@amby/models": "workspace:*",
 		"@daytonaio/sdk": "^0.153.0",
+		"@openrouter/ai-sdk-provider": "^2.3.1",
 		"cron-parser": "^5.5.0"
 	},
 	"peerDependencies": {

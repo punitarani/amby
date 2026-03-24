@@ -2,6 +2,7 @@ import {
 	AgentService,
 	JobRunnerService,
 	JobRunnerServiceLive,
+	ModelServiceLive,
 	makeAgentServiceLive,
 } from "@amby/agent"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
@@ -11,7 +12,6 @@ import { ConnectorsServiceLive } from "@amby/connectors"
 import { DbService, DbServiceLive, eq, schema } from "@amby/db"
 import { EnvServiceLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
-import { ModelServiceLive } from "@amby/models"
 import { Effect, Layer } from "effect"
 
 const userId: string = (() => {

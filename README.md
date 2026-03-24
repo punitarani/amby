@@ -13,11 +13,10 @@ packages/
   env             Environment config (Effect.Config + Redacted secrets)
   db              Postgres via Drizzle ORM + Effect service layer
   auth            BetterAuth with Drizzle adapter
-  models          OpenRouter provider registry (Gemini 3.1 Flash Lite default)
   memory          Persistent user memory — static facts + dynamic context
   computer        Daytona sandboxes — isolated per-user compute
   channels        Channel abstraction — CLI now, SMS/web/mobile later
-  agent           Core agent loop — orchestrates all services via Effect layers
+  agent           Core agent loop — orchestrates all services and model selection
 ```
 
 ## Stack

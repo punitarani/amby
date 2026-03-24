@@ -18,7 +18,6 @@
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",
-		"@amby/models": "workspace:*",
 		"effect": "^3.19.19"
 	}
 }

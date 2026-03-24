@@ -5,7 +5,6 @@ import { ConnectorsService, createConnectorManagementTools } from "@amby/connect
 import { DbService, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { createMemoryTools, MemoryService } from "@amby/memory"
-import { HIGH_INTELLIGENCE_MODEL_ID, ModelService } from "@amby/models"
 import { stepCountIs, ToolLoopAgent, type ToolSet, tool } from "ai"
 import { Context, Effect, Layer } from "effect"
 import { z } from "zod"
@@ -15,6 +14,7 @@ import { executeRequestPlan } from "./execution/coordinator"
 import { createRootTrace, type TraceWriter } from "./execution/ledger"
 import { queryExecution } from "./execution/query-execution"
 import type { ToolGroups } from "./execution/registry"
+import { HIGH_INTELLIGENCE_MODEL_ID, ModelService } from "./models"
 import { type ResolveThreadResult, resolveThread } from "./router"
 import {
 	synopsisCurrentThreadIfOverflowsAfterSave,

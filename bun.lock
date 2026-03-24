@@ -28,7 +28,6 @@
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@amby/memory": "workspace:*",
-        "@amby/models": "workspace:*",
         "@chat-adapter/state-memory": "^4.20.2",
         "@chat-adapter/telegram": "^4.20.2",
         "@cloudflare/playwright": "^1.1.2",
@@ -56,7 +55,6 @@
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@amby/memory": "workspace:*",
-        "@amby/models": "workspace:*",
         "effect": "^3.19.19",
       },
     },
@@ -96,9 +94,9 @@
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@amby/memory": "workspace:*",
-        "@amby/models": "workspace:*",
         "@braintrust/otel": "^0.2.0",
         "@daytonaio/sdk": "^0.153.0",
+        "@openrouter/ai-sdk-provider": "^2.3.1",
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/context-async-hooks": "^2.2.0",
         "@opentelemetry/core": "^2.2.0",
@@ -212,19 +210,6 @@
         "zod": "^3.24.0",
       },
     },
-    "packages/models": {
-      "name": "@amby/models",
-      "version": "0.1.0",
-      "dependencies": {
-        "@ai-sdk/openai": "^1.3.0",
-        "@amby/env": "workspace:*",
-        "@openrouter/ai-sdk-provider": "^2.3.1",
-      },
-      "peerDependencies": {
-        "ai": "^6.0.116",
-        "effect": "^3.19.19",
-      },
-    },
   },
   "packages": {
     "@ai-sdk/anthropic": ["@ai-sdk/anthropic@1.2.12", "", { "dependencies": { "@ai-sdk/provider": "1.1.3", "@ai-sdk/provider-utils": "2.2.8" }, "peerDependencies": { "zod": "^3.0.0" } }, "sha512-YSzjlko7JvuiyQFmI9RN1tNZdEiZxc+6xld/0tq/VkJaHpEzGAb1yiNxxvmYVcjvfu/PcvCxAAYXmTYQQ63IHQ=="],
@@ -284,8 +269,6 @@
     "@amby/env": ["@amby/env@workspace:packages/env"],
 
     "@amby/memory": ["@amby/memory@workspace:packages/memory"],
-
-    "@amby/models": ["@amby/models@workspace:packages/models"],
 
     "@amby/web": ["@amby/web@workspace:apps/web"],
 

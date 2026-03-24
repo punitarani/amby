@@ -1,6 +1,6 @@
 import type { RunnerKind, SpecialistKind } from "@amby/db"
-import { HIGH_INTELLIGENCE_MODEL_ID } from "@amby/models"
 import type { FlexibleSchema, ToolSet } from "ai"
+import { HIGH_INTELLIGENCE_MODEL_ID } from "../models"
 import { buildSpecialistPrompt } from "../specialists/prompts"
 import {
 	browserTaskInputSchema,
