@@ -2,7 +2,7 @@
 
 This document describes the sandbox compute layer (`@amby/computer`) and the task delegation system that lets Amby's agent spawn autonomous background workers.
 
-***
+---
 
 ## Overview
 
@@ -43,7 +43,7 @@ flowchart TD
     end
 ```
 
-***
+---
 
 ## Key Decisions
 
@@ -60,7 +60,7 @@ flowchart TD
 | Heartbeat | **Required** | Daytona auto-stop kills processes after 15 min. `refreshActivity()` every 60s keeps sandbox alive. |
 | Ordinary website automation | **Direct browser target when available** | Same-tab headless browsing prefers `delegate_task target="browser"`. When that target is unavailable (for example in local Bun runtimes), sandbox tasks can fall back to `needsBrowser: true`. |
 
-***
+---
 
 ## Module Layout
 
@@ -106,7 +106,7 @@ codex-auth.ts             # Codex auth status + setup tools
 tasks.ts                  # tasks table
 ```
 
-***
+---
 
 ## Task Lifecycle
 
@@ -143,7 +143,7 @@ stateDiagram-v2
 | `lost` | Supervisor restarted but session/sandbox gone |
 | `awaiting_auth` | Waiting for user auth (future ChatGPT account mode) |
 
-***
+---
 
 ## Architecture Detail
 
@@ -222,7 +222,7 @@ interface TaskProvider {
 * If reachable → re-register in active map
 * If gone → mark as `lost`
 
-***
+---
 
 ## Agent Tools
 
@@ -257,7 +257,7 @@ Output: { taskId, status, outputSummary, error, exitCode, startedAt, completedAt
 
 `get_task`, `probe_task`, and `get_task_artifacts` apply only to `delegate_task target="sandbox"` tasks.
 
-***
+---
 
 ## DB Schema: `tasks`
 
@@ -286,7 +286,7 @@ Output: { taskId, status, outputSummary, error, exitCode, startedAt, completedAt
 
 **What is NOT stored:** MCP config (lives in `.codex/config.toml`), logs (in `artifacts/stderr.log`), full result (in `artifacts/result.md`).
 
-***
+---
 
 ## Auth Flow
 
@@ -297,7 +297,7 @@ Codex auth now follows the official Codex CLI model instead of a custom OAuth im
 * **Persistence**: Store auth state and pending device-login metadata in `user_volumes.auth_config` (survives sandbox replacement), while the actual credentials stay in the sandbox filesystem via the mounted volume.
 * **Fallback**: If device auth is unavailable, import a trusted `~/.codex/auth.json` from another machine rather than implementing a custom OAuth callback flow.
 
-***
+---
 
 ## Browser Delegation
 
@@ -311,7 +311,7 @@ Single-tab browser work now runs outside the sandbox task system.
 
 This keeps ordinary website automation fast and direct when the browser target exists, while preserving a sandbox fallback in runtimes that do not expose it.
 
-***
+---
 
 ## Layer Composition
 
@@ -328,7 +328,7 @@ graph BT
     Model["ModelServiceLive"] --> Top
 ```
 
-***
+---
 
 ## Sandbox Filesystem Layout
 
@@ -353,7 +353,7 @@ graph BT
   harnesses.json                   # Installer cache manifest (survives sandbox stop/start)
 ```
 
-***
+---
 
 ## Future
 

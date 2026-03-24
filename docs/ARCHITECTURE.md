@@ -208,10 +208,10 @@ google/gemini-3-flash-preview         → higher-intelligence override
 `OPENROUTER_API_KEY` powers the agent runtime. `OPENAI_API_KEY` remains useful for Codex running inside user
 sandboxes, but it is not the primary application model provider.
 
-***
+---
 
 ### @amby/memory
-The memory brain. Fully described in MEMORY.md.
+The memory brain. Fully described in [MEMORY.md](./MEMORY.md).
 
 Stores, retrieves, deduplicates, and injects memories into LLM calls.
 
@@ -326,7 +326,7 @@ user replies, the exchange continues reactively in that same conversation thread
 
 ### @amby/agent
 The highest-level package. Brings everything together into a multi-agent orchestrator that any app (CLI, API server,
-etc.) can instantiate. See AGENT.md for the full multi-agent architecture.
+etc.) can instantiate. See [AGENT.md](./AGENT.md) for the full multi-agent architecture.
 
 **Exports:** `AgentService` (Effect service tag), `makeAgentServiceLive(userId)` (service factory), subagent definitions
 and utilities.
@@ -821,7 +821,7 @@ flowchart TD
 
 - CLI channel — interactive REPL for testing
 - Agent core — system prompt, tool loop, message handling
-- Memory — Phase 1 from MEMORY.md (store, retrieve, inject, dedupe)
+- Memory — Phase 1 from [MEMORY.md](./MEMORY.md) (store, retrieve, inject, dedupe)
 - Models — OpenRouter-backed Vercel AI SDK provider registry
 - Computer — Daytona sandbox create/start/stop/execute
 - DB — full schema, Drizzle migrations, Supabase local
@@ -837,7 +837,7 @@ flowchart TD
 - Tests
 - Production deployment
 - User dashboard / admin UI
-- Advanced memory (versioning, forgetting, compression — phases 2-3 of MEMORY.md)
+- Advanced memory (versioning, forgetting, compression — phases 2-3 of [MEMORY.md](./MEMORY.md))
 - Multi-user / multi-tenant
 - Rate limiting, billing, usage tracking
 
@@ -851,4 +851,4 @@ flowchart TD
 
 **Production infra.** Supabase hosted. Proper worker processes for job execution. pg_cron + pg_net for webhook-based job triggers. BetterAuth serving HTTP for user sign-up/login. Deployment to a long-running cloud compute environment.
 
-**Trust features.** Clear audit trails for all agent actions. Permission-based action approval (the agent asks before acting). Memory visibility and editing for users. Transparent sandbox activity logs. These are not optional polish — they are core to the mission. See MISSION.md.
+**Trust features.** Clear audit trails for all agent actions. Permission-based action approval (the agent asks before acting). Memory visibility and editing for users. Transparent sandbox activity logs. These are not optional polish — they are core to the mission. See [MISSION.md](./MISSION.md).
