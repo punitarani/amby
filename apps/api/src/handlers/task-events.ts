@@ -1,13 +1,16 @@
 import {
+	appendTaskTraceTerminalEvent,
 	CALLBACK_HEARTBEAT_INTERVAL_MS,
 	hashSecret,
 	isLegalTransition,
 	isTerminal,
 	isTimestampValid,
+	TaskSupervisor,
+	TERMINAL_STATUSES,
 	verifyHmacSignature,
 } from "@amby/computer"
-import type { TaskEventSource, TaskStatus } from "@amby/db"
-import { and, DbService, eq, lt, schema } from "@amby/db"
+import type { TaskEventKind, TaskEventSource, TaskStatus } from "@amby/db"
+import { and, DbService, eq, lt, notInArray, schema } from "@amby/db"
 import { Effect } from "effect"
 
 type TaskEventBody = {
@@ -28,10 +31,49 @@ function jsonResponse(body: Record<string, unknown>, status: number): Response {
 	return new Response(JSON.stringify(body), { status, headers: jsonHeaders })
 }
 
+function ackResponse() {
+	return jsonResponse(
+		{
+			ack: true,
+			cancelRequested: false,
+			nextHeartbeatMs: CALLBACK_HEARTBEAT_INTERVAL_MS,
+		},
+		200,
+	)
+}
+
 function sourceFromEventType(eventType: string): TaskEventSource {
-	if (eventType.startsWith("codex.")) return "codex_notify"
-	if (eventType.startsWith("task.")) return "harness"
-	return "harness"
+	if (eventType === "codex.notify" || eventType === "backend.notify") return "backend"
+	if (eventType.startsWith("task.")) return "runtime"
+	return "runtime"
+}
+
+const KNOWN_EVENT_KINDS: Set<string> = new Set([
+	"task.created",
+	"task.started",
+	"task.progress",
+	"task.heartbeat",
+	"task.completed",
+	"task.partial",
+	"task.escalated",
+	"task.failed",
+	"task.timed_out",
+	"task.lost",
+	"task.notification_sent",
+	"backend.notify",
+	"maintenance.probe",
+])
+
+function normalizeEventKind(eventType: string): TaskEventKind | null {
+	switch (eventType) {
+		case "codex.notify":
+			return "backend.notify"
+		case "reconciler.probe":
+			return "maintenance.probe"
+		default:
+			if (!KNOWN_EVENT_KINDS.has(eventType)) return null
+			return eventType as TaskEventKind
+	}
 }
 
 function mapHarnessEventToStatus(eventType: string): TaskStatus | undefined {
@@ -43,6 +85,10 @@ function mapHarnessEventToStatus(eventType: string): TaskStatus | undefined {
 			return "running"
 		case "task.completed":
 			return "succeeded"
+		case "task.partial":
+			return "partial"
+		case "task.escalated":
+			return "escalated"
 		case "task.failed":
 			return "failed"
 		default:
@@ -53,6 +99,7 @@ function mapHarnessEventToStatus(eventType: string): TaskStatus | undefined {
 export const handleTaskEventPost = (request: Request) =>
 	Effect.gen(function* () {
 		const { db } = yield* DbService
+		const taskSupervisor = yield* TaskSupervisor
 
 		const rawBody = yield* Effect.tryPromise({
 			try: () => request.text(),
@@ -121,74 +168,64 @@ export const handleTaskEventPost = (request: Request) =>
 		}
 
 		const seq = body.seq
-		/** Monotonic `seq` applies only to harness-originated events; `codex.notify` uses `seq: null`. */
-		const isHarnessSeq = typeof seq === "number" && Number.isFinite(seq)
-		if (isHarnessSeq && seq <= task.lastEventSeq) {
-			return jsonResponse(
-				{
-					ack: true,
-					cancelRequested: false,
-					nextHeartbeatMs: CALLBACK_HEARTBEAT_INTERVAL_MS,
-				},
-				200,
-			)
+		/** Monotonic `seq` applies to runtime-originated callback streams only. */
+		const isRuntimeSeq = typeof seq === "number" && Number.isFinite(seq)
+		if (isRuntimeSeq && seq <= task.lastEventSeq) {
+			return ackResponse()
 		}
 
 		const occurredAt = body.sentAt ? new Date(body.sentAt) : new Date()
 		const source = sourceFromEventType(body.eventType)
-
-		const inserted = yield* Effect.promise(async () => {
-			try {
-				await db.insert(schema.taskEvents).values({
-					taskId: task.id,
-					eventId: body.eventId,
-					source,
-					eventType: body.eventType,
-					seq: seq ?? null,
-					payload: body.payload ?? {
-						status: body.status,
-						message: body.message,
-						exitCode: body.exitCode,
-					},
-					occurredAt,
-				})
-				return true
-			} catch (e) {
-				console.error("[task-events] insert skipped:", e)
-				return false
-			}
-		})
-		if (!inserted) {
-			return jsonResponse(
-				{
-					ack: true,
-					cancelRequested: false,
-					nextHeartbeatMs: CALLBACK_HEARTBEAT_INTERVAL_MS,
-				},
-				200,
-			)
+		const kind = normalizeEventKind(body.eventType)
+		if (!kind) {
+			return jsonResponse({ error: `Unknown event kind: ${body.eventType}` }, 400)
+		}
+		const eventPayload = body.payload ?? {
+			status: body.status,
+			message: body.message,
+			exitCode: body.exitCode,
 		}
 
-		if (body.eventType === "codex.notify") {
-			const now = new Date()
-			yield* Effect.tryPromise({
-				try: () =>
-					db
-						.update(schema.tasks)
-						.set({
-							lastEventAt: occurredAt,
-							updatedAt: now,
+		if (kind === "backend.notify") {
+			const inserted = yield* Effect.promise(async () => {
+				try {
+					await db.transaction(async (tx) => {
+						await tx.insert(schema.taskEvents).values({
+							taskId: task.id,
+							eventId: body.eventId,
+							source,
+							kind,
+							seq: null,
+							payload: eventPayload,
+							occurredAt,
 						})
-						.where(eq(schema.tasks.id, task.id)),
-				catch: () => undefined,
+						await tx
+							.update(schema.tasks)
+							.set({
+								lastEventAt: occurredAt,
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									eq(schema.tasks.id, task.id),
+									notInArray(schema.tasks.status, TERMINAL_STATUSES),
+								),
+							)
+					})
+					return true
+				} catch (e) {
+					console.error("[task-events] backend notify skipped:", e)
+					return false
+				}
 			})
+			void inserted
 		} else {
 			const nextStatus = mapHarnessEventToStatus(body.eventType)
 			const fromStatus = task.status as TaskStatus
 			const statusOk = !nextStatus || isLegalTransition(fromStatus, nextStatus)
 			const now = new Date()
 			const patch: Partial<typeof schema.tasks.$inferInsert> = {
-				lastEventSeq: isHarnessSeq ? seq : task.lastEventSeq,
+				lastEventSeq: isRuntimeSeq ? seq : task.lastEventSeq,
 				lastEventAt: occurredAt,
 				heartbeatAt: now,
 				updatedAt: now,
@@ -198,38 +235,102 @@ export const handleTaskEventPost = (request: Request) =>
 				patch.status = nextStatus
 			}
 
-			if (statusOk && (body.eventType === "task.completed" || body.eventType === "task.failed")) {
+			if (
+				statusOk &&
+				(kind === "task.completed" ||
+					kind === "task.partial" ||
+					kind === "task.escalated" ||
+					kind === "task.failed")
+			) {
+				const executionData = yield* taskSupervisor
+					.getTaskExecutionData(task.id, task.userId)
+					.pipe(Effect.catchAll(() => Effect.succeed(null)))
 				patch.completedAt = occurredAt
-				patch.exitCode = body.exitCode ?? (body.eventType === "task.completed" ? 0 : 1)
+				patch.exitCode = body.exitCode ?? (kind === "task.failed" ? 1 : 0)
 				patch.callbackSecretHash = null
-				if (body.message) {
+				if (executionData) {
+					patch.output = executionData.output ? { result: executionData.output } : null
+					patch.artifacts = executionData.artifacts
+					patch.outputSummary = executionData.summary.slice(0, 2000)
+					if (kind === "task.failed") {
+						patch.error = executionData.summary.slice(0, 4000)
+					}
+				} else if (body.message) {
 					patch.outputSummary = body.message.slice(0, 2000)
+					if (kind === "task.failed") {
+						patch.error = body.message.slice(0, 4000)
+					}
 				}
 			}
 
-			const casResult = yield* Effect.tryPromise({
-				try: () =>
-					db
-						.update(schema.tasks)
-						.set(patch)
-						.where(
-							isHarnessSeq
-								? and(eq(schema.tasks.id, task.id), lt(schema.tasks.lastEventSeq, seq))
-								: eq(schema.tasks.id, task.id),
-						)
-						.returning({ id: schema.tasks.id }),
-				catch: () => [] as { id: string }[],
+			const applied = yield* Effect.promise(async () => {
+				try {
+					return await db.transaction(async (tx) => {
+						const updated = await tx
+							.update(schema.tasks)
+							.set(patch)
+							.where(
+								isRuntimeSeq
+									? and(
+											eq(schema.tasks.id, task.id),
+											lt(schema.tasks.lastEventSeq, seq),
+											notInArray(schema.tasks.status, TERMINAL_STATUSES),
+										)
+									: and(
+											eq(schema.tasks.id, task.id),
+											notInArray(schema.tasks.status, TERMINAL_STATUSES),
+										),
+							)
+							.returning({ id: schema.tasks.id })
+						if (updated.length === 0) {
+							return false
+						}
+						await tx.insert(schema.taskEvents).values({
+							taskId: task.id,
+							eventId: body.eventId,
+							source,
+							kind,
+							seq: isRuntimeSeq ? seq : null,
+							payload: eventPayload,
+							occurredAt,
+						})
+						return true
+					})
+				} catch (e) {
+					console.error("[task-events] runtime event skipped:", e)
+					return false
+				}
 			})
-			// CAS returned 0 rows → lost race; still ack so sender doesn't retry
-			void casResult
+			if (!applied) {
+				return ackResponse()
+			}
+
+			const traceId = task.traceId
+			if (
+				statusOk &&
+				traceId &&
+				(kind === "task.completed" ||
+					kind === "task.partial" ||
+					kind === "task.escalated" ||
+					kind === "task.failed")
+			) {
+				yield* Effect.tryPromise({
+					try: () =>
+						appendTaskTraceTerminalEvent({
+							db,
+							traceId,
+							taskId: task.id,
+							status: nextStatus ?? (kind === "task.failed" ? "failed" : "succeeded"),
+							message: body.message ?? null,
+							exitCode: body.exitCode ?? null,
+						}),
+					catch: (error) => {
+						console.error("[task-events] failed to append trace terminal event:", error)
+						return undefined
+					},
+				})
+			}
 		}
 
-		return jsonResponse(
-			{
-				ack: true,
-				cancelRequested: false,
-				nextHeartbeatMs: CALLBACK_HEARTBEAT_INTERVAL_MS,
-			},
-			200,
-		)
+		return ackResponse()
 	})

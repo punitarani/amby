@@ -148,12 +148,13 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 							}).pipe(Effect.provide(makeAgentServiceLive(finalUserId)))
 
 							const result = await runtime.runPromise(effect)
+							const finalText = result.userResponse.text
 
 							// Finalize streamed message
 							if (streamInterval) clearInterval(streamInterval)
 							if (streamMessageId) {
-								if (result.trim()) {
-									const [firstChunk, ...moreChunks] = splitTelegramMessage(result)
+								if (finalText.trim()) {
+									const [firstChunk, ...moreChunks] = splitTelegramMessage(finalText)
 									if (firstChunk !== undefined) {
 										await adapter
 											.editMessage(chatIdStr, streamMessageId, firstChunk)
@@ -166,14 +167,14 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 									// Response empty (tool sent replies) — remove streaming message
 									await adapter.deleteMessage(chatIdStr, streamMessageId).catch(() => {})
 								}
-							} else if (!isSubAgent && result.trim()) {
+							} else if (!isSubAgent && finalText.trim()) {
 								// No streaming happened — post full response
-								for (const chunk of splitTelegramMessage(result)) {
+								for (const chunk of splitTelegramMessage(finalText)) {
 									await adapter.postMessage(chatIdStr, chunk)
 								}
 							}
 
-							return result
+							return finalText
 						} finally {
 							await runtime.dispose()
 						}

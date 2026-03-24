@@ -2,6 +2,7 @@ import {
 	AgentService,
 	JobRunnerService,
 	JobRunnerServiceLive,
+	ModelServiceLive,
 	makeAgentServiceLive,
 } from "@amby/agent"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
@@ -11,7 +12,6 @@ import { ConnectorsServiceLive } from "@amby/connectors"
 import { DbService, DbServiceLive, eq, schema } from "@amby/db"
 import { EnvServiceLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
-import { ModelServiceLive } from "@amby/models"
 import { Effect, Layer } from "effect"
 
 const userId: string = (() => {
@@ -74,19 +74,21 @@ const program = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const description = (job.payload as { description?: string })?.description ?? "Scheduled task"
 			console.log(`\n[Job] Running: ${description}`)
-			const response = yield* agent.handleMessage(conversationId, `[Scheduled Task] ${description}`)
-			console.log(`\n${response}\n`)
+			const result = yield* agent.handleMessage(conversationId, `[Scheduled Task] ${description}`)
+			console.log(`\n${result.userResponse.text}\n`)
 		}),
 	)
 	console.log("Job runner started")
 
 	const channel = new CLIChannel()
-	channel.onMessage(async (msg) =>
-		Effect.runPromise(agent.handleMessage(conversationId, msg.content)),
-	)
-	channel.onStreamingMessage(async (msg, onPart) =>
-		Effect.runPromise(agent.streamMessage(conversationId, msg.content, onPart)),
-	)
+	channel.onMessage(async (msg) => {
+		const result = await Effect.runPromise(agent.handleMessage(conversationId, msg.content))
+		return result.userResponse.text
+	})
+	channel.onStreamingMessage(async (msg, onPart) => {
+		const result = await Effect.runPromise(agent.streamMessage(conversationId, msg.content, onPart))
+		return result.userResponse.text
+	})
 
 	console.log("\nAmby is ready. Type a message or /quit to exit.\n")
 	yield* channel.start()

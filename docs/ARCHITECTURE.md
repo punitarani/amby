@@ -100,11 +100,10 @@ graph BT
     auth["@amby/auth"] --> env
     auth --> db
     memory["@amby/memory"] --> db
-    models["@amby/models"] --> env
     computer["@amby/computer"] --> env
     channels["@amby/channels"] --> env
     agent["@amby/agent"] --> memory
-    agent --> models
+    agent --> env
     agent --> computer
     agent --> channels
     agent --> db
@@ -117,11 +116,10 @@ graph BT
 | `@amby/env`      | Type-safe environment variables via T3 Env        | `@t3-oss/env-core`, `zod`              |
 | `@amby/db`       | Drizzle ORM, schemas, migrations, Supabase client | `drizzle-orm`, `postgres`, `@amby/env` |
 | `@amby/auth`     | BetterAuth configuration and user authentication  | `better-auth`, `@amby/db`, `@amby/env` |
-| `@amby/models`   | OpenRouter-backed model registry and model selection | `ai`, `@openrouter/ai-sdk-provider`, `@amby/env` |
 | `@amby/memory`   | Memory storage, retrieval, and LLM injection      | `@amby/db`, `ai`                       |
 | `@amby/computer` | Daytona sandbox lifecycle and command execution   | `@daytonaio/sdk`, `@amby/env`          |
 | `@amby/channels` | Channel interface and adapters (CLI for MVP)      | `@amby/env`                            |
-| `@amby/agent`    | Core agent orchestration, tools, jobs             | `ai`, all `@amby/*` packages           |
+| `@amby/agent`    | Core agent orchestration, tools, jobs, and model selection | `ai`, `@openrouter/ai-sdk-provider`, all `@amby/*` packages |
 
 ---
 
@@ -192,32 +190,25 @@ defined, but there is no HTTP server to serve auth routes yet.
 
 ---
 
-### @amby/models
-Manages runtime model selection. It builds the OpenRouter-backed Vercel AI SDK registry and defines interfaces for
-future TTS/STT providers.
+### @amby/agent
 
-**Exports:** `getModel(id)`, `defaultModelId`, and `TTSProvider` / `STTProvider` (interfaces, future).
+Owns runtime model selection alongside the agent loop. It builds the OpenRouter-backed Vercel AI SDK registry and
+exposes the shared model layer used by the CLI and API runtimes.
+
+**Exports:** `ModelService`, `ModelServiceLive`, `DEFAULT_MODEL_ID`, `HIGH_INTELLIGENCE_MODEL_ID`.
 
 ### Provider registry
 The runtime uses `createOpenRouter()` from `@openrouter/ai-sdk-provider`:
 
 ```plain text
 google/gemini-3.1-flash-lite-preview  → default model
-nvidia/nemotron-3-super-120b-a12b     → higher-intelligence override
+google/gemini-3-flash-preview         → higher-intelligence override
 ```
 
 `OPENROUTER_API_KEY` powers the agent runtime. `OPENAI_API_KEY` remains useful for Codex running inside user
 sandboxes, but it is not the primary application model provider.
 
-### TTS / STT (future — MVP is text-only)
-Interfaces defined now, implementations later:
-
-- **TTS default:** Cartesia Sonic 3 (~$0.005/1000 chars, ~90ms first byte)
-- **STT default:** OpenAI Whisper API ($0.006/min, lowest flat rate)
-- Both are swappable via provider interface
-- LiveKit for real-time voice transport when voice is added
-
----
+***
 
 ### @amby/memory
 The memory brain. Fully described in MEMORY.md.

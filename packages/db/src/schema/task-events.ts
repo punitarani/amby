@@ -10,7 +10,21 @@ import {
 } from "drizzle-orm/pg-core"
 import { tasks } from "./tasks"
 
-export type TaskEventSource = "server" | "harness" | "codex_notify" | "reconciler"
+export type TaskEventSource = "server" | "runtime" | "backend" | "maintenance"
+export type TaskEventKind =
+	| "task.created"
+	| "task.started"
+	| "task.progress"
+	| "task.heartbeat"
+	| "task.completed"
+	| "task.partial"
+	| "task.escalated"
+	| "task.failed"
+	| "task.timed_out"
+	| "task.lost"
+	| "task.notification_sent"
+	| "backend.notify"
+	| "maintenance.probe"
 
 export const taskEvents = pgTable(
 	"task_events",
@@ -21,10 +35,10 @@ export const taskEvents = pgTable(
 			.references(() => tasks.id, { onDelete: "cascade" }),
 		eventId: uuid("event_id").notNull(),
 		source: text("source").$type<TaskEventSource>().notNull(),
-		eventType: text("event_type").notNull(),
+		kind: text("kind").$type<TaskEventKind>().notNull(),
 		/**
-		 * Monotonic sequence for `source = 'harness'` events only; other sources use `null`
-		 * (unordered metadata: codex_notify, reconciler, server).
+		 * Monotonic sequence is used for callback-driven progress streams. Server-originated
+		 * create/complete events and maintenance events continue to use `null`.
 		 */
 		seq: integer("seq"),
 		payload: jsonb("payload").$type<Record<string, unknown>>(),

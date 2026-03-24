@@ -51,8 +51,8 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 				return yield* agent.handleMessage(conversationId, text, { telegram: raw }, sendReply)
 			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
 
-			if (response.trim()) {
-				yield* Effect.tryPromise(() => thread.post(response))
+			if (response.userResponse.text.trim()) {
+				yield* Effect.tryPromise(() => thread.post(response.userResponse.text))
 			}
 		}).pipe(
 			Effect.catchAllCause((cause) =>

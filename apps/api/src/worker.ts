@@ -18,7 +18,7 @@ import { handleTaskEventPost } from "./handlers/task-events"
 import { getHomeResponse } from "./home"
 import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
-import { makeRuntimeForConsumer } from "./queue/runtime"
+import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "./queue/runtime"
 import { getSentryOptions, getSentryOptionsOrFallback } from "./sentry"
 import { getOrCreateChat } from "./telegram/chat-sdk"
 import type { TelegramQueueMessage } from "./telegram/utils"
@@ -135,7 +135,7 @@ app.post("/telegram/webhook", async (c) => {
 })
 
 app.post("/internal/task-events", async (c) => {
-	const rt = makeRuntimeForConsumer(c.env)
+	const rt = makeAgentRuntimeForConsumer(c.env)
 	try {
 		return await rt.runPromise(handleTaskEventPost(c.req.raw))
 	} finally {

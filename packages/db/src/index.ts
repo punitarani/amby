@@ -17,9 +17,15 @@ export {
 } from "drizzle-orm"
 export * from "./errors"
 export type {
+	ExecutionMode,
 	JobStatus,
 	Platform,
+	RunnerKind,
+	SpecialistKind,
+	TaskEventKind,
 	TaskEventSource,
+	TaskProvider,
+	TaskRuntime,
 	TaskStatus,
 	ThreadSource,
 	TraceEventKind,
