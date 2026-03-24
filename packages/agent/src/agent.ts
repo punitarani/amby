@@ -446,11 +446,10 @@ export const makeAgentServiceLive = (userId: string) =>
 								if (state.execution) {
 									return {
 										mode: state.execution.mode,
-										status: "failed" as const,
-										tasks: [],
-										backgroundTasks: [],
-										summary:
-											"Execution already completed in this turn. Use query_execution to inspect results.",
+										status: state.execution.status,
+										tasks: state.execution.taskResults,
+										backgroundTasks: state.execution.backgroundTasks,
+										summary: "Execution already completed this turn.",
 									}
 								}
 								const composed = context?.trim()

@@ -48,13 +48,30 @@ function sourceFromEventType(eventType: string): TaskEventSource {
 	return "runtime"
 }
 
-function normalizeEventKind(eventType: string): TaskEventKind {
+const KNOWN_EVENT_KINDS: Set<string> = new Set([
+	"task.created",
+	"task.started",
+	"task.progress",
+	"task.heartbeat",
+	"task.completed",
+	"task.partial",
+	"task.escalated",
+	"task.failed",
+	"task.timed_out",
+	"task.lost",
+	"task.notification_sent",
+	"backend.notify",
+	"maintenance.probe",
+])
+
+function normalizeEventKind(eventType: string): TaskEventKind | null {
 	switch (eventType) {
 		case "codex.notify":
 			return "backend.notify"
 		case "reconciler.probe":
 			return "maintenance.probe"
 		default:
+			if (!KNOWN_EVENT_KINDS.has(eventType)) return null
 			return eventType as TaskEventKind
 	}
 }
@@ -160,6 +177,9 @@ export const handleTaskEventPost = (request: Request) =>
 		const occurredAt = body.sentAt ? new Date(body.sentAt) : new Date()
 		const source = sourceFromEventType(body.eventType)
 		const kind = normalizeEventKind(body.eventType)
+		if (!kind) {
+			return jsonResponse({ error: `Unknown event kind: ${body.eventType}` }, 400)
+		}
 		const eventPayload = body.payload ?? {
 			status: body.status,
 			message: body.message,

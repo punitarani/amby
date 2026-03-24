@@ -15,6 +15,7 @@ type PlannerInput = {
 	config: AgentRunConfig
 }
 
+const TZ_RE = /(?:to|as)\s+([A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?|UTC|GMT[+-]?\d*)/i
 const URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g
 const INTEGRATION_RE = /\b(gmail|google calendar|calendar|notion|slack|drive|google drive)\b/i
 const SETTINGS_RE =
@@ -204,7 +205,7 @@ export function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 					kind: "settings" as const,
 					task: {
 						kind: "timezone" as const,
-						timezone: normalized,
+						timezone: TZ_RE.exec(normalized)?.[1] ?? normalized,
 					},
 				}
 			: normalizedLower.includes("remind") || normalizedLower.includes("schedule")
@@ -423,23 +424,6 @@ export function shouldUseModelPlanner(request: string, heuristicPlan: ExecutionP
 	return /\b(plan|carefully|step by step|then|after that|sequence)\b/i.test(request)
 }
 
-function rewritePlanTaskIds(plan: ExecutionPlan): ExecutionPlan {
-	return {
-		...plan,
-		tasks: plan.tasks.map((task) => {
-			const dependencyMap = new Map(
-				plan.tasks.map((_, sourceIndex) => [`task-${sourceIndex}`, `task-${sourceIndex}`]),
-			)
-			return {
-				...task,
-				dependencies: task.dependencies.map(
-					(dependency) => dependencyMap.get(dependency) ?? dependency,
-				),
-			}
-		}),
-	}
-}
-
 export async function buildExecutionPlan(params: {
 	request: string
 	config: AgentRunConfig
@@ -447,7 +431,7 @@ export async function buildExecutionPlan(params: {
 }): Promise<ExecutionPlan> {
 	const heuristicPlan = buildHeuristicPlan({ request: params.request, config: params.config })
 	if (!shouldUseModelPlanner(params.request, heuristicPlan)) {
-		return rewritePlanTaskIds(heuristicPlan)
+		return heuristicPlan
 	}
 
 	try {
@@ -464,9 +448,9 @@ export async function buildExecutionPlan(params: {
 				`Heuristic draft:\n${JSON.stringify(heuristicPlan)}`,
 			].join("\n\n"),
 		})
-		return rewritePlanTaskIds(object as unknown as ExecutionPlan)
+		return object as unknown as ExecutionPlan
 	} catch (error) {
 		console.warn("[planner] model planner failed, falling back to heuristic plan:", error)
-		return rewritePlanTaskIds(heuristicPlan)
+		return heuristicPlan
 	}
 }

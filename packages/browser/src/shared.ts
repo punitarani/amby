@@ -97,25 +97,11 @@ const READ_HINTS = [
 	/\bwhat is\b/i,
 ]
 
-const ACT_HINTS = [
-	/\bclick\b/i,
-	/\bfill\b/i,
-	/\btype\b/i,
-	/\bsubmit\b/i,
-	/\blog in\b/i,
-	/\bsign in\b/i,
-	/\badd to cart\b/i,
-	/\bcheckout\b/i,
-]
-
 const LEADING_URL_WRAPPERS_RE = /^[<({["'`]+/
 const TRAILING_URL_WRAPPERS_RE = /[>)}\]"'`]+$/
 const TRAILING_URL_PUNCTUATION_RE = /[.,!?;:]+$/
 
 export function inferBrowserSideEffectLevel(instruction: string): BrowserTaskSideEffectLevel {
-	if (ACT_HINTS.some((pattern) => pattern.test(instruction))) {
-		return "soft-write"
-	}
 	if (READ_HINTS.some((pattern) => pattern.test(instruction))) {
 		return "read"
 	}

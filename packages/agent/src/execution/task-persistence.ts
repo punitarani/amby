@@ -51,7 +51,7 @@ export async function persistTaskCreated(
 		threadId?: string
 		traceId: string
 	},
-): Promise<void> {
+): Promise<boolean> {
 	const runtime = deriveRuntimeForRunner({
 		runnerKind: task.runnerKind,
 		requiresBrowser: task.input.kind === "background" ? task.input.needsBrowser : undefined,
@@ -96,11 +96,13 @@ export async function persistTaskCreated(
 				},
 			}),
 		)
+		return true
 	} catch (error) {
 		console.error(
 			"[task-persistence] Failed to persist task creation:",
 			error instanceof Error ? error.message : String(error),
 		)
+		return false
 	}
 }
 
@@ -108,7 +110,7 @@ export async function persistTaskCompleted(
 	query: TaskQueryFn,
 	taskId: string,
 	result: ExecutionTaskResult,
-): Promise<void> {
+): Promise<boolean> {
 	try {
 		await Effect.runPromise(
 			completeTaskRecord(query, {
@@ -133,10 +135,12 @@ export async function persistTaskCompleted(
 				},
 			}),
 		)
+		return true
 	} catch (error) {
 		console.error(
 			"[task-persistence] Failed to persist task completion:",
 			error instanceof Error ? error.message : String(error),
 		)
+		return false
 	}
 }

@@ -15,6 +15,9 @@ const READ_ONLY_BLOCKLIST = [
 	/\b(?:bash|sh|zsh)\s+-c\b/,
 	/\beval\b/,
 	/\bpython[23]?\s+-c\b/,
+	/\b(?:node|ruby|perl|deno)\s+-e\b/,
+	/\bdeno\s+eval\b/,
+	/\bsudo\b/,
 ]
 
 function isBlocked(command: string): boolean {
@@ -96,5 +99,20 @@ describe("read-only command blocklist", () => {
 
 	it("allows sed without -i", () => {
 		expect(isBlocked("sed 's/old/new/g' file")).toBe(false)
+	})
+
+	it("blocks node -e, ruby -e, perl -e, deno eval, and sudo", () => {
+		expect(isBlocked("node -e 'process.exit(1)'")).toBe(true)
+		expect(isBlocked("ruby -e 'system(\"rm -rf /\")'")).toBe(true)
+		expect(isBlocked("perl -e 'unlink glob \"*\"'")).toBe(true)
+		expect(isBlocked("deno eval 'Deno.exit(1)'")).toBe(true)
+		expect(isBlocked("deno -e 'Deno.exit(1)'")).toBe(true)
+		expect(isBlocked("sudo rm -rf /")).toBe(true)
+	})
+
+	it("allows node --version and similar safe commands", () => {
+		expect(isBlocked("node --version")).toBe(false)
+		expect(isBlocked("ruby --version")).toBe(false)
+		expect(isBlocked("deno --version")).toBe(false)
 	})
 })

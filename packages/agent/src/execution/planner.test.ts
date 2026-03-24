@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import type { AgentRunConfig } from "../types/agent"
 import type { ExecutionPlan } from "../types/execution"
+import { materializePlan } from "./coordinator"
 import { buildHeuristicPlan, shouldUseModelPlanner } from "./planner"
 
 const stubConfig: AgentRunConfig = {
@@ -148,6 +149,49 @@ describe("buildHeuristicPlan", () => {
 		expect(plan.tasks[0]?.specialist).toBe("settings")
 	})
 
+	it("extracts timezone from 'Set my timezone to America/New_York'", () => {
+		const plan = buildHeuristicPlan({
+			request: "Set my timezone to America/New_York",
+			config: stubConfig,
+		})
+		const task = plan.tasks[0]
+		expect(task?.input.kind).toBe("settings")
+		if (task?.input.kind === "settings") {
+			expect(task.input.task).toEqual({
+				kind: "timezone",
+				timezone: "America/New_York",
+			})
+		}
+	})
+
+	it("extracts 3-part IANA timezone America/Indiana/Knox", () => {
+		const plan = buildHeuristicPlan({
+			request: "Set my timezone to America/Indiana/Knox",
+			config: stubConfig,
+		})
+		const task = plan.tasks[0]
+		if (task?.input.kind === "settings") {
+			expect(task.input.task).toEqual({
+				kind: "timezone",
+				timezone: "America/Indiana/Knox",
+			})
+		}
+	})
+
+	it("extracts UTC as timezone", () => {
+		const plan = buildHeuristicPlan({
+			request: "Set my timezone to UTC",
+			config: stubConfig,
+		})
+		const task = plan.tasks[0]
+		if (task?.input.kind === "settings") {
+			expect(task.input.task).toEqual({
+				kind: "timezone",
+				timezone: "UTC",
+			})
+		}
+	})
+
 	it("routes desktop requests to computer specialist", () => {
 		const plan = buildHeuristicPlan({
 			request: "Take a screenshot of the desktop",
@@ -196,5 +240,63 @@ describe("shouldUseModelPlanner", () => {
 			reducer: "conversation",
 		}
 		expect(shouldUseModelPlanner("plan this carefully step by step", plan)).toBe(true)
+	})
+})
+
+describe("materializePlan", () => {
+	const stubTask = {
+		specialist: "research" as const,
+		runnerKind: "toolloop" as const,
+		mode: "sequential" as const,
+		input: { kind: "specialist" as const, goal: "test", payload: {} },
+		dependencies: [],
+		inputBindings: {},
+		resourceLocks: [],
+		mutates: false,
+		writesExternal: false,
+		requiresConfirmation: false,
+		requiresValidation: false,
+	}
+
+	it("single-task plan: rootTaskId equals task id", () => {
+		const plan: ExecutionPlan = {
+			strategy: "sequential",
+			rationale: "",
+			tasks: [stubTask],
+			reducer: "conversation",
+		}
+		const tasks = materializePlan(plan)
+		expect(tasks).toHaveLength(1)
+		const first = tasks[0]
+		expect(first?.rootTaskId).toBe(first?.id)
+	})
+
+	it("multi-task plan: all tasks share rootTaskId === ids[0]", () => {
+		const plan: ExecutionPlan = {
+			strategy: "sequential",
+			rationale: "",
+			tasks: [stubTask, { ...stubTask, dependencies: ["task-0"] }],
+			reducer: "conversation",
+		}
+		const tasks = materializePlan(plan)
+		expect(tasks).toHaveLength(2)
+		const first = tasks[0]
+		const second = tasks[1]
+		expect(first?.rootTaskId).toBe(first?.id)
+		expect(second?.rootTaskId).toBe(first?.id)
+	})
+
+	it("resolves task-N dependency references to UUIDs", () => {
+		const plan: ExecutionPlan = {
+			strategy: "sequential",
+			rationale: "",
+			tasks: [stubTask, { ...stubTask, dependencies: ["task-0"] }],
+			reducer: "conversation",
+		}
+		const tasks = materializePlan(plan)
+		const first = tasks[0]
+		const second = tasks[1]
+		expect(second?.dependencies).toContain(first?.id)
+		expect(second?.dependencies).not.toContain("task-0")
 	})
 })

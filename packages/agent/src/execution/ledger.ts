@@ -15,7 +15,7 @@ import { Effect } from "effect"
 import type { AgentRunConfig } from "../types/agent"
 import type { ExecutionRequestEnvelope, ExecutionResponseEnvelope } from "../types/persistence"
 
-type QueryFn = <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, DbError>
+export type QueryFn = <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, DbError>
 
 export type TraceWriter = {
 	traceId: string
@@ -52,22 +52,24 @@ function makeTraceWriter(query: QueryFn, traceId: string): TraceWriter {
 		events: Array<{ kind: TraceEventKind; payload: Record<string, unknown> }>,
 	) =>
 		query(async (db) => {
-			const lastRows = await db
-				.select({ seq: schema.traceEvents.seq })
-				.from(schema.traceEvents)
-				.where(eq(schema.traceEvents.traceId, traceId))
-				.orderBy(desc(schema.traceEvents.seq))
-				.limit(1)
+			await db.transaction(async (tx) => {
+				const lastRows = await tx
+					.select({ seq: schema.traceEvents.seq })
+					.from(schema.traceEvents)
+					.where(eq(schema.traceEvents.traceId, traceId))
+					.orderBy(desc(schema.traceEvents.seq))
+					.limit(1)
 
-			let nextSeq = (lastRows[0]?.seq ?? -1) + 1
-			await db.insert(schema.traceEvents).values(
-				events.map((event) => ({
-					traceId,
-					seq: nextSeq++,
-					kind: event.kind,
-					payload: event.payload,
-				})),
-			)
+				let nextSeq = (lastRows[0]?.seq ?? -1) + 1
+				await tx.insert(schema.traceEvents).values(
+					events.map((event) => ({
+						traceId,
+						seq: nextSeq++,
+						kind: event.kind,
+						payload: event.payload,
+					})),
+				)
+			})
 		}).pipe(Effect.asVoid)
 
 	return {

@@ -19,6 +19,9 @@ const READ_ONLY_BLOCKLIST = [
 	/\b(?:bash|sh|zsh)\s+-c\b/,
 	/\beval\b/,
 	/\bpython[23]?\s+-c\b/,
+	/\b(?:node|ruby|perl|deno)\s+-e\b/,
+	/\bdeno\s+eval\b/,
+	/\bsudo\b/,
 ]
 
 function assertReadOnlyCommand(command: string) {

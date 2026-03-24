@@ -18,6 +18,11 @@ describe("browser task normalization", () => {
 		).toBe(true)
 	})
 
+	it("returns soft-write for act-like instructions", () => {
+		expect(inferBrowserSideEffectLevel("click the submit button")).toBe("soft-write")
+		expect(inferBrowserSideEffectLevel("fill in the form and sign in")).toBe("soft-write")
+	})
+
 	it("sanitizes wrapped start URLs before browser execution", () => {
 		expect(sanitizeBrowserStartUrl('"https://www.nytimes.com"')).toBe("https://www.nytimes.com/")
 		expect(sanitizeBrowserStartUrl("(https://example.com/path)")).toBe("https://example.com/path")

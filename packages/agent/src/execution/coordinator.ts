@@ -10,7 +10,7 @@ import type {
 	ExecutionTaskResult,
 } from "../types/execution"
 import type { ExecutionRequestEnvelope, ExecutionResponseEnvelope } from "../types/persistence"
-import { buildTaskMetadata, createTrace, type TraceWriter } from "./ledger"
+import { buildTaskMetadata, createTrace, type QueryFn, type TraceWriter } from "./ledger"
 import { buildReadyBatch } from "./locks"
 import { buildExecutionPlan } from "./planner"
 import { buildExecutionSummary } from "./reducer"
@@ -19,10 +19,6 @@ import { runBackgroundSpecialist } from "./runners/background"
 import { runBrowserSpecialist } from "./runners/browser"
 import { runToolloopSpecialist } from "./runners/toolloop"
 import { persistTaskCompleted, persistTaskCreated } from "./task-persistence"
-
-type QueryFn = <T>(
-	fn: (db: import("@amby/db").Database) => Promise<T>,
-) => Effect.Effect<T, import("@amby/db").DbError>
 
 function findBlockingDependency(
 	task: ExecutionTask,
@@ -64,7 +60,7 @@ function buildBlockedDependencyResult(
 	}
 }
 
-function materializePlan(plan: ExecutionPlan): ExecutionTask[] {
+export function materializePlan(plan: ExecutionPlan): ExecutionTask[] {
 	const ids = plan.tasks.map(() => crypto.randomUUID())
 	return plan.tasks.map((task, index) => {
 		const id = ids[index] ?? crypto.randomUUID()
@@ -77,7 +73,7 @@ function materializePlan(plan: ExecutionPlan): ExecutionTask[] {
 		return {
 			...task,
 			id,
-			rootTaskId: id,
+			rootTaskId: ids[0] ?? id,
 			depth: 1,
 			dependencies: dependencyIds,
 		}
@@ -226,6 +222,7 @@ async function runTaskWithTrace(params: {
 					}),
 				),
 			)
+			await Effect.runPromise(trace.complete("completed"))
 			return runResult.result
 		}
 
