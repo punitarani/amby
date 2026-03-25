@@ -1,4 +1,11 @@
 export * from "./agent"
+export {
+	buildExecutionToolSummary,
+	buildRunConfig,
+	type ConversationEngineConfig,
+	handleTurn,
+	type TurnRequest,
+} from "./conversation/engine"
 export * from "./errors"
 export * from "./jobs"
 export * from "./models"

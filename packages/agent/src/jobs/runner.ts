@@ -1,4 +1,6 @@
-import type { ChannelType } from "@amby/channels"
+/** Channel type for job delivery — telegram only after CLI removal. */
+type ChannelType = "telegram"
+
 import { and, DbService, eq, type JobStatus, lte, or, schema } from "@amby/db"
 import { CronExpressionParser } from "cron-parser"
 import { Context, Effect, Layer } from "effect"
@@ -58,7 +60,7 @@ export const JobRunnerServiceLive = Layer.effect(
 							id: job.id,
 							userId: job.userId,
 							payload: job.payload,
-							channelType: job.channelType,
+							channelType: "telegram" as ChannelType,
 						})
 
 						let nextStatus: JobStatus = job.type === "cron" ? "active" : "completed"

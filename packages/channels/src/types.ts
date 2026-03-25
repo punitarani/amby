@@ -1,10 +1,9 @@
 import type { Effect } from "effect"
 import type { ChannelError } from "./errors"
 
-export type ChannelType = "cli" | "telegram"
+export type ChannelType = "telegram"
 
-/** Platform superset — includes future platforms beyond what channels currently support. */
-export type Platform = "cli" | "telegram" | "slack" | "discord"
+export type Platform = "telegram"
 
 export interface IncomingMessage {
 	conversationId: string
@@ -30,7 +29,6 @@ export interface Channel {
 	id: string
 	type: ChannelType
 	onMessage(handler: MessageHandler): void
-	onStreamingMessage?(handler: StreamingMessageHandler): void
 	send(message: OutgoingMessage): Effect.Effect<void, ChannelError>
 	start(): Effect.Effect<void, ChannelError>
 	stop(): Effect.Effect<void, ChannelError>

@@ -13,6 +13,7 @@
 		"create-snapshot": "bun run src/scripts/create-snapshot.ts"
 	},
 	"dependencies": {
+		"@amby/core": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/connectors": "workspace:*",

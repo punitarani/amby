@@ -26,9 +26,12 @@
         "@amby/browser": "workspace:*",
         "@amby/computer": "workspace:*",
         "@amby/connectors": "workspace:*",
+        "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@amby/memory": "workspace:*",
+        "@amby/plugins": "workspace:*",
+        "@amby/skills": "workspace:*",
         "@chat-adapter/state-memory": "^4.20.2",
         "@chat-adapter/telegram": "^4.20.2",
         "@cloudflare/playwright": "^1.1.2",
@@ -42,21 +45,6 @@
         "@cloudflare/workers-types": "^4.20241218.0",
         "@sentry/cli": "^2.58.2",
         "wrangler": "^4.0.0",
-      },
-    },
-    "apps/cli": {
-      "name": "@amby/cli",
-      "version": "0.1.0",
-      "dependencies": {
-        "@amby/agent": "workspace:*",
-        "@amby/browser": "workspace:*",
-        "@amby/channels": "workspace:*",
-        "@amby/computer": "workspace:*",
-        "@amby/connectors": "workspace:*",
-        "@amby/db": "workspace:*",
-        "@amby/env": "workspace:*",
-        "@amby/memory": "workspace:*",
-        "effect": "^3.21.0",
       },
     },
     "apps/web": {
@@ -92,6 +80,7 @@
         "@amby/channels": "workspace:*",
         "@amby/computer": "workspace:*",
         "@amby/connectors": "workspace:*",
+        "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@amby/memory": "workspace:*",
@@ -129,6 +118,7 @@
       "name": "@amby/browser",
       "version": "0.1.0",
       "dependencies": {
+        "@amby/core": "workspace:*",
         "@amby/env": "workspace:*",
         "@browserbasehq/stagehand": "2.5.x",
         "@cloudflare/playwright": "^1.0.0",
@@ -154,6 +144,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@amby/connectors": "workspace:*",
+        "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@daytonaio/sdk": "^0.153.0",
@@ -175,6 +166,13 @@
         "ai": "^6.0.0",
         "effect": "^3.21.0",
         "zod": "^3.24.0",
+      },
+    },
+    "packages/core": {
+      "name": "@amby/core",
+      "version": "0.1.0",
+      "peerDependencies": {
+        "effect": "^3.21.0",
       },
     },
     "packages/db": {
@@ -213,6 +211,28 @@
         "ai": "^6.0.116",
         "effect": "^3.21.0",
         "zod": "^3.24.0",
+      },
+    },
+    "packages/plugins": {
+      "name": "@amby/plugins",
+      "version": "0.1.0",
+      "dependencies": {
+        "@amby/core": "workspace:*",
+      },
+      "peerDependencies": {
+        "ai": "^6.0.116",
+        "effect": "^3.21.0",
+        "zod": "^3.24.0",
+      },
+    },
+    "packages/skills": {
+      "name": "@amby/skills",
+      "version": "0.1.0",
+      "dependencies": {
+        "@amby/core": "workspace:*",
+      },
+      "peerDependencies": {
+        "effect": "^3.21.0",
       },
     },
   },
@@ -263,17 +283,21 @@
 
     "@amby/channels": ["@amby/channels@workspace:packages/channels"],
 
-    "@amby/cli": ["@amby/cli@workspace:apps/cli"],
-
     "@amby/computer": ["@amby/computer@workspace:packages/computer"],
 
     "@amby/connectors": ["@amby/connectors@workspace:packages/connectors"],
+
+    "@amby/core": ["@amby/core@workspace:packages/core"],
 
     "@amby/db": ["@amby/db@workspace:packages/db"],
 
     "@amby/env": ["@amby/env@workspace:packages/env"],
 
     "@amby/memory": ["@amby/memory@workspace:packages/memory"],
+
+    "@amby/plugins": ["@amby/plugins@workspace:packages/plugins"],
+
+    "@amby/skills": ["@amby/skills@workspace:packages/skills"],
 
     "@amby/web": ["@amby/web@workspace:apps/web"],
 
