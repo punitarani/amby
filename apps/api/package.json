@@ -13,7 +13,8 @@
 		"sentry:release": "sentry-cli releases info \"$SENTRY_RELEASE\" >/dev/null 2>&1 || sentry-cli releases new \"$SENTRY_RELEASE\"",
 		"sentry:sourcemaps": "bun run sentry:release && sentry-cli sourcemaps upload --release=\"$SENTRY_RELEASE\" --strip-prefix \"$PWD\" dist-worker && sentry-cli releases finalize \"$SENTRY_RELEASE\"",
 		"cf-typegen": "wrangler types --env-interface CloudflareBindings",
-		"start": "bun run src/index.ts"
+		"start": "bun run src/index.ts",
+		"test:telegram": "bun run src/scripts/test-telegram-flow.ts"
 	},
 	"devDependencies": {
 		"@sentry/cli": "^2.58.2",

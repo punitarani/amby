@@ -124,9 +124,69 @@ export const findOrCreateUser = (from: TelegramFrom, chatId: number) =>
 		const metadata = buildProfileMetadata(from, chatId)
 
 		return yield* Effect.tryPromise(async () => {
-			return await db.transaction(async (tx) => {
-				const existing = await tx
-					.select({ userId: schema.accounts.userId, id: schema.accounts.id })
+			// Fast path: check if the account already exists (no transaction needed)
+			const existing = await db
+				.select({ userId: schema.accounts.userId, id: schema.accounts.id })
+				.from(schema.accounts)
+				.where(
+					and(
+						eq(schema.accounts.providerId, "telegram"),
+						eq(schema.accounts.accountId, String(from.id)),
+					),
+				)
+				.limit(1)
+
+			if (existing[0]) {
+				await db
+					.update(schema.accounts)
+					.set({ metadata, updatedAt: new Date() })
+					.where(eq(schema.accounts.id, existing[0].id))
+				return existing[0].userId
+			}
+
+			// Slow path: create user + account in a transaction
+			try {
+				return await db.transaction(async (tx) => {
+					// Re-check inside transaction to handle concurrent creation
+					const recheck = await tx
+						.select({ userId: schema.accounts.userId })
+						.from(schema.accounts)
+						.where(
+							and(
+								eq(schema.accounts.providerId, "telegram"),
+								eq(schema.accounts.accountId, String(from.id)),
+							),
+						)
+						.limit(1)
+
+					if (recheck[0]) {
+						return recheck[0].userId
+					}
+
+					const userId = crypto.randomUUID()
+					const name = [from.first_name, from.last_name].filter(Boolean).join(" ")
+					const inferredTz = inferTimezoneFromLanguageCode(from.language_code)
+
+					await tx.insert(schema.users).values({
+						id: userId,
+						name,
+						...(inferredTz ? { timezone: inferredTz } : {}),
+					})
+					await tx.insert(schema.accounts).values({
+						id: crypto.randomUUID(),
+						userId,
+						accountId: String(from.id),
+						providerId: "telegram",
+						metadata,
+					})
+
+					return userId
+				})
+			} catch (err) {
+				// Race condition: another request created the account between our check and insert.
+				// Retry the lookup — the account should now exist.
+				const retryLookup = await db
+					.select({ userId: schema.accounts.userId })
 					.from(schema.accounts)
 					.where(
 						and(
@@ -136,34 +196,13 @@ export const findOrCreateUser = (from: TelegramFrom, chatId: number) =>
 					)
 					.limit(1)
 
-				if (existing[0]) {
-					await tx
-						.update(schema.accounts)
-						.set({ metadata, updatedAt: new Date() })
-						.where(eq(schema.accounts.id, existing[0].id))
-					return existing[0].userId
+				if (retryLookup[0]) {
+					return retryLookup[0].userId
 				}
 
-				const userId = crypto.randomUUID()
-				const name = [from.first_name, from.last_name].filter(Boolean).join(" ")
-
-				const inferredTz = inferTimezoneFromLanguageCode(from.language_code)
-
-				await tx.insert(schema.users).values({
-					id: userId,
-					name,
-					...(inferredTz ? { timezone: inferredTz } : {}),
-				})
-				await tx.insert(schema.accounts).values({
-					id: crypto.randomUUID(),
-					userId,
-					accountId: String(from.id),
-					providerId: "telegram",
-					metadata,
-				})
-
-				return userId
-			})
+				// If still not found, the error is genuine — rethrow
+				throw err
+			}
 		})
 	})
 

@@ -23,6 +23,7 @@
 		"db:push": "doppler run -- turbo db:push --filter=@amby/db",
 		"db:studio": "doppler run -- turbo db:studio --filter=@amby/db",
 		"seed": "doppler run -- bun run scripts/seed.ts",
+		"test:telegram": "doppler run -- bash -c 'cd apps/api && bun run src/scripts/test-telegram-flow.ts'",
 		"setup": "docker compose up -d && bun install && bun run db:push && bun run seed",
 		"api": "doppler run -- bun run apps/api/src/index.ts",
 		"api:dev": "doppler run -- bun run --hot apps/api/src/index.ts",

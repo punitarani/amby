@@ -153,12 +153,16 @@ export const conversations = pgTable(
 		id: uuid().defaultRandom().primaryKey().notNull(),
 		userId: text("user_id").notNull(),
 		platform: text().notNull(),
-		workspaceKey: text("workspace_key").default(').notNull(),
-	externalConversationKey: text("external_conversation_key").notNull(),
-	title: text(),
-	metadata: jsonb(),
-	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),,
+		workspaceKey: text("workspace_key").default("").notNull(),
+		externalConversationKey: text("external_conversation_key").notNull(),
+		title: text(),
+		metadata: jsonb(),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+			.defaultNow()
+			.notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+			.defaultNow()
+			.notNull(),
 	},
 	(table) => [
 		uniqueIndex("conversations_platform_key_idx").using(

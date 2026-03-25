@@ -67,10 +67,17 @@ async function resolveToolGroupsFromRegistry(
 	const groups: ToolGroups = {}
 	const context = { userId, conversationId, threadId }
 	for (const provider of registry.toolProviders) {
-		const tools = await provider.getTools(context)
-		if (tools && Object.keys(tools).length > 0) {
-			const group = provider.group as keyof ToolGroups
-			groups[group] = { ...(groups[group] ?? {}), ...tools } as ToolSet
+		try {
+			const tools = await provider.getTools(context)
+			if (tools && Object.keys(tools).length > 0) {
+				const group = provider.group as keyof ToolGroups
+				groups[group] = { ...(groups[group] ?? {}), ...tools } as ToolSet
+			}
+		} catch (err) {
+			console.warn(
+				`[agent] Tool provider "${provider.id}" (group: ${provider.group}) failed, skipping:`,
+				err instanceof Error ? err.message : String(err),
+			)
 		}
 	}
 	return groups
