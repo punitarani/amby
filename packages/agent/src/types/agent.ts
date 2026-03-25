@@ -1,6 +1,6 @@
 import type { ExecutionMode, SpecialistKind, TaskStatus } from "@amby/db"
-import type { ExecutionTaskResult } from "./execution"
 import type { TraceEnvironment } from "../trace-metadata"
+import type { ExecutionTaskResult } from "./execution"
 
 export type AgentRunConfig = {
 	request: {
