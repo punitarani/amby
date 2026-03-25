@@ -5,7 +5,7 @@
 		"jsx": "preserve",
 		"incremental": true,
 		"plugins": [{ "name": "next" }],
-		"types": ["node"],
+		"types": ["node", "bun-types"],
 		"paths": {
 			"@/*": ["./*"]
 		}

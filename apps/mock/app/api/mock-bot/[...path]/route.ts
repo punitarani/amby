@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { addMessage, addRequestLogEntry } from "../../../../lib/message-store"
 import { emitSSE } from "../../../../lib/sse-emitter"
 
@@ -23,7 +23,7 @@ export async function POST(
 	} else if (contentType.includes("multipart/form-data")) {
 		const formData = await request.formData()
 		for (const [key, value] of formData.entries()) {
-			body[key] = typeof value === "string" ? value : value.name
+			body[key] = typeof value === "string" ? value : (value as unknown as File).name
 		}
 	}
 

@@ -6,6 +6,7 @@ export interface TelegramUser {
 	first_name: string
 	last_name?: string
 	username?: string
+	language_code?: string
 }
 
 export interface TelegramChat {
