@@ -8,6 +8,7 @@
 		"./sandbox-config": "./src/sandbox-config.ts"
 	},
 	"scripts": {
+		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
 		"create-snapshot": "bun run src/scripts/create-snapshot.ts"
