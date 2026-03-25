@@ -1,10 +1,10 @@
 "use client"
 
+import { PanelRightClose, PanelRightOpen } from "lucide-react"
+import { useState } from "react"
 import { ChatContainer } from "../components/chat-container"
 import { DebugPanel } from "../components/debug-panel"
 import { UserConfigPanel, useUserConfig } from "../components/user-config"
-import { useState } from "react"
-import { PanelRightOpen, PanelRightClose } from "lucide-react"
 
 export default function Home() {
 	const { config, updateConfig, resetConfig, loaded } = useUserConfig()
@@ -25,9 +25,7 @@ export default function Home() {
 	return (
 		<main className="flex h-screen">
 			{/* Chat area */}
-			<div
-				className={`flex flex-col ${showDebug ? "w-[65%]" : "w-full"}`}
-			>
+			<div className={`flex flex-col ${showDebug ? "w-[65%]" : "w-full"}`}>
 				<UserConfigPanel
 					config={config}
 					onUpdate={updateConfig}
@@ -39,15 +37,12 @@ export default function Home() {
 
 			{/* Debug toggle */}
 			<button
+				type="button"
 				onClick={() => setShowDebug(!showDebug)}
 				className="absolute right-2 top-2 z-10 rounded p-1.5 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
 				title={showDebug ? "Hide debug panel" : "Show debug panel"}
 			>
-				{showDebug ? (
-					<PanelRightClose size={16} />
-				) : (
-					<PanelRightOpen size={16} />
-				)}
+				{showDebug ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
 			</button>
 
 			{/* Debug panel */}

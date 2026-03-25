@@ -1,6 +1,6 @@
-import { describe, expect, it, beforeEach } from "bun:test"
-import { buildWebhookUpdate, resetCounters } from "./webhook-builder"
+import { beforeEach, describe, expect, it } from "bun:test"
 import type { MockUserConfig } from "./telegram-types"
+import { buildWebhookUpdate, resetCounters } from "./webhook-builder"
 
 const mockUser: MockUserConfig = {
 	telegramUserId: 12345,

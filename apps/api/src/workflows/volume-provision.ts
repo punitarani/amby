@@ -7,6 +7,7 @@ import {
 	upsertVolumeRow,
 	volumeName,
 } from "@amby/computer/sandbox-config"
+import { CoreError } from "@amby/core"
 import { DbService } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
@@ -74,9 +75,9 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 						return yield* Effect.tryPromise({
 							try: () => ensureProvisionableVolume(daytona, db, userId, isDev),
 							catch: (cause) =>
-								new Error(
-									`Failed to ensure provisionable volume: ${cause instanceof Error ? cause.message : String(cause)}`,
-								),
+								new CoreError({
+									message: `Failed to ensure provisionable volume: ${cause instanceof Error ? cause.message : String(cause)}`,
+								}),
 						})
 					}),
 				)
@@ -109,9 +110,9 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 								return yield* Effect.tryPromise({
 									try: () => upsertVolumeRow(db, userId, volume.id, status),
 									catch: (cause) =>
-										new Error(
-											`Failed to upsert volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
-										),
+										new CoreError({
+											message: `Failed to upsert volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
+										}),
 								})
 							}),
 						)

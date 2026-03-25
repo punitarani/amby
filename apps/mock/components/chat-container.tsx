@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import type { MockUserConfig, DisplayMessage } from "../lib/telegram-types"
-import { MessageList } from "./message-list"
+import { useCallback, useEffect, useState } from "react"
+import type { DisplayMessage, MockUserConfig } from "../lib/telegram-types"
 import { MessageInput } from "./message-input"
+import { MessageList } from "./message-list"
 
 export function ChatContainer({ user }: { user: MockUserConfig }) {
 	const [messages, setMessages] = useState<DisplayMessage[]>([])

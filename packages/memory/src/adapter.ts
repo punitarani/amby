@@ -27,6 +27,6 @@ export function adaptMemoryService(service: MemoryOps): MemoryRepository {
 
 		deactivate: (id) => service.deactivate(id).pipe(Effect.mapError(mapError)),
 
-		findById: (_id) => Effect.succeed(undefined),
+		findById: (_id) => Effect.void.pipe(Effect.as(undefined)),
 	}
 }

@@ -311,7 +311,7 @@ export function ensureDefaultThread(
 
 		if (fallback[0]) return fallback[0].id
 
-		return yield* Effect.fail(new AgentError({ message: "Failed to create default thread" }))
+		return yield* new AgentError({ message: "Failed to create default thread" })
 	}).pipe(
 		Effect.mapError(
 			(e) =>
@@ -405,7 +405,7 @@ export function resolveThread(
 				)
 				const row = rows[0]
 				if (!row) {
-					return yield* Effect.fail(new AgentError({ message: "Failed to create native thread" }))
+					return yield* new AgentError({ message: "Failed to create native thread" })
 				}
 				threadId = row.id
 			}
@@ -523,7 +523,7 @@ export function resolveThread(
 			)
 			const row = rows[0]
 			if (!row) {
-				return yield* Effect.fail(new AgentError({ message: "Failed to insert new thread" }))
+				return yield* new AgentError({ message: "Failed to insert new thread" })
 			}
 			resolvedThreadId = row.id
 		}

@@ -30,7 +30,9 @@ export function getRequestLog(): RequestLogEntry[] {
 	return requestLog
 }
 
-export function addRequestLogEntry(entry: Omit<RequestLogEntry, "id" | "timestamp">): RequestLogEntry {
+export function addRequestLogEntry(
+	entry: Omit<RequestLogEntry, "id" | "timestamp">,
+): RequestLogEntry {
 	const full: RequestLogEntry = {
 		...entry,
 		id: crypto.randomUUID(),

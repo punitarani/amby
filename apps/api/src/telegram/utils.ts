@@ -1,4 +1,5 @@
 import { kickOffSandboxProvisionIfNeeded, sandboxWorkflowId } from "@amby/computer/sandbox-config"
+import { CoreError } from "@amby/core"
 import { and, DbService, eq, schema } from "@amby/db"
 import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
@@ -247,9 +248,9 @@ const startTelegramSession = (
 						}),
 					),
 				catch: (cause) =>
-					new Error(
-						`Failed to start sandbox provisioning workflow: ${cause instanceof Error ? cause.message : String(cause)}`,
-					),
+					new CoreError({
+						message: `Failed to start sandbox provisioning workflow: ${cause instanceof Error ? cause.message : String(cause)}`,
+					}),
 			}).pipe(
 				Effect.catchAll((error) =>
 					Effect.sync(() => {

@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { RotateCcw, Settings } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
 import type { MockUserConfig } from "../lib/telegram-types"
-import { Settings, RotateCcw } from "lucide-react"
 
 const STORAGE_KEY = "mock-channel-user-config"
 
@@ -71,6 +71,7 @@ export function UserConfigPanel({
 				</div>
 				<div className="flex items-center gap-1">
 					<button
+						type="button"
 						onClick={onClear}
 						className="rounded p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
 						title="Clear conversation"
@@ -78,6 +79,7 @@ export function UserConfigPanel({
 						<RotateCcw size={14} />
 					</button>
 					<button
+						type="button"
 						onClick={() => setExpanded(!expanded)}
 						className="rounded p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
 						title="Settings"
@@ -94,9 +96,7 @@ export function UserConfigPanel({
 							<input
 								type="number"
 								value={config.telegramUserId}
-								onChange={(e) =>
-									onUpdate({ telegramUserId: Number(e.target.value) })
-								}
+								onChange={(e) => onUpdate({ telegramUserId: Number(e.target.value) })}
 								className="mt-1 block w-full rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-200"
 							/>
 						</label>
@@ -105,9 +105,7 @@ export function UserConfigPanel({
 							<input
 								type="number"
 								value={config.chatId}
-								onChange={(e) =>
-									onUpdate({ chatId: Number(e.target.value) })
-								}
+								onChange={(e) => onUpdate({ chatId: Number(e.target.value) })}
 								className="mt-1 block w-full rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-200"
 							/>
 						</label>
@@ -149,6 +147,7 @@ export function UserConfigPanel({
 						/>
 					</label>
 					<button
+						type="button"
 						onClick={onReset}
 						className="text-xs text-red-400 hover:text-red-300"
 					>

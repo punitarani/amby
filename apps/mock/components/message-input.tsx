@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useCallback } from "react"
 import { Send } from "lucide-react"
+import { useCallback, useState } from "react"
 
 export function MessageInput({
 	onSend,
@@ -37,6 +37,7 @@ export function MessageInput({
 					className="flex-1 resize-none rounded-lg bg-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-600 disabled:opacity-50"
 				/>
 				<button
+					type="button"
 					onClick={handleSubmit}
 					disabled={disabled || !text.trim()}
 					className="rounded-lg bg-blue-600 p-2 text-white hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600"

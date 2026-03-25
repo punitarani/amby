@@ -50,11 +50,11 @@ const PluginRegistryLive = Layer.effect(
 			createAutomationsPlugin({
 				automationRepo: {
 					create: () => Effect.fail(notAvailable),
-					findById: () => Effect.succeed(undefined),
+					findById: () => Effect.void.pipe(Effect.as(undefined)),
 					findByUser: () => Effect.succeed([]),
 					findDue: () => Effect.succeed([]),
-					updateStatus: () => Effect.succeed(undefined),
-					delete: () => Effect.succeed(undefined),
+					updateStatus: () => Effect.void,
+					delete: () => Effect.void,
 				},
 			}),
 			createBrowserToolsPlugin({
@@ -140,17 +140,20 @@ runtime
 			)
 
 			yield* Effect.tryPromise(() =>
-				fetch(`${env.TELEGRAM_API_BASE_URL || "https://api.telegram.org"}/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						commands: [
-							{ command: "start", description: "Start or resume the assistant" },
-							{ command: "stop", description: "Pause the assistant" },
-							{ command: "help", description: "Show help" },
-						],
-					}),
-				}),
+				fetch(
+					`${env.TELEGRAM_API_BASE_URL || "https://api.telegram.org"}/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
+					{
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							commands: [
+								{ command: "start", description: "Start or resume the assistant" },
+								{ command: "stop", description: "Pause the assistant" },
+								{ command: "help", description: "Show help" },
+							],
+						}),
+					},
+				),
 			)
 
 			const bot = createAmbyBot(botRuntime, env.TELEGRAM_BOT_TOKEN)

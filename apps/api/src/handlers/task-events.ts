@@ -9,6 +9,7 @@ import {
 	TERMINAL_STATUSES,
 	verifyHmacSignature,
 } from "@amby/computer"
+import { CoreError } from "@amby/core"
 import type { TaskEventKind, TaskEventSource, TaskStatus } from "@amby/db"
 import { and, DbService, eq, lt, notInArray, schema } from "@amby/db"
 import { Effect } from "effect"
@@ -103,7 +104,7 @@ export const handleTaskEventPost = (request: Request) =>
 
 		const rawBody = yield* Effect.tryPromise({
 			try: () => request.text(),
-			catch: () => new Error("invalid body"),
+			catch: () => new CoreError({ message: "invalid body" }),
 		})
 
 		const callbackId = request.headers.get("x-amby-callback-id")
@@ -120,7 +121,7 @@ export const handleTaskEventPost = (request: Request) =>
 		const taskRows = yield* Effect.tryPromise({
 			try: () =>
 				db.select().from(schema.tasks).where(eq(schema.tasks.callbackId, callbackId)).limit(1),
-			catch: () => new Error("db"),
+			catch: () => new CoreError({ message: "db" }),
 		})
 		const task = taskRows[0]
 		if (!task) {
@@ -137,7 +138,7 @@ export const handleTaskEventPost = (request: Request) =>
 
 		const bearerHash = yield* Effect.tryPromise({
 			try: () => hashSecret(bearer),
-			catch: () => new Error("hash"),
+			catch: () => new CoreError({ message: "hash" }),
 		})
 		if (bearerHash !== task.callbackSecretHash) {
 			return jsonResponse({ error: "Unauthorized" }, 401)
@@ -156,10 +157,10 @@ export const handleTaskEventPost = (request: Request) =>
 			return jsonResponse({ error: "Unauthorized" }, 401)
 		}
 
-		let body: TaskEventBody
-		try {
-			body = JSON.parse(rawBody) as TaskEventBody
-		} catch {
+		const body = yield* Effect.try(() => JSON.parse(rawBody) as TaskEventBody).pipe(
+			Effect.orElseSucceed(() => null),
+		)
+		if (body === null) {
 			return jsonResponse({ error: "Invalid JSON" }, 400)
 		}
 

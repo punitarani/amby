@@ -17,7 +17,7 @@ function makeSkillService(overrides?: Partial<SkillService>): SkillService {
 					references: [],
 					requiredCapabilities: [],
 				})),
-		findById: overrides?.findById ?? (() => Effect.succeed(undefined)),
+		findById: overrides?.findById ?? (() => Effect.void.pipe(Effect.as(undefined))),
 		search: overrides?.search ?? (() => Effect.succeed([])),
 	}
 }

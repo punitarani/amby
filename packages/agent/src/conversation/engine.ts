@@ -4,7 +4,7 @@ import type { PluginRegistry } from "@amby/core"
 import type { Database, DbError } from "@amby/db"
 import { type LanguageModel, stepCountIs, ToolLoopAgent, type ToolSet, tool } from "ai"
 import type { Context } from "effect"
-import { Effect } from "effect"
+import { Effect, Runtime } from "effect"
 import { z } from "zod"
 import type { prepareConversationContext } from "../context/builder"
 import { AgentError } from "../errors"
@@ -271,6 +271,7 @@ export function handleTurn(
 			requestMetadata: metadata ?? null,
 		})
 		rootTraceRef = rootTrace
+		const rt = yield* Effect.runtime<never>()
 		yield* rootTrace.append("context_built", {
 			threadId: threadCtx.threadId,
 			sharedPromptContext: prepared.sharedPromptContext,
@@ -329,7 +330,7 @@ export function handleTurn(
 						rootTrace,
 					})
 					state.execution = summary
-					await Effect.runPromise(rootTrace.setMode(summary.mode))
+					await Runtime.runPromise(rt)(rootTrace.setMode(summary.mode))
 					return {
 						mode: summary.mode,
 						status: summary.status,
@@ -367,7 +368,7 @@ export function handleTurn(
 					}),
 				]),
 				async execute(input) {
-					const result = await Effect.runPromise(
+					const result = await Runtime.runPromise(rt)(
 						queryExecution({
 							query,
 							supervisor: config.supervisor,
@@ -403,7 +404,7 @@ export function handleTurn(
 				agentRole: "conversation",
 			}),
 			experimental_onStepStart: async (event) => {
-				await Effect.runPromise(
+				await Runtime.runPromise(rt)(
 					rootTrace.append("model_request", {
 						stepNumber: event.stepNumber,
 						activeTools: event.activeTools,
@@ -411,7 +412,7 @@ export function handleTurn(
 				)
 			},
 			onStepFinish: async (event) => {
-				await Effect.runPromise(
+				await Runtime.runPromise(rt)(
 					rootTrace.append("model_response", {
 						finishReason: event.finishReason,
 						text: event.text,

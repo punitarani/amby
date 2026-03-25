@@ -36,11 +36,11 @@ const PluginRegistryLive = Layer.effect(
 			createAutomationsPlugin({
 				automationRepo: {
 					create: () => Effect.fail(notAvailable),
-					findById: () => Effect.succeed(undefined),
+					findById: () => Effect.void.pipe(Effect.as(undefined)),
 					findByUser: () => Effect.succeed([]),
 					findDue: () => Effect.succeed([]),
-					updateStatus: () => Effect.succeed(undefined),
-					delete: () => Effect.succeed(undefined),
+					updateStatus: () => Effect.void,
+					delete: () => Effect.void,
 				},
 			}),
 			createBrowserToolsPlugin({

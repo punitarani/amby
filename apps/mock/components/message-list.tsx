@@ -7,9 +7,12 @@ import { MessageBubble } from "./message-bubble"
 export function MessageList({ messages }: { messages: DisplayMessage[] }) {
 	const bottomRef = useRef<HTMLDivElement>(null)
 
+	const messageCount = messages.length
 	useEffect(() => {
-		bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-	}, [messages])
+		if (messageCount > 0) {
+			bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+		}
+	}, [messageCount])
 
 	return (
 		<div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">

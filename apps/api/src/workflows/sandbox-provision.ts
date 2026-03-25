@@ -14,6 +14,7 @@ import {
 	VOLUME_MOUNT_PATH,
 	volumeWorkflowId,
 } from "@amby/computer/sandbox-config"
+import { CoreError } from "@amby/core"
 import { DbService } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
@@ -73,9 +74,9 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 						try: () =>
 							upsertMainSandboxRow(db, userId, externalInstanceId, status, volumeId, snapshot),
 						catch: (cause) =>
-							new Error(
-								`Failed to upsert sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,
-							),
+							new CoreError({
+								message: `Failed to upsert sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,
+							}),
 					})
 				}),
 			)
@@ -113,9 +114,9 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 						return yield* Effect.tryPromise({
 							try: () => ensureVolume(daytona, db, userId, isDev),
 							catch: (cause) =>
-								new Error(
-									`Failed to ensure volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
-								),
+								new CoreError({
+									message: `Failed to ensure volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
+								}),
 						})
 					}),
 				)
