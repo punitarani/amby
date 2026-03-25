@@ -35,8 +35,7 @@ export const MemoryServiceLive = Layer.effect(
 							.returning({ id: schema.memories.id }),
 					)
 					const row = rows[0]
-					if (!row)
-						return yield* Effect.fail(new MemoryError({ message: "Insert returned no rows" }))
+					if (!row) return yield* new MemoryError({ message: "Insert returned no rows" })
 					return row.id
 				}).pipe(
 					Effect.mapError((e) => new MemoryError({ message: "Failed to add memory", cause: e })),
