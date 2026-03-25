@@ -67,6 +67,8 @@ describe("trace metadata", () => {
 		expect(normalizeTraceEnvironment("production")).toBe("production")
 		expect(normalizeTraceEnvironment("development")).toBe("development")
 		expect(normalizeTraceEnvironment("staging")).toBe("development")
+		expect(normalizeTraceEnvironment(undefined)).toBe("development")
+		expect(normalizeTraceEnvironment(null)).toBe("development")
 	})
 
 	it("builds agent metadata from request context", () => {
@@ -123,6 +125,11 @@ describe("trace metadata", () => {
 			}),
 		).toMatchObject({
 			environment: "production",
+			request: expect.objectContaining({
+				taskId: "task-1",
+				rootTaskId: "task-1",
+				specialist: "builder",
+			}),
 		})
 	})
 })
