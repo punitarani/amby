@@ -12,8 +12,8 @@ import {
 	type TraceEventKind,
 } from "@amby/db"
 import { Effect } from "effect"
+import { buildRootTraceMetadata } from "../trace-metadata"
 import type { AgentRunConfig } from "../types/agent"
-import type { ExecutionRequestEnvelope, ExecutionResponseEnvelope } from "../types/persistence"
 
 export type QueryFn = <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, DbError>
 
@@ -133,29 +133,6 @@ export function createTrace(params: CreateTraceParams): Effect.Effect<TraceWrite
 				return makeTraceWriter(params.query, traceId)
 			}),
 		)
-}
-
-export function buildRootTraceMetadata(config: AgentRunConfig, extra?: Record<string, unknown>) {
-	return {
-		requestId: config.request.requestId,
-		conversationId: config.request.conversationId,
-		threadId: config.request.threadId ?? null,
-		userId: config.request.userId,
-		mode: config.request.mode,
-		...extra,
-	}
-}
-
-export function buildTaskMetadata(params: {
-	request: ExecutionRequestEnvelope
-	response?: ExecutionResponseEnvelope
-	extra?: Record<string, unknown>
-}): Record<string, unknown> {
-	return {
-		request: params.request as unknown as Record<string, unknown>,
-		...(params.response ? { response: params.response as unknown as Record<string, unknown> } : {}),
-		...(params.extra ?? {}),
-	}
 }
 
 export function createRootTrace(

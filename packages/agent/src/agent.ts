@@ -21,7 +21,6 @@ import {
 	synopsisPreviousThreadIfDormantSwitch,
 } from "./synopsis"
 import {
-	type AgentTraceMetadata,
 	createTelemetrySettings,
 	initializeTelemetry,
 	shutdownTelemetry,
@@ -29,6 +28,7 @@ import {
 } from "./telemetry"
 import { createCodexAuthTools } from "./tools/codex-auth"
 import { createJobTools, createReplyTools, type ReplyFn } from "./tools/messaging"
+import { normalizeTraceEnvironment } from "./trace-metadata"
 import type { AgentRunConfig, AgentRunResult, StreamPart } from "./types/agent"
 import type { QueryExecutionResult } from "./types/execution"
 
@@ -63,6 +63,8 @@ function buildRunConfig(params: {
 	conversationId: string
 	threadId: string
 	mode: "message" | "batched-message" | "stream-message"
+	environment: string
+	requestMetadata?: Record<string, unknown>
 	modelId: string
 	userTimezone: string
 	sharedPromptContext: string
@@ -81,6 +83,8 @@ function buildRunConfig(params: {
 			threadId: params.threadId,
 			userId: params.userId,
 			mode: params.mode,
+			environment: normalizeTraceEnvironment(params.environment),
+			metadata: params.requestMetadata,
 		},
 		modelPolicy: {
 			defaultModelId: params.modelId,
@@ -376,6 +380,8 @@ export const makeAgentServiceLive = (userId: string) =>
 						conversationId,
 						threadId: threadCtx.threadId,
 						mode,
+						environment: env.NODE_ENV,
+						requestMetadata: metadata,
 						modelId: models.defaultModelId,
 						userTimezone: prepared.userTimezone,
 						sharedPromptContext: prepared.sharedPromptContext,
@@ -537,14 +543,9 @@ export const makeAgentServiceLive = (userId: string) =>
 								config.request.mode === "stream-message"
 									? "amby.conversation.stream"
 									: "amby.conversation.generate",
-							metadata: {
-								request_id: config.request.requestId,
-								conversation_id: config.request.conversationId,
-								request_mode: config.request.mode,
-								user_id: userId,
-								model_id: models.defaultModelId,
-								agent_role: "conversation",
-							} as AgentTraceMetadata,
+							request: config.request,
+							modelId: models.defaultModelId,
+							agentRole: "conversation",
 						}),
 						experimental_onStepStart: async (event) => {
 							await Effect.runPromise(
