@@ -10,6 +10,7 @@ const stubConfig: AgentRunConfig = {
 		conversationId: "test",
 		userId: "test",
 		mode: "message",
+		environment: "development",
 	},
 	modelPolicy: {
 		defaultModelId: "test-model",

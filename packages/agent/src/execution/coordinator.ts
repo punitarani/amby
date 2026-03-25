@@ -2,6 +2,7 @@ import type { BrowserService } from "@amby/browser"
 import { appendTaskProgressEvent, type TaskSupervisor } from "@amby/computer"
 import type { LanguageModel } from "ai"
 import { Effect } from "effect"
+import { buildTaskTraceMetadata } from "../trace-metadata"
 import type { AgentRunConfig } from "../types/agent"
 import type {
 	ExecutionPlan,
@@ -10,7 +11,7 @@ import type {
 	ExecutionTaskResult,
 } from "../types/execution"
 import type { ExecutionRequestEnvelope, ExecutionResponseEnvelope } from "../types/persistence"
-import { buildTaskMetadata, createTrace, type QueryFn, type TraceWriter } from "./ledger"
+import { createTrace, type QueryFn, type TraceWriter } from "./ledger"
 import { buildReadyBatch } from "./locks"
 import { buildExecutionPlan } from "./planner"
 import { buildExecutionSummary } from "./reducer"
@@ -135,7 +136,10 @@ async function runTaskWithTrace(params: {
 			runnerKind: params.task.runnerKind,
 			mode: params.task.mode,
 			depth: params.task.depth,
-			metadata: buildTaskMetadata({ request: requestEnvelope }),
+			metadata: buildTaskTraceMetadata({
+				request: params.config.request,
+				executionRequest: requestEnvelope,
+			}),
 		}),
 	)
 
@@ -216,9 +220,10 @@ async function runTaskWithTrace(params: {
 		if (params.task.runnerKind === "background_handoff") {
 			await Effect.runPromise(
 				trace.updateMetadata(
-					buildTaskMetadata({
-						request: requestEnvelope,
-						response: buildResponseEnvelope(runResult.result),
+					buildTaskTraceMetadata({
+						request: params.config.request,
+						executionRequest: requestEnvelope,
+						executionResponse: buildResponseEnvelope(runResult.result),
 					}),
 				),
 			)
@@ -236,9 +241,10 @@ async function runTaskWithTrace(params: {
 		await Effect.runPromise(
 			trace.complete(
 				runResult.result.status === "failed" ? "failed" : "completed",
-				buildTaskMetadata({
-					request: requestEnvelope,
-					response: responseEnvelope,
+				buildTaskTraceMetadata({
+					request: params.config.request,
+					executionRequest: requestEnvelope,
+					executionResponse: responseEnvelope,
 				}),
 			),
 		)
@@ -266,9 +272,10 @@ async function runTaskWithTrace(params: {
 		await Effect.runPromise(
 			trace.complete(
 				"failed",
-				buildTaskMetadata({
-					request: requestEnvelope,
-					response: buildResponseEnvelope(failedResult),
+				buildTaskTraceMetadata({
+					request: params.config.request,
+					executionRequest: requestEnvelope,
+					executionResponse: buildResponseEnvelope(failedResult),
 				}),
 			),
 		)

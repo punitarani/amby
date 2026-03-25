@@ -4,25 +4,8 @@ import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-ho
 import { BasicTracerProvider, type SpanProcessor } from "@opentelemetry/sdk-trace-base"
 import type { TelemetrySettings } from "ai"
 import { Effect } from "effect"
-
-export type TraceRequestMode = "message" | "batched-message" | "stream-message"
-
-export type RequestTraceMetadata = {
-	request_id: string
-	conversation_id: string
-	request_mode: TraceRequestMode
-	source?: string
-	telegram_batched?: boolean
-	telegram_message_count?: number
-}
-
-export type AgentTraceMetadata = RequestTraceMetadata & {
-	user_id: string
-	model_id: string
-	agent_role: "conversation" | "specialist"
-	specialist_name?: string
-	task_id?: string
-}
+import { type AgentTraceMetadata, buildAgentTraceMetadata } from "./trace-metadata"
+import type { AgentRunConfig } from "./types/agent"
 
 type TelemetryState = {
 	enabled: boolean
@@ -81,46 +64,32 @@ export const initializeTelemetry = ({
 	return telemetryState
 }
 
-export const buildRequestTraceMetadata = ({
-	requestId = crypto.randomUUID(),
-	conversationId,
-	requestMode,
-	requestMetadata,
-}: {
-	requestId?: string
-	conversationId: string
-	requestMode: TraceRequestMode
-	requestMetadata?: Record<string, unknown>
-}): RequestTraceMetadata => {
-	const telegram =
-		requestMetadata?.telegram &&
-		typeof requestMetadata.telegram === "object" &&
-		!Array.isArray(requestMetadata.telegram)
-			? (requestMetadata.telegram as Record<string, unknown>)
-			: undefined
-
-	return {
-		request_id: requestId,
-		conversation_id: conversationId,
-		request_mode: requestMode,
-		...(requestMetadata && Object.hasOwn(requestMetadata, "telegram") && { source: "telegram" }),
-		...(typeof telegram?.batched === "boolean" && { telegram_batched: telegram.batched }),
-		...(typeof telegram?.messageCount === "number" && {
-			telegram_message_count: telegram.messageCount,
-		}),
-	}
-}
-
 export const createTelemetrySettings = ({
 	functionId,
-	metadata,
+	request,
+	modelId,
+	agentRole,
+	specialistName,
+	taskId,
 }: {
 	functionId: string
-	metadata: AgentTraceMetadata
+	request: AgentRunConfig["request"]
+	modelId: string
+	agentRole: AgentTraceMetadata["agent_role"]
+	specialistName?: string
+	taskId?: string
 }): TelemetrySettings => {
 	if (!telemetryState?.enabled) {
 		return { isEnabled: false }
 	}
+
+	const metadata = buildAgentTraceMetadata({
+		request,
+		modelId,
+		agentRole,
+		specialistName,
+		taskId,
+	})
 
 	return {
 		isEnabled: true,

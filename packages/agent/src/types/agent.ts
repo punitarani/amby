@@ -8,6 +8,8 @@ export type AgentRunConfig = {
 		threadId?: string
 		userId: string
 		mode: "message" | "batched-message" | "stream-message"
+		environment: import("../trace-metadata").TraceEnvironment
+		metadata?: Record<string, unknown>
 	}
 	modelPolicy: {
 		defaultModelId: string
