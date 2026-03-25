@@ -4,9 +4,10 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "next dev --port 3002",
+		"dev": "next dev --port 3100",
 		"build": "next build",
-		"start": "next start --port 3002",
+		"start": "next start --port 3100",
+		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"lint": "bunx @biomejs/biome check .",
 		"lint:fix": "bunx @biomejs/biome check --fix ."

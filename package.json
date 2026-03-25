@@ -18,6 +18,7 @@
 		"dev": "doppler run -- turbo dev",
 		"web": "bun run --filter @amby/web start",
 		"web:dev": "bun run --filter @amby/web dev",
+		"mock-channel": "bun run --filter @amby/mock-channel dev",
 		"db:generate": "turbo db:generate --filter=@amby/db",
 		"db:migrate": "doppler run -- turbo db:migrate --filter=@amby/db",
 		"db:push": "doppler run -- turbo db:push --filter=@amby/db",

@@ -25,10 +25,12 @@
         "@amby/auth": "workspace:*",
         "@amby/browser": "workspace:*",
         "@amby/computer": "workspace:*",
-        "@amby/connectors": "workspace:*",
+        "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@amby/memory": "workspace:*",
+        "@amby/plugins": "workspace:*",
+        "@amby/skills": "workspace:*",
         "@chat-adapter/state-memory": "^4.20.2",
         "@chat-adapter/telegram": "^4.20.2",
         "@cloudflare/playwright": "^1.1.2",
@@ -42,21 +44,6 @@
         "@cloudflare/workers-types": "^4.20241218.0",
         "@sentry/cli": "^2.58.2",
         "wrangler": "^4.0.0",
-      },
-    },
-    "apps/cli": {
-      "name": "@amby/cli",
-      "version": "0.1.0",
-      "dependencies": {
-        "@amby/agent": "workspace:*",
-        "@amby/browser": "workspace:*",
-        "@amby/channels": "workspace:*",
-        "@amby/computer": "workspace:*",
-        "@amby/connectors": "workspace:*",
-        "@amby/db": "workspace:*",
-        "@amby/env": "workspace:*",
-        "@amby/memory": "workspace:*",
-        "effect": "^3.21.0",
       },
     },
     "apps/mock-channel": {
@@ -82,7 +69,7 @@
       "name": "@amby/web",
       "version": "0.1.0",
       "dependencies": {
-        "@amby/connectors": "workspace:*",
+        "@amby/plugins": "workspace:*",
         "@posthog/react": "^1.8.2",
         "clsx": "^2.1.1",
         "framer-motion": "^12.37.0",
@@ -108,12 +95,10 @@
       "dependencies": {
         "@ai-sdk/provider": "^3.0.0",
         "@amby/browser": "workspace:*",
-        "@amby/channels": "workspace:*",
         "@amby/computer": "workspace:*",
-        "@amby/connectors": "workspace:*",
+        "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
-        "@amby/memory": "workspace:*",
         "@braintrust/otel": "^0.2.0",
         "@daytonaio/sdk": "^0.153.0",
         "@openrouter/ai-sdk-provider": "^2.3.1",
@@ -123,7 +108,6 @@
         "@opentelemetry/exporter-trace-otlp-http": "^0.207.0",
         "@opentelemetry/sdk-trace-base": "^2.6.0",
         "braintrust": "^3.4.0",
-        "cron-parser": "^5.5.0",
       },
       "peerDependencies": {
         "ai": "^6.0.116",
@@ -148,6 +132,7 @@
       "name": "@amby/browser",
       "version": "0.1.0",
       "dependencies": {
+        "@amby/core": "workspace:*",
         "@amby/env": "workspace:*",
         "@browserbasehq/stagehand": "2.5.x",
         "@cloudflare/playwright": "^1.0.0",
@@ -158,21 +143,11 @@
         "zod": "^3.24.0",
       },
     },
-    "packages/channels": {
-      "name": "@amby/channels",
-      "version": "0.1.0",
-      "dependencies": {
-        "@amby/env": "workspace:*",
-      },
-      "peerDependencies": {
-        "effect": "^3.21.0",
-      },
-    },
     "packages/computer": {
       "name": "@amby/computer",
       "version": "0.1.0",
       "dependencies": {
-        "@amby/connectors": "workspace:*",
+        "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@daytonaio/sdk": "^0.153.0",
@@ -183,17 +158,11 @@
         "zod": "^3.24.0",
       },
     },
-    "packages/connectors": {
-      "name": "@amby/connectors",
+    "packages/core": {
+      "name": "@amby/core",
       "version": "0.1.0",
-      "dependencies": {
-        "@amby/db": "workspace:*",
-        "@amby/env": "workspace:*",
-        "@composio/core": "0.6.5",
-        "@composio/vercel": "0.6.5",
-        "ai": "^6.0.0",
+      "peerDependencies": {
         "effect": "^3.21.0",
-        "zod": "^3.24.0",
       },
     },
     "packages/db": {
@@ -226,7 +195,36 @@
       "name": "@amby/memory",
       "version": "0.1.0",
       "dependencies": {
+        "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
+      },
+      "peerDependencies": {
+        "ai": "^6.0.116",
+        "effect": "^3.21.0",
+        "zod": "^3.24.0",
+      },
+    },
+    "packages/plugins": {
+      "name": "@amby/plugins",
+      "version": "0.1.0",
+      "dependencies": {
+        "@amby/core": "workspace:*",
+        "@amby/db": "workspace:*",
+        "@amby/env": "workspace:*",
+        "@composio/core": "0.6.5",
+        "@composio/vercel": "0.6.5",
+      },
+      "peerDependencies": {
+        "ai": "^6.0.116",
+        "effect": "^3.21.0",
+        "zod": "^3.24.0",
+      },
+    },
+    "packages/skills": {
+      "name": "@amby/skills",
+      "version": "0.1.0",
+      "dependencies": {
+        "@amby/core": "workspace:*",
       },
       "peerDependencies": {
         "ai": "^6.0.116",
@@ -280,13 +278,9 @@
 
     "@amby/browser": ["@amby/browser@workspace:packages/browser"],
 
-    "@amby/channels": ["@amby/channels@workspace:packages/channels"],
-
-    "@amby/cli": ["@amby/cli@workspace:apps/cli"],
-
     "@amby/computer": ["@amby/computer@workspace:packages/computer"],
 
-    "@amby/connectors": ["@amby/connectors@workspace:packages/connectors"],
+    "@amby/core": ["@amby/core@workspace:packages/core"],
 
     "@amby/db": ["@amby/db@workspace:packages/db"],
 
@@ -295,6 +289,10 @@
     "@amby/memory": ["@amby/memory@workspace:packages/memory"],
 
     "@amby/mock-channel": ["@amby/mock-channel@workspace:apps/mock-channel"],
+
+    "@amby/plugins": ["@amby/plugins@workspace:packages/plugins"],
+
+    "@amby/skills": ["@amby/skills@workspace:packages/skills"],
 
     "@amby/web": ["@amby/web@workspace:apps/web"],
 
@@ -1092,8 +1090,6 @@
 
     "cors": ["cors@2.8.6", "", { "dependencies": { "object-assign": "^4", "vary": "^1" } }, "sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw=="],
 
-    "cron-parser": ["cron-parser@5.5.0", "", { "dependencies": { "luxon": "^3.7.1" } }, "sha512-oML4lKUXxizYswqmxuOCpgFS8BNUJpIu6k/2HVHyaL8Ynnf3wdf9tkns0yRdJLSIjkJ+b0DXHMZEHGpMwjnPww=="],
-
     "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
 
     "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
@@ -1379,8 +1375,6 @@
     "lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
     "lucide-react": ["lucide-react@0.577.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-4LjoFv2eEPwYDPg/CUdBJQSDfPyzXCRrVW1X7jrx/trgxnxkHFjnVZINbzvzxjN70dxychOfg+FTYwBiS3pQ5A=="],
-
-    "luxon": ["luxon@3.7.2", "", {}, "sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew=="],
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 

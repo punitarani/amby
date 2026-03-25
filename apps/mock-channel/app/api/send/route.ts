@@ -22,8 +22,8 @@ export async function POST(request: Request) {
 	const userMsg = addMessage("user", text)
 	emitSSE("message", userMsg)
 
-	const update = buildWebhookUpdate(text, user, Number(userMsg.id))
-	const webhookUrl = `${user.backendUrl}/api/telegram/webhook`
+	const update = buildWebhookUpdate(text, user)
+	const webhookUrl = `${user.backendUrl}/telegram/webhook`
 
 	addRequestLogEntry({
 		direction: "outbound",
