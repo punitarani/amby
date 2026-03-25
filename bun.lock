@@ -59,6 +59,26 @@
         "effect": "^3.21.0",
       },
     },
+    "apps/mock-channel": {
+      "name": "@amby/mock-channel",
+      "version": "0.1.0",
+      "dependencies": {
+        "clsx": "^2.1.1",
+        "lucide-react": "^0.577.0",
+        "next": "16",
+        "react": "19",
+        "react-dom": "19",
+        "tailwind-merge": "^3.5.0",
+      },
+      "devDependencies": {
+        "@tailwindcss/postcss": "^4.2.1",
+        "@types/node": "^25.5.0",
+        "@types/react": "^19.2.14",
+        "@types/react-dom": "^19.2.3",
+        "postcss": "^8.5.8",
+        "tailwindcss": "^4.2.1",
+      },
+    },
     "apps/web": {
       "name": "@amby/web",
       "version": "0.1.0",
@@ -274,6 +294,8 @@
     "@amby/env": ["@amby/env@workspace:packages/env"],
 
     "@amby/memory": ["@amby/memory@workspace:packages/memory"],
+
+    "@amby/mock-channel": ["@amby/mock-channel@workspace:apps/mock-channel"],
 
     "@amby/web": ["@amby/web@workspace:apps/web"],
 

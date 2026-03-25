@@ -32,7 +32,8 @@
 		"tunnel": "doppler run -- ./scripts/tunnel.sh",
 		"docs:notion:pull": "cd docs && doppler run -- notionfs pull",
 		"docs:notion:push": "cd docs && doppler run -- notionfs push",
-		"docs:notion:sync": "cd docs && doppler run -- notionfs sync"
+		"docs:notion:sync": "cd docs && doppler run -- notionfs sync",
+		"mock-channel": "bun run --filter @amby/mock-channel dev"
 	},
 	"packageManager": "bun@1.3.0",
 	"workspaces": [
