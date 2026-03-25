@@ -371,15 +371,13 @@ export const ensureMainSandbox = (
 				}),
 		})
 
-		return yield* Effect.fail(
-			new SandboxError({
-				message:
-					isVolumeProvisioning(volumeRow.status) || isVolumeUnavailable(volumeRow.status)
-						? ENV_SETUP_MESSAGE
-						: SANDBOX_START_MESSAGE,
-				transient: true,
-			}),
-		)
+		return yield* new SandboxError({
+			message:
+				isVolumeProvisioning(volumeRow.status) || isVolumeUnavailable(volumeRow.status)
+					? ENV_SETUP_MESSAGE
+					: SANDBOX_START_MESSAGE,
+			transient: true,
+		})
 	})
 
 export const PROVISION_WORKFLOW_THROTTLE_MS = 15_000

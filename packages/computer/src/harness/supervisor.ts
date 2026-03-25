@@ -3,7 +3,7 @@ import type { RunnerKind, SpecialistKind, TaskStatus } from "@amby/db"
 import { and, DbService, eq, inArray, lte, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Runtime } from "effect"
 import {
 	AGENT_WORKDIR,
 	CODEX_HOME,
@@ -222,6 +222,8 @@ export const TaskSupervisorLive = Layer.scoped(
 		const env = yield* EnvService
 		const { db, query } = yield* DbService
 
+		const rt = yield* Effect.runtime<never>()
+		const runPromise = Runtime.runPromise(rt)
 		const installer = new CodexInstaller()
 		const provider = new CodexProvider()
 		const activeTasks = new Map<string, ActiveTask>()
@@ -406,7 +408,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							activeTasks.delete(task.taskId)
 							continue
 						}
-						const completed = await Effect.runPromise(
+						const completed = await runPromise(
 							completeTaskRecord(query, {
 								taskId: task.taskId,
 								status: "lost",
@@ -473,7 +475,7 @@ export const TaskSupervisorLive = Layer.scoped(
 			}
 
 			const nextStatus = exitCode === 0 ? "succeeded" : "failed"
-			const completed = await Effect.runPromise(
+			const completed = await runPromise(
 				completeTaskRecord(query, {
 					taskId: task.taskId,
 					status: nextStatus,
@@ -513,7 +515,7 @@ export const TaskSupervisorLive = Layer.scoped(
 				.limit(1)
 			const current = rows[0]?.status as TaskStatus | undefined
 			if (current && !isTerminal(current)) {
-				const completed = await Effect.runPromise(
+				const completed = await runPromise(
 					completeTaskRecord(query, {
 						taskId: task.taskId,
 						status: "timed_out",
@@ -560,7 +562,7 @@ export const TaskSupervisorLive = Layer.scoped(
 						),
 					)
 				for (const row of lostPreparing) {
-					const completed = await Effect.runPromise(
+					const completed = await runPromise(
 						completeTaskRecord(query, {
 							taskId: row.id,
 							status: "lost",
@@ -595,7 +597,7 @@ export const TaskSupervisorLive = Layer.scoped(
 			for (const task of running) {
 				const runtimeData = readSandboxRuntimeData(task)
 				if (!runtimeData?.sandboxId || !runtimeData.sessionId || !runtimeData.commandId) {
-					const completed = await Effect.runPromise(
+					const completed = await runPromise(
 						completeTaskRecord(query, {
 							taskId: task.id,
 							status: "lost",
@@ -616,7 +618,7 @@ export const TaskSupervisorLive = Layer.scoped(
 				}
 
 				try {
-					const sandbox = await Effect.runPromise(sandboxService.ensure(task.userId))
+					const sandbox = await runPromise(sandboxService.ensure(task.userId))
 					await sandbox.process.getSession(runtimeData.sessionId)
 
 					activeTasks.set(task.id, {
@@ -631,7 +633,7 @@ export const TaskSupervisorLive = Layer.scoped(
 						hasCallbacks: Boolean(task.callbackSecretHash),
 					})
 				} catch {
-					const completed = await Effect.runPromise(
+					const completed = await runPromise(
 						completeTaskRecord(query, {
 							taskId: task.id,
 							status: "lost",
@@ -652,7 +654,7 @@ export const TaskSupervisorLive = Layer.scoped(
 			}
 		}
 
-		// Fire-and-forget: recoverRunning uses Effect.runPromise for sandboxService.ensure
+		// Fire-and-forget: recoverRunning uses Runtime.runPromise for sandboxService.ensure
 		// because it runs outside the Effect pipeline during layer initialization.
 		recoverRunning().catch((err) => console.error("[TaskSupervisor] recovery failed:", err))
 
@@ -672,9 +674,7 @@ export const TaskSupervisorLive = Layer.scoped(
 				Effect.gen(function* () {
 					const trimmed = apiKey.trim()
 					if (!trimmed) {
-						return yield* Effect.fail(
-							new SandboxError({ message: "OpenAI API key cannot be empty." }),
-						)
+						return yield* new SandboxError({ message: "OpenAI API key cannot be empty." })
 					}
 
 					const sandbox = yield* sandboxService.ensure(userId)
@@ -779,11 +779,9 @@ export const TaskSupervisorLive = Layer.scoped(
 				Effect.gen(function* () {
 					const parsed = parseCodexAuthFile(authJson)
 					if (!parsed || parsed.cache.method !== "chatgpt") {
-						return yield* Effect.fail(
-							new SandboxError({
-								message: "That auth.json does not contain ChatGPT Codex credentials.",
-							}),
-						)
+						return yield* new SandboxError({
+							message: "That auth.json does not contain ChatGPT Codex credentials.",
+						})
 					}
 
 					const sandbox = yield* sandboxService.ensure(userId)
@@ -860,9 +858,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					})
 
 					if (!installResult.installed) {
-						return yield* Effect.fail(
-							new SandboxError({ message: "Failed to install Codex CLI in sandbox" }),
-						)
+						return yield* new SandboxError({ message: "Failed to install Codex CLI in sandbox" })
 					}
 
 					// Enforce per-user active task limit
@@ -888,11 +884,9 @@ export const TaskSupervisorLive = Layer.scoped(
 					})
 
 					if (activeCount >= MAX_ACTIVE_TASKS_PER_USER) {
-						return yield* Effect.fail(
-							new SandboxError({
-								message: `You already have ${activeCount} active tasks. Wait for some to finish before starting another (limit: ${MAX_ACTIVE_TASKS_PER_USER}).`,
-							}),
-						)
+						return yield* new SandboxError({
+							message: `You already have ${activeCount} active tasks. Wait for some to finish before starting another (limit: ${MAX_ACTIVE_TASKS_PER_USER}).`,
+						})
 					}
 
 					const creds = yield* Effect.tryPromise({
@@ -1025,7 +1019,7 @@ export const TaskSupervisorLive = Layer.scoped(
 								})
 
 								const now = new Date()
-								await Effect.runPromise(
+								await runPromise(
 									updateTaskRecord(query, taskId, {
 										status: "running",
 										startedAt: now,
@@ -1061,7 +1055,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							} catch (cause) {
 								// Roll back: mark as failed and clean up the session
 								const message = cause instanceof Error ? cause.message : String(cause)
-								await Effect.runPromise(
+								await runPromise(
 									completeTaskRecord(query, {
 										taskId,
 										status: "failed",
@@ -1260,7 +1254,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							const runtimeData = readSandboxRuntimeData(task)
 							if (!runtimeData?.artifactRoot) return null
 
-							const sandbox = await Effect.runPromise(sandboxService.ensure(userId))
+							const sandbox = await runPromise(sandboxService.ensure(userId))
 							return await collectTaskExecutionData({
 								sandbox,
 								provider,
@@ -1295,7 +1289,7 @@ export const TaskSupervisorLive = Layer.scoped(
 						const runtimeData = readSandboxRuntimeData(task)
 						if (!runtimeData?.artifactRoot) return null
 
-						const sandbox = await Effect.runPromise(sandboxService.ensure(userId))
+						const sandbox = await runPromise(sandboxService.ensure(userId))
 						const executionData = await collectTaskExecutionData({
 							sandbox,
 							provider,
