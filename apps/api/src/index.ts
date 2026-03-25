@@ -11,6 +11,7 @@ import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
+import type { Chat } from "chat"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
 import { createAmbyBot } from "./bot"
@@ -58,6 +59,8 @@ app.get("/composio/redirect", (c) => {
 
 const port = Number(process.env.PORT) || 3001
 
+let chatBot: Chat | null = null
+
 console.log("Starting Amby API...")
 
 runtime
@@ -76,7 +79,7 @@ runtime
 
 			// Register bot commands via Telegram API
 			yield* Effect.tryPromise(() =>
-				fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
+				fetch(`${env.TELEGRAM_API_BASE_URL || "https://api.telegram.org"}/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
@@ -91,6 +94,7 @@ runtime
 
 			// Initialize Chat SDK bot (auto mode: polling in dev, webhook when deployed)
 			const bot = createAmbyBot(botRuntime, env.TELEGRAM_BOT_TOKEN)
+			chatBot = bot
 			yield* Effect.tryPromise(() => bot.initialize())
 
 			console.log("Telegram bot: configured and running")
@@ -99,6 +103,18 @@ runtime
 	.then(() => {
 		console.log(`Amby API listening on port ${port}`)
 	})
+
+// Webhook endpoint for local dev mock Telegram channel
+app.post("/telegram/webhook", async (c) => {
+	if (!chatBot) {
+		return c.json({ error: "Bot not initialized" }, 503)
+	}
+	const handler = chatBot.webhooks.telegram
+	if (!handler) {
+		return c.json({ error: "Telegram adapter not available" }, 500)
+	}
+	return handler(c.req.raw, { waitUntil: () => {} })
+})
 
 export default {
 	port,

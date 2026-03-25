@@ -42,6 +42,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 
 		const adapter = createTelegramAdapter({
 			botToken: this.env.TELEGRAM_BOT_TOKEN ?? "",
+			apiBaseUrl: this.env.TELEGRAM_API_BASE_URL,
 			mode: "webhook",
 		})
 		const chatIdStr = String(chatId)

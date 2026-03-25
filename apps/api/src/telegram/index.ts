@@ -19,10 +19,10 @@ export const TelegramSenderLive = Layer.effect(
 		if (!env.TELEGRAM_BOT_TOKEN) {
 			throw new Error("TELEGRAM_BOT_TOKEN is not set")
 		}
-		const adapter = createTelegramAdapter({ botToken: env.TELEGRAM_BOT_TOKEN, mode: "webhook" })
+		const adapter = createTelegramAdapter({ botToken: env.TELEGRAM_BOT_TOKEN, apiBaseUrl: env.TELEGRAM_API_BASE_URL, mode: "webhook" })
 
 		yield* Effect.tryPromise(() =>
-			fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
+			fetch(`${env.TELEGRAM_API_BASE_URL || "https://api.telegram.org"}/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -54,7 +54,7 @@ export const TelegramSenderLite = Layer.effect(
 		if (!env.TELEGRAM_BOT_TOKEN) {
 			throw new Error("TELEGRAM_BOT_TOKEN is not set")
 		}
-		const adapter = createTelegramAdapter({ botToken: env.TELEGRAM_BOT_TOKEN, mode: "webhook" })
+		const adapter = createTelegramAdapter({ botToken: env.TELEGRAM_BOT_TOKEN, apiBaseUrl: env.TELEGRAM_API_BASE_URL, mode: "webhook" })
 		return {
 			sendMessage: async (chatId: number, text: string) => {
 				await adapter.postMessage(String(chatId), text)

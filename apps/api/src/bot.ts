@@ -12,7 +12,7 @@ import {
 
 // biome-ignore lint/suspicious/noExplicitAny: Runtime type is complex; correctness verified at the call site
 export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, botToken: string) {
-	const telegram = createTelegramAdapter({ botToken, mode: "auto" })
+	const telegram = createTelegramAdapter({ botToken, apiBaseUrl: process.env.TELEGRAM_API_BASE_URL, mode: "auto" })
 	const bot = new Chat({
 		userName: "amby",
 		adapters: { telegram },
