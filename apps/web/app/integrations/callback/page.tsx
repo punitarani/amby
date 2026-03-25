@@ -1,4 +1,4 @@
-import { INTEGRATION_LABELS } from "@amby/connectors"
+import { INTEGRATION_LABELS } from "@amby/plugins/integrations"
 import Link from "next/link"
 import { buildTelegramStartUrl, normalizeTelegramBotUsername } from "@/lib/telegram"
 

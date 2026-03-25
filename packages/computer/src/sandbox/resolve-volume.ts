@@ -23,7 +23,7 @@ import {
 	waitForSandboxStarted,
 } from "./resolve-sandbox"
 
-type VolumeRow = typeof schema.userVolumes.$inferSelect
+type VolumeRow = typeof schema.computeVolumes.$inferSelect
 type DaytonaVolume = Awaited<ReturnType<Daytona["volume"]["get"]>>
 
 const ENV_SETUP_MESSAGE =
@@ -101,20 +101,20 @@ export async function resolveHealthyVolume(daytona: Daytona, name: string): Prom
 export async function upsertVolumeRow(
 	db: Database,
 	userId: string,
-	daytonaVolumeId: string,
+	externalVolumeId: string,
 	status: VolumeRow["status"],
 ): Promise<VolumeRow> {
 	const rows = await db
-		.insert(schema.userVolumes)
+		.insert(schema.computeVolumes)
 		.values({
 			userId,
-			daytonaVolumeId,
+			externalVolumeId,
 			status,
 		})
 		.onConflictDoUpdate({
-			target: schema.userVolumes.userId,
+			target: schema.computeVolumes.userId,
 			set: {
-				daytonaVolumeId,
+				externalVolumeId,
 				status,
 				updatedAt: new Date(),
 			},
@@ -199,10 +199,10 @@ export async function waitForVolumeReady(
 	})
 }
 
-export function sandboxHasExpectedVolume(sandbox: Sandbox, daytonaVolumeId: string): boolean {
+export function sandboxHasExpectedVolume(sandbox: Sandbox, externalVolumeId: string): boolean {
 	return (
 		sandbox.volumes?.some(
-			(volume) => volume.volumeId === daytonaVolumeId && volume.mountPath === VOLUME_MOUNT_PATH,
+			(volume) => volume.volumeId === externalVolumeId && volume.mountPath === VOLUME_MOUNT_PATH,
 		) ?? false
 	)
 }
@@ -214,7 +214,7 @@ export async function ensureMountedHomeLayout(sandbox: Sandbox): Promise<void> {
 export async function upsertMainSandboxRow(
 	db: Database,
 	userId: string,
-	daytonaSandboxId: string | null,
+	externalInstanceId: string | null,
 	status: SandboxDbStatus,
 	volumeId: string,
 	snapshot?: string | null,
@@ -222,10 +222,10 @@ export async function upsertMainSandboxRow(
 	const now = new Date()
 
 	await db
-		.insert(schema.sandboxes)
+		.insert(schema.computeInstances)
 		.values({
 			userId,
-			daytonaSandboxId,
+			externalInstanceId,
 			volumeId,
 			role: "main",
 			status,
@@ -234,10 +234,13 @@ export async function upsertMainSandboxRow(
 			updatedAt: now,
 		})
 		.onConflictDoUpdate({
-			target: [schema.sandboxes.userId, schema.sandboxes.role],
-			targetWhere: and(eq(schema.sandboxes.role, "main"), ne(schema.sandboxes.status, "deleted")),
+			target: [schema.computeInstances.userId, schema.computeInstances.role],
+			targetWhere: and(
+				eq(schema.computeInstances.role, "main"),
+				ne(schema.computeInstances.status, "deleted"),
+			),
 			set: {
-				daytonaSandboxId,
+				externalInstanceId,
 				volumeId,
 				status,
 				snapshot,
@@ -314,7 +317,7 @@ export const ensureMainSandbox = (
 					Effect.tryPromise({
 						try: async () => {
 							await cached.refreshData()
-							if (!sandboxHasExpectedVolume(cached, volumeRow.daytonaVolumeId)) return null
+							if (!sandboxHasExpectedVolume(cached, volumeRow.externalVolumeId)) return null
 							if (inferDbStatusFromSandbox(cached) === "error") return null
 							return await adoptSandbox(cached)
 						},
@@ -341,7 +344,7 @@ export const ensureMainSandbox = (
 
 			if (
 				existing &&
-				sandboxHasExpectedVolume(existing, volumeRow.daytonaVolumeId) &&
+				sandboxHasExpectedVolume(existing, volumeRow.externalVolumeId) &&
 				inferDbStatusFromSandbox(existing) !== "error"
 			) {
 				return yield* Effect.tryPromise({
@@ -404,20 +407,20 @@ export async function kickOffSandboxProvisionIfNeeded(
 	// Succeeds only if the sandbox needs provisioning AND no other request
 	// claimed the slot within the throttle window.
 	const claimed = await db
-		.update(schema.sandboxes)
+		.update(schema.computeInstances)
 		.set({ updatedAt: now })
 		.where(
 			and(
-				eq(schema.sandboxes.userId, userId),
-				eq(schema.sandboxes.role, "main"),
-				ne(schema.sandboxes.status, "deleted"),
-				ne(schema.sandboxes.status, "running"),
-				ne(schema.sandboxes.status, "stopped"),
-				ne(schema.sandboxes.status, "archived"),
-				lte(schema.sandboxes.updatedAt, throttleCutoff),
+				eq(schema.computeInstances.userId, userId),
+				eq(schema.computeInstances.role, "main"),
+				ne(schema.computeInstances.status, "deleted"),
+				ne(schema.computeInstances.status, "running"),
+				ne(schema.computeInstances.status, "stopped"),
+				ne(schema.computeInstances.status, "archived"),
+				lte(schema.computeInstances.updatedAt, throttleCutoff),
 			),
 		)
-		.returning({ id: schema.sandboxes.id })
+		.returning({ id: schema.computeInstances.id })
 
 	if (claimed.length > 0) {
 		await createWorkflow()
@@ -427,13 +430,13 @@ export async function kickOffSandboxProvisionIfNeeded(
 	// No row was updated — either the sandbox is healthy, throttle hasn't
 	// expired, or no row exists yet. Only proceed for first-time users.
 	const exists = await db
-		.select({ id: schema.sandboxes.id })
-		.from(schema.sandboxes)
+		.select({ id: schema.computeInstances.id })
+		.from(schema.computeInstances)
 		.where(
 			and(
-				eq(schema.sandboxes.userId, userId),
-				eq(schema.sandboxes.role, "main"),
-				ne(schema.sandboxes.status, "deleted"),
+				eq(schema.computeInstances.userId, userId),
+				eq(schema.computeInstances.role, "main"),
+				ne(schema.computeInstances.status, "deleted"),
 			),
 		)
 		.limit(1)
@@ -448,8 +451,8 @@ export async function getMainVolumeRow(db: Database, userId: string): Promise<Vo
 	return (
 		(await db
 			.select()
-			.from(schema.userVolumes)
-			.where(eq(schema.userVolumes.userId, userId))
+			.from(schema.computeVolumes)
+			.where(eq(schema.computeVolumes.userId, userId))
 			.limit(1)
 			.then((rows) => rows[0])) ?? null
 	)

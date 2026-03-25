@@ -1,15 +1,19 @@
-import type { AmbyPlugin, MemoryRepository, PluginRegistry } from "@amby/core"
+import type { AmbyPlugin, PluginRegistry } from "@amby/core"
+import type { Context } from "effect"
 import { Effect } from "effect"
 import { buildMemoriesText, deduplicateMemories } from "./prompt-builder"
+import type { MemoryService } from "./repository"
 import { createMemoryTools } from "./tools"
 
-export interface MemoryPluginConfig {
-	readonly memoryRepo: MemoryRepository
-}
+type MemoryOps = Context.Tag.Service<typeof MemoryService>
 
-export function createMemoryPlugin(config: MemoryPluginConfig): AmbyPlugin {
-	const { memoryRepo } = config
-
+/**
+ * Create the memory plugin from a resolved MemoryService instance.
+ *
+ * This is the authoritative memory plugin — the duplicate in
+ * @amby/plugins/memory has been deleted.
+ */
+export function createMemoryPlugin(memory: MemoryOps): AmbyPlugin {
 	return {
 		id: "memory",
 
@@ -17,7 +21,7 @@ export function createMemoryPlugin(config: MemoryPluginConfig): AmbyPlugin {
 			registry.addContextContributor({
 				id: "memory:profile",
 				contribute: async ({ userId }) => {
-					const profile = await Effect.runPromise(memoryRepo.getProfile(userId))
+					const profile = await Effect.runPromise(memory.getProfile(userId))
 					if (profile.static.length === 0 && profile.dynamic.length === 0) {
 						return undefined
 					}
@@ -29,7 +33,7 @@ export function createMemoryPlugin(config: MemoryPluginConfig): AmbyPlugin {
 			registry.addToolProvider({
 				id: "memory:tools",
 				group: "memory",
-				getTools: async ({ userId }) => createMemoryTools(memoryRepo, userId),
+				getTools: async ({ userId }) => createMemoryTools(memory, userId),
 			})
 		},
 	}

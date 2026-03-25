@@ -20,8 +20,3 @@ export class PluginError extends Data.TaggedError("PluginError")<{
 	readonly message: string
 	readonly cause?: unknown
 }> {}
-
-export class ChannelError extends Data.TaggedError("ChannelError")<{
-	readonly message: string
-	readonly cause?: unknown
-}> {}

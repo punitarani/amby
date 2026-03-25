@@ -1,17 +1,8 @@
-/**
- * AgentService — thin facade over ConversationEngine.
- *
- * This file preserves the original AgentService interface for backward compat.
- * The real orchestration logic lives in conversation/engine.ts.
- * As the migration completes, callers should use ConversationEngine directly.
- */
 import { BrowserService } from "@amby/browser"
-import type { Platform } from "@amby/channels"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
-import { ConnectorsService } from "@amby/connectors"
+import { type Platform, type PluginRegistry, PluginRegistryService } from "@amby/core"
 import { DbService, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
-import { createMemoryTools, MemoryService } from "@amby/memory"
 import type { ToolSet } from "ai"
 import { Context, Effect, Layer } from "effect"
 import { prepareConversationContext } from "./context/builder"
@@ -26,7 +17,7 @@ import {
 } from "./synopsis"
 import { initializeTelemetry, shutdownTelemetry, withTelemetryFlush } from "./telemetry"
 import { createCodexAuthTools } from "./tools/codex-auth"
-import { createJobTools } from "./tools/messaging"
+import { createTimezoneTools } from "./tools/settings"
 import type { AgentRunResult, StreamPart } from "./types/agent"
 
 export class AgentService extends Context.Tag("AgentService")<
@@ -60,17 +51,41 @@ export class AgentService extends Context.Tag("AgentService")<
 	}
 >() {}
 
+/**
+ * Resolve tool groups from the plugin registry.
+ *
+ * Each tool provider is mapped to its declared group. The agent's
+ * specialist registry uses these groups to select which tools are
+ * visible to each specialist.
+ */
+async function resolveToolGroupsFromRegistry(
+	registry: PluginRegistry,
+	userId: string,
+	conversationId: string,
+	threadId: string,
+): Promise<ToolGroups> {
+	const groups: ToolGroups = {}
+	const context = { userId, conversationId, threadId }
+	for (const provider of registry.toolProviders) {
+		const tools = await provider.getTools(context)
+		if (tools && Object.keys(tools).length > 0) {
+			const group = provider.group as keyof ToolGroups
+			groups[group] = { ...(groups[group] ?? {}), ...tools } as ToolSet
+		}
+	}
+	return groups
+}
+
 export const makeAgentServiceLive = (userId: string) =>
 	Layer.effect(
 		AgentService,
 		Effect.gen(function* () {
 			const { db, query } = yield* DbService
 			const models = yield* ModelService
-			const memory = yield* MemoryService
 			const sandbox = yield* SandboxService
 			const browserService = yield* BrowserService
 			const taskSupervisor = yield* TaskSupervisor
-			const connectors = yield* ConnectorsService
+			const pluginRegistry = yield* PluginRegistryService
 			const env = yield* EnvService
 			initializeTelemetry({
 				apiKey: env.BRAINTRUST_API_KEY,
@@ -78,34 +93,49 @@ export const makeAgentServiceLive = (userId: string) =>
 			})
 			const computer = createComputerTools(sandbox, userId)
 
-			// Build tool groups from current direct imports
-			// (will be replaced by plugin registry in Unit 11)
-			const buildToolGroups = (prepared: { userTimezone: string }): ToolGroups => {
-				const memoryTools = createMemoryTools(memory, userId)
-				const settingsTools = {
-					...createJobTools(db, userId, prepared.userTimezone),
+			const buildToolGroups = async (
+				conversationId: string,
+				threadId: string,
+			): Promise<ToolGroups> => {
+				const registryTools = await resolveToolGroupsFromRegistry(
+					pluginRegistry,
+					userId,
+					conversationId,
+					threadId,
+				)
+
+				// Merge sandbox tools (still directly assembled — these are stateful
+				// per-user tools that depend on the SandboxService closure)
+				registryTools["sandbox-read"] = {
+					...(registryTools["sandbox-read"] ?? {}),
+					...computer.readTools,
+				}
+				registryTools["sandbox-write"] = {
+					...(registryTools["sandbox-write"] ?? {}),
+					...computer.writeTools,
+				}
+
+				// Settings tools: timezone + codex auth
+				registryTools.settings = {
+					...(registryTools.settings ?? {}),
+					...createTimezoneTools(db, userId),
 					...(sandbox.enabled ? createCodexAuthTools(taskSupervisor, userId) : {}),
-				}
+				} as ToolSet
+
+				// CUA tools if enabled
 				const cuaEnabled = env.ENABLE_CUA && sandbox.enabled
-				const cuaTools = cuaEnabled
-					? createCuaTools(sandbox, userId, "", computer.getSandbox).tools
-					: undefined
-
-				let integrationTools: ToolSet | undefined
-				// Integration tools are resolved per-turn, not here
-
-				return {
-					"memory-read": { search_memories: memoryTools.search_memories },
-					"memory-write": { save_memory: memoryTools.save_memory },
-					"sandbox-read": computer.readTools,
-					"sandbox-write": computer.writeTools,
-					settings: settingsTools as ToolSet,
-					cua: cuaTools as ToolSet | undefined,
-					integration: integrationTools,
+				if (cuaEnabled) {
+					registryTools.cua = createCuaTools(sandbox, userId, "", computer.getSandbox)
+						.tools as ToolSet
 				}
+
+				return registryTools
 			}
 
-			const makeEngineConfig = (): ConversationEngineConfig => ({
+			const makeEngineConfig = async (
+				conversationId: string,
+				threadId: string,
+			): Promise<ConversationEngineConfig> => ({
 				userId,
 				defaultModelId: models.defaultModelId,
 				highReasoningModelId: HIGH_INTELLIGENCE_MODEL_ID,
@@ -114,12 +144,13 @@ export const makeAgentServiceLive = (userId: string) =>
 				runtime: {
 					sandboxEnabled: sandbox.enabled,
 					cuaEnabled: env.ENABLE_CUA && sandbox.enabled,
-					integrationEnabled: connectors.isEnabled(),
+					integrationEnabled: pluginRegistry.toolProviders.some((p) => p.group === "integration"),
 					browserEnabled: browserService.enabled,
 				},
-				toolGroups: buildToolGroups({ userTimezone: "UTC" }),
+				toolGroups: await buildToolGroups(conversationId, threadId),
 				query,
 				db,
+				pluginRegistry,
 				prepareContext: prepareConversationContext,
 				resolveThread,
 				synopsisPreviousThreadIfDormantSwitch,
@@ -137,7 +168,14 @@ export const makeAgentServiceLive = (userId: string) =>
 				onReply?: ReplyFn
 				onTextDelta?: (text: string) => void
 				onPart?: (part: StreamPart) => void
-			}) => withTelemetryFlush(handleTurn(makeEngineConfig(), params))
+			}) =>
+				Effect.gen(function* () {
+					const config = yield* Effect.tryPromise({
+						try: () => makeEngineConfig(params.conversationId, ""),
+						catch: (cause) => new AgentError({ message: "Failed to build engine config", cause }),
+					})
+					return yield* withTelemetryFlush(handleTurn(config, params))
+				})
 
 			return {
 				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>

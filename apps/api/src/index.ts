@@ -2,35 +2,97 @@ import { ModelServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
+import { CoreError, createPluginRegistry, PluginRegistryService, registerPlugins } from "@amby/core"
+import { DbServiceLive } from "@amby/db"
+import { EnvService } from "@amby/env"
+import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
+import { createMemoryPlugin, MemoryService, MemoryServiceLive } from "@amby/memory"
+import {
+	createAutomationsPlugin,
+	createBrowserToolsPlugin,
+	createComputerToolsPlugin,
+} from "@amby/plugins"
 import {
 	buildSafeComposioRedirectUrl,
 	ConnectorsService,
 	ConnectorsServiceLive,
-} from "@amby/connectors"
-import { DbServiceLive } from "@amby/db"
-import { EnvService } from "@amby/env"
-import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
-import { MemoryServiceLive } from "@amby/memory"
+	createIntegrationsPlugin,
+} from "@amby/plugins/integrations"
+import { createSkillService, createSkillsPlugin } from "@amby/skills"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
 import { createAmbyBot } from "./bot"
 import { getHomeResponse } from "./home"
 import { TelegramSenderLite } from "./telegram"
 
+/**
+ * Build the PluginRegistry Layer from resolved services.
+ *
+ * This is the composition root — it wires concrete service implementations
+ * into the plugin registry that the agent consumes via PluginRegistryService.
+ */
+const PluginRegistryLive = Layer.effect(
+	PluginRegistryService,
+	Effect.gen(function* () {
+		const memory = yield* MemoryService
+		const connectors = yield* ConnectorsService
+
+		const registry = createPluginRegistry()
+
+		const skillService = createSkillService({ skillsDir: "./skills" })
+
+		const notAvailable = new CoreError({ message: "not available" })
+
+		registerPlugins(registry, [
+			createMemoryPlugin(memory),
+			createIntegrationsPlugin({ connectors, userId: "" }),
+			createAutomationsPlugin({
+				automationRepo: {
+					create: () => Effect.fail(notAvailable),
+					findById: () => Effect.succeed(undefined),
+					findByUser: () => Effect.succeed([]),
+					findDue: () => Effect.succeed([]),
+					updateStatus: () => Effect.succeed(undefined),
+					delete: () => Effect.succeed(undefined),
+				},
+			}),
+			createBrowserToolsPlugin({
+				browserProvider: {
+					execute: () => Effect.fail(notAvailable),
+					isAvailable: () => Effect.succeed(false),
+				},
+			}),
+			createComputerToolsPlugin({
+				computerProvider: {
+					startTask: () => Effect.fail(notAvailable),
+					queryTask: () => Effect.fail(notAvailable),
+					isAvailable: () => Effect.succeed(false),
+				},
+			}),
+			createSkillsPlugin(skillService),
+		])
+
+		return registry
+	}),
+)
+
 // Shared layers — constructed once at startup
-const SharedLive = Layer.mergeAll(
-	makeEffectDevToolsLive(),
+// Layer order: infra (env, db) → services (memory, connectors, etc.) → PluginRegistry (depends on services)
+const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
+	Layer.provideMerge(DbServiceLive),
+	Layer.provideMerge(EnvServiceLive),
+)
+
+const ServicesLive = Layer.mergeAll(
 	MemoryServiceLive,
 	TaskSupervisorLive,
 	ModelServiceLive,
 	AuthServiceLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
-).pipe(
-	Layer.provideMerge(SandboxServiceLive),
-	Layer.provideMerge(DbServiceLive),
-	Layer.provideMerge(EnvServiceLive),
-)
+).pipe(Layer.provideMerge(InfraLive))
+
+const SharedLive = PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 
 const runtime = ManagedRuntime.make(SharedLive)
 
@@ -51,7 +113,7 @@ app.get("/link/:id", async (c) => {
 	return url ? c.redirect(url, 302) : c.notFound()
 })
 
-// OAuth callback proxy — same as Cloudflare Worker; local dev uses ngrok/API_URL for OAuth redirect URIs
+// OAuth callback proxy
 app.get("/composio/redirect", (c) => {
 	return c.redirect(buildSafeComposioRedirectUrl(c.req.url), 302)
 })
@@ -74,7 +136,6 @@ runtime
 				TelegramSenderLite.pipe(Layer.provideMerge(SharedLive)),
 			)
 
-			// Register bot commands via Telegram API
 			yield* Effect.tryPromise(() =>
 				fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
 					method: "POST",
@@ -89,7 +150,6 @@ runtime
 				}),
 			)
 
-			// Initialize Chat SDK bot (auto mode: polling in dev, webhook when deployed)
 			const bot = createAmbyBot(botRuntime, env.TELEGRAM_BOT_TOKEN)
 			yield* Effect.tryPromise(() => bot.initialize())
 

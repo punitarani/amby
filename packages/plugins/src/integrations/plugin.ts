@@ -1,58 +1,46 @@
-import type {
-	AmbyPlugin,
-	IntegrationProvider,
-	IntegrationRepository,
-	PluginRegistry,
-} from "@amby/core"
-import { createIntegrationTools } from "./tools"
+import type { AmbyPlugin, PluginRegistry } from "@amby/core"
+import type { Context } from "effect"
+import type { ConnectorsService } from "./service"
+import { createConnectorManagementTools } from "./tools"
 
-export interface IntegrationsPluginConfig {
-	readonly integrationRepo: IntegrationRepository
-	readonly connectProvider?: (
-		userId: string,
-		provider: IntegrationProvider,
-	) => Promise<{ redirectUrl: string; messages: string[] }>
-	readonly disconnectProvider?: (
-		userId: string,
-		provider: IntegrationProvider,
-		accountId?: string,
-	) => Promise<{ disconnected: boolean }>
-	/**
-	 * Get the external tool set for a user (e.g. from Composio).
-	 * The composition root provides this.
-	 */
-	readonly getExternalTools?: (userId: string) => Promise<Record<string, unknown> | undefined>
+export type IntegrationsPluginConfig = {
+	readonly connectors: Context.Tag.Service<typeof ConnectorsService>
+	readonly userId: string
 }
 
 export function createIntegrationsPlugin(config: IntegrationsPluginConfig): AmbyPlugin {
-	const { integrationRepo, connectProvider, disconnectProvider, getExternalTools } = config
+	const { connectors, userId } = config
 
 	return {
 		id: "integrations",
-
 		register(registry: PluginRegistry) {
 			registry.addToolProvider({
 				id: "integrations:management",
 				group: "integration",
-				getTools: async ({ userId }) =>
-					createIntegrationTools({
-						integrationRepo,
-						userId,
-						connectProvider,
-						disconnectProvider,
-					}),
+				async getTools() {
+					return createConnectorManagementTools(connectors, userId)
+				},
 			})
 
-			if (getExternalTools) {
-				registry.addToolProvider({
-					id: "integrations:external",
-					group: "integration",
-					getTools: async ({ userId }) => {
-						const tools = await getExternalTools(userId)
-						return tools ?? {}
-					},
-				})
-			}
+			registry.addToolProvider({
+				id: "integrations:external",
+				group: "integration",
+				async getTools() {
+					if (!connectors.isEnabled()) return {}
+					const tools = await import("effect").then(({ Effect }) =>
+						Effect.runPromise(connectors.getAgentTools(userId)),
+					)
+					return tools ?? {}
+				},
+			})
+
+			registry.addPlannerHintProvider({
+				id: "integrations:hints",
+				async getHints() {
+					if (!connectors.isEnabled()) return undefined
+					return "Integration specialist: can perform actions through connected third-party apps (Gmail, Google Calendar, Notion, Slack, Google Drive)."
+				},
+			})
 		},
 	}
 }

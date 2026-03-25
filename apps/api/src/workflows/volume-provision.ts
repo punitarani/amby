@@ -25,7 +25,7 @@ export interface VolumeProvisionParams {
 
 export interface VolumeProvisionResult {
 	id: string
-	daytonaVolumeId: string
+	externalVolumeId: string
 	status: "creating" | "ready" | "error" | "deleted"
 }
 
@@ -80,7 +80,7 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 						})
 					}),
 				)
-				return { id: row.id, daytonaVolumeId: row.daytonaVolumeId, status: row.status }
+				return { id: row.id, externalVolumeId: row.externalVolumeId, status: row.status }
 			},
 		)
 
@@ -116,7 +116,7 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 							}),
 						)
 
-						return { id: row.id, daytonaVolumeId: row.daytonaVolumeId, status: row.status }
+						return { id: row.id, externalVolumeId: row.externalVolumeId, status: row.status }
 					},
 				)
 
@@ -145,7 +145,7 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 						type: VOLUME_READY_EVENT,
 						payload: {
 							id: volumeRow.id,
-							daytonaVolumeId: volumeRow.daytonaVolumeId,
+							externalVolumeId: volumeRow.externalVolumeId,
 							status: volumeRow.status,
 						},
 					})
@@ -157,12 +157,12 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 			workflow_instance_id: event.instanceId,
 			user_id: userId,
 			volume_id: volumeRow.id,
-			daytona_volume_id: volumeRow.daytonaVolumeId,
+			external_volume_id: volumeRow.externalVolumeId,
 		})
 
 		return {
 			id: volumeRow.id,
-			daytonaVolumeId: volumeRow.daytonaVolumeId,
+			externalVolumeId: volumeRow.externalVolumeId,
 			status: volumeRow.status,
 		}
 	}

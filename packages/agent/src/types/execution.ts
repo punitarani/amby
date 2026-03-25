@@ -10,14 +10,7 @@ import type { BrowserTaskInput, BrowserTaskResult } from "./browser"
 import type { ArtifactRef, JsonValue, TaskIssue } from "./persistence"
 import type { SettingsTaskInput } from "./settings"
 
-export type ToolGroupKey =
-	| "memory-read"
-	| "memory-write"
-	| "sandbox-read"
-	| "sandbox-write"
-	| "cua"
-	| "integration"
-	| "settings"
+export type { ToolGroupKey } from "@amby/core"
 
 export type ExecutionTaskInput =
 	| {

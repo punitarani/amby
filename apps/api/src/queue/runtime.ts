@@ -2,12 +2,66 @@ import { ModelServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { ConnectorsServiceLive } from "@amby/connectors"
+import { CoreError, createPluginRegistry, PluginRegistryService, registerPlugins } from "@amby/core"
 import { makeDbServiceFromHyperdrive } from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
-import { MemoryServiceLive } from "@amby/memory"
-import { Layer, ManagedRuntime } from "effect"
+import { createMemoryPlugin, MemoryService, MemoryServiceLive } from "@amby/memory"
+import {
+	createAutomationsPlugin,
+	createBrowserToolsPlugin,
+	createComputerToolsPlugin,
+} from "@amby/plugins"
+import {
+	ConnectorsService,
+	ConnectorsServiceLive,
+	createIntegrationsPlugin,
+} from "@amby/plugins/integrations"
+import { createSkillService, createSkillsPlugin } from "@amby/skills"
+import { Effect, Layer, ManagedRuntime } from "effect"
 import { TelegramSenderLite } from "../telegram"
+
+const PluginRegistryLive = Layer.effect(
+	PluginRegistryService,
+	Effect.gen(function* () {
+		const memory = yield* MemoryService
+		const connectors = yield* ConnectorsService
+		const registry = createPluginRegistry()
+		const skillService = createSkillService({ skillsDir: "./skills" })
+
+		const notAvailable = new CoreError({ message: "not available" })
+
+		registerPlugins(registry, [
+			createMemoryPlugin(memory),
+			createIntegrationsPlugin({ connectors, userId: "" }),
+			createAutomationsPlugin({
+				automationRepo: {
+					create: () => Effect.fail(notAvailable),
+					findById: () => Effect.succeed(undefined),
+					findByUser: () => Effect.succeed([]),
+					findDue: () => Effect.succeed([]),
+					updateStatus: () => Effect.succeed(undefined),
+					delete: () => Effect.succeed(undefined),
+				},
+			}),
+			createBrowserToolsPlugin({
+				browserProvider: {
+					execute: () => Effect.fail(notAvailable),
+					isAvailable: () => Effect.succeed(false),
+				},
+			}),
+			createComputerToolsPlugin({
+				computerProvider: {
+					startTask: () => Effect.fail(notAvailable),
+					queryTask: () => Effect.fail(notAvailable),
+					isAvailable: () => Effect.succeed(false),
+				},
+			}),
+			createSkillsPlugin(skillService),
+		])
+
+		return registry
+	}),
+)
 
 const makeBaseLive = (bindings: WorkerBindings) => {
 	const connectionString = bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? ""
@@ -17,18 +71,21 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		)
 	}
 
-	return Layer.mergeAll(
+	const InfraLive = Layer.mergeAll(SandboxServiceLive).pipe(
+		Layer.provideMerge(makeDbServiceFromHyperdrive(connectionString)),
+		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
+	)
+
+	const ServicesLive = Layer.mergeAll(
 		MemoryServiceLive,
 		ModelServiceLive,
 		AuthServiceLive,
 		TelegramSenderLite,
 		ConnectorsServiceLive,
 		makeBrowserServiceFromBindings(bindings),
-	).pipe(
-		Layer.provideMerge(SandboxServiceLive),
-		Layer.provideMerge(makeDbServiceFromHyperdrive(connectionString)),
-		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
-	)
+	).pipe(Layer.provideMerge(InfraLive))
+
+	return PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 }
 
 /** Lightweight runtime for queue consumers and workflows that don't need TaskSupervisor */

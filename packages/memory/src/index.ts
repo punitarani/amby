@@ -1,5 +1,7 @@
+export * from "./adapter"
 export * from "./cache"
 export * from "./errors"
+export * from "./plugin"
 export * from "./prompt-builder"
 export * from "./repository"
 export * from "./tools"

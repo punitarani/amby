@@ -1,13 +1,13 @@
 import { kickOffSandboxProvisionIfNeeded, sandboxWorkflowId } from "@amby/computer/sandbox-config"
+import { and, DbService, eq, schema } from "@amby/db"
+import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
+import type { WorkerBindings } from "@amby/env/workers"
 import {
 	ConnectorsService,
 	getIntegrationLabel,
 	getIntegrationSuccessMessage,
 	parseIntegrationStartPayload,
-} from "@amby/connectors"
-import { and, DbService, eq, schema } from "@amby/db"
-import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
-import type { WorkerBindings } from "@amby/env/workers"
+} from "@amby/plugins/integrations"
 import { Effect } from "effect"
 import { getPostHogClient } from "../posthog"
 import { TelegramSender } from "./index"

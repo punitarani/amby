@@ -25,7 +25,6 @@
 		"@amby/auth": "workspace:*",
 		"@amby/browser": "workspace:*",
 		"@amby/computer": "workspace:*",
-		"@amby/connectors": "workspace:*",
 		"@amby/core": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",

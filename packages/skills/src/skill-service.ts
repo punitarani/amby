@@ -1,5 +1,5 @@
 import type { CoreError } from "@amby/core"
-import { Context, Effect } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { activateSkill } from "./activation/skill-activation"
 import { discoverSkills } from "./discovery/filesystem-discovery"
 import type { ActivatedSkill, SkillManifest } from "./discovery/skill-manifest"
@@ -93,3 +93,9 @@ export function createSkillService(config: SkillServiceConfig): SkillService {
 			}) as Effect.Effect<SkillManifest[], CoreError>,
 	}
 }
+
+/**
+ * Effect Layer that provides SkillService from a SkillServiceConfig.
+ */
+export const SkillServiceLive = (config: SkillServiceConfig) =>
+	Layer.succeed(SkillServiceTag, createSkillService(config))

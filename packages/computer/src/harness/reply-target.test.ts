@@ -27,22 +27,7 @@ describe("parseReplyTarget", () => {
 		expect(parseReplyTarget({ channel: "telegram" })).toBeNull()
 	})
 
-	it("parses cli target", () => {
-		expect(parseReplyTarget({ channel: "cli" })).toEqual({ channel: "cli" })
-	})
-
-	it("parses web target", () => {
-		expect(parseReplyTarget({ channel: "web" })).toEqual({ channel: "web" })
-	})
-
 	it("returns null for unknown channel", () => {
 		expect(parseReplyTarget({ channel: "unknown" })).toBeNull()
-	})
-
-	it("parses legacy { chatId } without channel as telegram", () => {
-		expect(parseReplyTarget({ chatId: 67890 })).toEqual({
-			channel: "telegram",
-			chatId: 67890,
-		})
 	})
 })

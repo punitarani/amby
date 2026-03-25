@@ -223,14 +223,30 @@ export function handleTurn(
 
 		yield* config.synopsisPreviousThreadIfDormantSwitch(query, baseModel, conversationId, threadCtx)
 
+		// Gather plugin context contributions (memory, skills, etc.)
+		let pluginContext = ""
+		const registry = config.pluginRegistry
+		if (registry) {
+			const contributions = yield* Effect.tryPromise({
+				try: () =>
+					Promise.all(
+						registry.contextContributors.map((c) =>
+							c
+								.contribute({ userId, conversationId, threadId: threadCtx.threadId })
+								.catch(() => undefined),
+						),
+					),
+				catch: () => new AgentError({ message: "Failed to gather plugin context" }),
+			})
+			pluginContext = contributions.filter(Boolean).join("\n\n")
+		}
+
 		const prepared = yield* config.prepareContext({
 			query,
 			userId,
 			conversationId,
 			threadCtx,
-			// The old code passes the memory service; now we need to pass
-			// a compatible interface. The composition root handles this mapping.
-			memory: config as unknown as Parameters<typeof prepareConversationContext>[0]["memory"],
+			memoryContext: pluginContext || undefined,
 		})
 
 		const runConfig = buildRunConfig({
@@ -259,24 +275,6 @@ export function handleTurn(
 			threadId: threadCtx.threadId,
 			sharedPromptContext: prepared.sharedPromptContext,
 		})
-
-		// Gather plugin context contributions if available
-		let pluginContext = ""
-		const registry = config.pluginRegistry
-		if (registry) {
-			const contributions = yield* Effect.tryPromise({
-				try: () =>
-					Promise.all(
-						registry.contextContributors.map((c) =>
-							c
-								.contribute({ userId, conversationId, threadId: threadCtx.threadId })
-								.catch(() => undefined),
-						),
-					),
-				catch: () => new AgentError({ message: "Failed to gather plugin context" }),
-			})
-			pluginContext = contributions.filter(Boolean).join("\n\n")
-		}
 
 		const state = {
 			execution: undefined as Awaited<ReturnType<typeof executeRequestPlan>> | undefined,
@@ -390,14 +388,10 @@ export function handleTurn(
 			}),
 		}
 
-		const systemPrompt = pluginContext
-			? `${prepared.systemPrompt}\n\n${pluginContext}`
-			: prepared.systemPrompt
-
 		const agent = new ToolLoopAgent({
 			id: "conversation",
 			model: baseModel,
-			instructions: systemPrompt,
+			instructions: prepared.systemPrompt,
 			tools: conversationTools as ToolSet,
 			stopWhen: stepCountIs(runConfig.budgets.maxConversationSteps),
 			prepareStep: buildConversationPrepareStep(),

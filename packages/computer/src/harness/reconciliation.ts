@@ -357,15 +357,6 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 			continue
 		}
 
-		if (target.channel === "cli" || target.channel === "web") {
-			console.info(
-				`[Reconciliation] skip notification for task ${task.id}: channel "${target.channel}" not implemented`,
-			)
-			continue
-		}
-
-		if (target.channel !== "telegram") continue
-
 		const chatId = target.chatId
 		if (!Number.isFinite(chatId)) continue
 

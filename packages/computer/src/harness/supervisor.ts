@@ -1,4 +1,3 @@
-import { getTelegramChatId } from "@amby/connectors"
 import type { RunnerKind, SpecialistKind, TaskStatus } from "@amby/db"
 import { and, DbService, eq, inArray, lte, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
@@ -44,6 +43,7 @@ import {
 	updateTaskRecord,
 } from "./task-store"
 import { appendTaskTraceTerminalEvent } from "./task-trace"
+import { getTelegramChatId } from "./telegram-chat-id"
 
 type TaskRecord = typeof schema.tasks.$inferSelect
 const CODEX_AUTH_FILE = `${CODEX_HOME}/auth.json`
@@ -228,9 +228,9 @@ export const TaskSupervisorLive = Layer.scoped(
 
 		const loadAuthConfig = async (userId: string) => {
 			const rows = await db
-				.select({ authConfig: schema.userVolumes.authConfig })
-				.from(schema.userVolumes)
-				.where(eq(schema.userVolumes.userId, userId))
+				.select({ authConfig: schema.computeVolumes.authConfig })
+				.from(schema.computeVolumes)
+				.where(eq(schema.computeVolumes.userId, userId))
 				.limit(1)
 			return rows[0]?.authConfig
 		}
@@ -238,12 +238,12 @@ export const TaskSupervisorLive = Layer.scoped(
 		const saveAuthConfig = async (userId: string, authConfig: unknown) => {
 			const next = readHarnessAuthConfig(authConfig)
 			await db
-				.update(schema.userVolumes)
+				.update(schema.computeVolumes)
 				.set({
 					authConfig: Object.keys(next).length === 0 ? null : (next as Record<string, unknown>),
 					updatedAt: new Date(),
 				})
-				.where(eq(schema.userVolumes.userId, userId))
+				.where(eq(schema.computeVolumes.userId, userId))
 		}
 
 		const readSandboxText = async (sandbox: Sandbox, path: string) => {
