@@ -46,8 +46,8 @@
         "wrangler": "^4.0.0",
       },
     },
-    "apps/mock-channel": {
-      "name": "@amby/mock-channel",
+    "apps/mock": {
+      "name": "@amby/mock",
       "version": "0.1.0",
       "dependencies": {
         "lucide-react": "^0.577.0",
@@ -288,7 +288,7 @@
 
     "@amby/memory": ["@amby/memory@workspace:packages/memory"],
 
-    "@amby/mock-channel": ["@amby/mock-channel@workspace:apps/mock-channel"],
+    "@amby/mock": ["@amby/mock@workspace:apps/mock"],
 
     "@amby/plugins": ["@amby/plugins@workspace:packages/plugins"],
 
