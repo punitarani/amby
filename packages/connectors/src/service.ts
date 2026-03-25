@@ -560,11 +560,9 @@ export const ConnectorsServiceLive = Layer.effect(
 					})
 					const redirectUrl = request.redirectUrl
 					if (!redirectUrl) {
-						return yield* Effect.fail(
-							new ConnectorsError({
-								message: "missing_authorization_redirect_url",
-							}),
-						)
+						return yield* new ConnectorsError({
+							message: "missing_authorization_redirect_url",
+						})
 					}
 
 					const rowId = yield* upsertPendingAuthRequest(
@@ -669,11 +667,9 @@ export const ConnectorsServiceLive = Layer.effect(
 					)
 
 					if (!matchingAccount) {
-						return yield* Effect.fail(
-							new ConnectorsError({
-								message: "connected_account_not_found",
-							}),
-						)
+						return yield* new ConnectorsError({
+							message: "connected_account_not_found",
+						})
 					}
 
 					yield* Effect.tryPromise({
@@ -776,19 +772,15 @@ export const ConnectorsServiceLive = Layer.effect(
 					const composio = yield* ensureClient()
 
 					if (!env.COMPOSIO_WEBHOOK_SECRET) {
-						return yield* Effect.fail(
-							new ConnectorsError({
-								message: "missing_webhook_secret",
-							}),
-						)
+						return yield* new ConnectorsError({
+							message: "missing_webhook_secret",
+						})
 					}
 
 					if (!headers.signature || !headers.webhookId || !headers.webhookTimestamp) {
-						return yield* Effect.fail(
-							new ConnectorsError({
-								message: "missing_webhook_headers",
-							}),
-						)
+						return yield* new ConnectorsError({
+							message: "missing_webhook_headers",
+						})
 					}
 					const signature = headers.signature
 					const webhookId = headers.webhookId
