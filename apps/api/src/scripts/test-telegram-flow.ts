@@ -8,25 +8,14 @@
  * Usage: doppler run -- bun run scripts/test-telegram-flow.ts
  */
 
-import { AgentService, makeAgentServiceLive } from "@amby/agent"
+import { AgentService, ModelServiceLive, makeAgentServiceLive } from "@amby/agent"
+import { AuthServiceLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { CoreError, createPluginRegistry, PluginRegistryService, registerPlugins } from "@amby/core"
+import { ConnectorsServiceLive } from "@amby/connectors"
 import { and, DbService, DbServiceLive, eq, schema } from "@amby/db"
-import type { EnvService } from "@amby/env"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
-import { createMemoryPlugin, MemoryService, MemoryServiceLive } from "@amby/memory"
-import {
-	createAutomationsPlugin,
-	createBrowserToolsPlugin,
-	createComputerToolsPlugin,
-} from "@amby/plugins"
-import {
-	ConnectorsService,
-	ConnectorsServiceLive,
-	createIntegrationsPlugin,
-} from "@amby/plugins/integrations"
-import { createSkillService, createSkillsPlugin } from "@amby/skills"
+import { MemoryServiceLive } from "@amby/memory"
 import { Effect, Layer, ManagedRuntime } from "effect"
 
 // --- Test Configuration ---
@@ -42,67 +31,19 @@ const SIMULATED_FROM = {
 
 // --- Runtime Setup (mirrors apps/api/src/index.ts) ---
 
-const PluginRegistryLive = Layer.effect(
-	PluginRegistryService,
-	Effect.gen(function* () {
-		const memory = yield* MemoryService
-		const connectors = yield* ConnectorsService
-		const registry = createPluginRegistry()
-		const skillService = createSkillService({ skillsDir: "./skills" })
-		const notAvailable = new CoreError({ message: "not available" })
-
-		registerPlugins(registry, [
-			createMemoryPlugin(memory),
-			createIntegrationsPlugin({ connectors, userId: "" }),
-			createAutomationsPlugin({
-				automationRepo: {
-					create: () => Effect.fail(notAvailable),
-					findById: () => Effect.succeed(undefined),
-					findByUser: () => Effect.succeed([]),
-					findDue: () => Effect.succeed([]),
-					updateStatus: () => Effect.succeed(undefined),
-					delete: () => Effect.succeed(undefined),
-				},
-			}),
-			createBrowserToolsPlugin({
-				browserProvider: {
-					execute: () => Effect.fail(notAvailable),
-					isAvailable: () => Effect.succeed(false),
-				},
-			}),
-			createComputerToolsPlugin({
-				computerProvider: {
-					startTask: () => Effect.fail(notAvailable),
-					queryTask: () => Effect.fail(notAvailable),
-					isAvailable: () => Effect.succeed(false),
-				},
-			}),
-			createSkillsPlugin(skillService),
-		])
-
-		return registry
-	}),
-)
-
-const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
-	Layer.provideMerge(DbServiceLive),
-	Layer.provideMerge(EnvServiceLive),
-)
-
-const ServicesLive = Layer.mergeAll(
+const SharedLive = Layer.mergeAll(
+	makeEffectDevToolsLive(),
 	MemoryServiceLive,
 	TaskSupervisorLive,
 	ModelServiceLive,
 	AuthServiceLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
-).pipe(Layer.provideMerge(InfraLive))
-
-// Import ModelServiceLive and AuthServiceLive
-import { ModelServiceLive } from "@amby/agent"
-import { AuthServiceLive } from "@amby/auth"
-
-const SharedLive = PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
+).pipe(
+	Layer.provideMerge(SandboxServiceLive),
+	Layer.provideMerge(DbServiceLive),
+	Layer.provideMerge(EnvServiceLive),
+)
 
 // --- Test helpers ---
 
@@ -129,21 +70,7 @@ function fail(name: string, err?: unknown) {
 async function main() {
 	console.log("\n🧪 Telegram Flow Local Simulation\n")
 
-	let runtime: ManagedRuntime.ManagedRuntime<
-		typeof PluginRegistryService.Service &
-			typeof DbService.Service &
-			typeof EnvService.Service &
-			typeof MemoryService.Service &
-			typeof ConnectorsService.Service,
-		never
-	>
-
-	try {
-		runtime = ManagedRuntime.make(SharedLive) as typeof runtime
-	} catch (err) {
-		console.error("Failed to create runtime:", err)
-		process.exit(1)
-	}
+	const runtime = ManagedRuntime.make(SharedLive)
 
 	let maybeUserId: string | undefined
 	let maybeConversationId: string | undefined
