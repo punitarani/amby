@@ -6,7 +6,7 @@ import { DbService, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { createMemoryTools, MemoryService } from "@amby/memory"
 import { stepCountIs, ToolLoopAgent, type ToolSet, tool } from "ai"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Runtime } from "effect"
 import { z } from "zod"
 import { prepareConversationContext } from "./context/builder"
 import { AgentError } from "./errors"
@@ -399,6 +399,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						requestMetadata: metadata ?? null,
 					})
 					rootTraceRef = rootTrace
+					const rt = yield* Effect.runtime<never>()
 					yield* rootTrace.append("context_built", {
 						threadId: threadCtx.threadId,
 						sharedPromptContext: prepared.sharedPromptContext,
@@ -414,7 +415,7 @@ export const makeAgentServiceLive = (userId: string) =>
 								...(createConnectorManagementTools(connectors, userId) ?? {}),
 								...((yield* connectors
 									.getAgentTools(userId)
-									.pipe(Effect.catchAll(() => Effect.succeed(undefined)))) ?? {}),
+									.pipe(Effect.catchAll(() => Effect.void))) ?? {}),
 							} as ToolSet)
 						: undefined
 					const cuaTools = config.runtime.cuaEnabled
@@ -472,7 +473,7 @@ export const makeAgentServiceLive = (userId: string) =>
 									rootTrace,
 								})
 								state.execution = summary
-								await Effect.runPromise(rootTrace.setMode(summary.mode))
+								await Runtime.runPromise(rt)(rootTrace.setMode(summary.mode))
 								return {
 									mode: summary.mode,
 									status: summary.status,
@@ -510,7 +511,7 @@ export const makeAgentServiceLive = (userId: string) =>
 								}),
 							]),
 							async execute(input) {
-								const result = await Effect.runPromise(
+								const result = await Runtime.runPromise(rt)(
 									queryExecution({
 										query,
 										supervisor: taskSupervisor,
@@ -548,7 +549,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							agentRole: "conversation",
 						}),
 						experimental_onStepStart: async (event) => {
-							await Effect.runPromise(
+							await Runtime.runPromise(rt)(
 								rootTrace.append("model_request", {
 									stepNumber: event.stepNumber,
 									activeTools: event.activeTools,
@@ -556,7 +557,7 @@ export const makeAgentServiceLive = (userId: string) =>
 							)
 						},
 						onStepFinish: async (event) => {
-							await Effect.runPromise(
+							await Runtime.runPromise(rt)(
 								rootTrace.append("model_response", {
 									finishReason: event.finishReason,
 									text: event.text,
@@ -684,13 +685,11 @@ export const makeAgentServiceLive = (userId: string) =>
 									.complete("failed", { error: toErrorMessage(error) })
 									.pipe(Effect.catchAll(() => Effect.void))
 							}
-							if (error instanceof AgentError) return yield* Effect.fail(error)
-							return yield* Effect.fail(
-								new AgentError({
-									message: "Agent request failed",
-									cause: error,
-								}),
-							)
+							if (error instanceof AgentError) return yield* error
+							return yield* new AgentError({
+								message: "Agent request failed",
+								cause: error,
+							})
 						}),
 					),
 				)
