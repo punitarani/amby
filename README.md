@@ -46,6 +46,14 @@ bun run typecheck       # type-check all packages (tsc)
 bun run build           # build all packages (bun build)
 ```
 
+## Effect Devtools
+
+`bun install` now auto-patches the workspace TypeScript install through the root `prepare` script so the Effect language service is available in editors and local `tsc` runs. Use `bun run devtools:check` if you want to confirm the patch is still applied.
+
+For VS Code and Cursor, the repo now commits workspace settings that point the editor at `node_modules/typescript/lib` and recommends the `Effect Dev Tools` extension. Start the extension server, then run either `EFFECT_DEVTOOLS=1 bun run cli` or `EFFECT_DEVTOOLS=1 bun run api` to attach the local Bun entrypoints. If the app needs to connect to a non-local devtools server, also set `EFFECT_DEVTOOLS_URL=ws://host:34437`.
+
+For JetBrains IDEs, enable the TypeScript service and set the project TypeScript package to the workspace install under `node_modules/typescript`. The Effect language service plugin is configured in the shared tsconfig, so once the IDE is using the repo's TypeScript version it should pick up the same diagnostics and refactors.
+
 ## Production API Logging
 
 The deployed API runs as a Cloudflare Worker from `apps/api/src/worker.ts`. Production logs are exported to PostHog through Cloudflare Workers Observability OTLP export, with the Worker config expecting a dashboard destination named `posthog-logs`.

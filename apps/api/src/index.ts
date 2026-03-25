@@ -9,7 +9,7 @@ import {
 } from "@amby/connectors"
 import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
-import { EnvServiceLive } from "@amby/env/local"
+import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
@@ -19,6 +19,7 @@ import { TelegramSenderLite } from "./telegram"
 
 // Shared layers — constructed once at startup
 const SharedLive = Layer.mergeAll(
+	makeEffectDevToolsLive(),
 	MemoryServiceLive,
 	TaskSupervisorLive,
 	ModelServiceLive,

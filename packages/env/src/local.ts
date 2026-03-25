@@ -1,3 +1,4 @@
+import { DevTools } from "@effect/experimental"
 import { Config, Effect, Layer, Redacted } from "effect"
 import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService } from "./shared"
 
@@ -96,3 +97,17 @@ export const EnvServiceLive = Layer.effect(
 		}
 	}),
 )
+
+const isEnabled = (value: string | undefined) => {
+	const normalized = value?.trim().toLowerCase()
+	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
+}
+
+export const makeEffectDevToolsLive = (): Layer.Layer<never> => {
+	if (!isEnabled(process.env.EFFECT_DEVTOOLS)) {
+		return Layer.empty
+	}
+
+	const url = process.env.EFFECT_DEVTOOLS_URL?.trim()
+	return url ? DevTools.layer(url) : DevTools.layer()
+}

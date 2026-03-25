@@ -16,7 +16,13 @@
 		"sourceMap": true,
 		"outDir": "dist",
 		"noUncheckedIndexedAccess": true,
-		"noEmit": true
+		"noEmit": true,
+		"plugins": [
+			{
+				"name": "@effect/language-service",
+				"ignoreEffectWarningsInTscExitCode": true
+			}
+		]
 	},
 	"exclude": ["node_modules", "dist"]
 }

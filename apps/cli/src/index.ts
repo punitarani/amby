@@ -10,9 +10,13 @@ import { CLIChannel } from "@amby/channels"
 import { SandboxService, SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { ConnectorsServiceLive } from "@amby/connectors"
 import { DbService, DbServiceLive, eq, schema } from "@amby/db"
-import { EnvServiceLive } from "@amby/env/local"
+import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
-import { Effect, Layer } from "effect"
+import { Data, Effect, Layer, ManagedRuntime } from "effect"
+
+class CliError extends Data.TaggedError("CliError")<{
+	readonly message: string
+}> {}
 
 const userId: string = (() => {
 	const flag = process.argv.indexOf("--user")
@@ -22,6 +26,27 @@ const userId: string = (() => {
 	}
 	return "demo"
 })()
+
+const AppLive = Layer.mergeAll(
+	makeEffectDevToolsLive(),
+	makeAgentServiceLive(userId),
+	JobRunnerServiceLive,
+).pipe(
+	Layer.provideMerge(
+		Layer.mergeAll(
+			MemoryServiceLive,
+			TaskSupervisorLive,
+			ModelServiceLive,
+			ConnectorsServiceLive,
+			BrowserServiceDisabledLive,
+		),
+	),
+	Layer.provideMerge(SandboxServiceLive),
+	Layer.provideMerge(DbServiceLive),
+	Layer.provideMerge(EnvServiceLive),
+)
+
+const runtime = ManagedRuntime.make(AppLive)
 
 const verifyUser = Effect.gen(function* () {
 	const { query } = yield* DbService
@@ -35,8 +60,9 @@ const verifyUser = Effect.gen(function* () {
 
 	const user = rows[0]
 	if (!user) {
-		console.error(`User "${userId}" not found. Run \`bun run seed\` first.`)
-		process.exit(1)
+		return yield* new CliError({
+			message: `User "${userId}" not found. Run \`bun run seed\` first.`,
+		})
 	}
 
 	// Auto-detect system timezone and update if user is still on the default
@@ -82,11 +108,13 @@ const program = Effect.gen(function* () {
 
 	const channel = new CLIChannel()
 	channel.onMessage(async (msg) => {
-		const result = await Effect.runPromise(agent.handleMessage(conversationId, msg.content))
+		const result = await runtime.runPromise(agent.handleMessage(conversationId, msg.content))
 		return result.userResponse.text
 	})
 	channel.onStreamingMessage(async (msg, onPart) => {
-		const result = await Effect.runPromise(agent.streamMessage(conversationId, msg.content, onPart))
+		const result = await runtime.runPromise(
+			agent.streamMessage(conversationId, msg.content, onPart),
+		)
 		return result.userResponse.text
 	})
 
@@ -97,24 +125,19 @@ const program = Effect.gen(function* () {
 	yield* agent.shutdown()
 })
 
-const AppLive = Layer.mergeAll(makeAgentServiceLive(userId), JobRunnerServiceLive).pipe(
-	Layer.provideMerge(
-		Layer.mergeAll(
-			MemoryServiceLive,
-			TaskSupervisorLive,
-			ModelServiceLive,
-			ConnectorsServiceLive,
-			BrowserServiceDisabledLive,
-		),
-	),
-	Layer.provideMerge(SandboxServiceLive),
-	Layer.provideMerge(DbServiceLive),
-	Layer.provideMerge(EnvServiceLive),
-)
-
-Effect.runPromise(program.pipe(Effect.provide(AppLive)))
-	.then(() => process.exit(0))
-	.catch((err) => {
+const exit = async (code: 0 | 1, err?: unknown) => {
+	if (err) {
 		console.error("Fatal error:", err)
-		process.exit(1)
-	})
+	}
+
+	try {
+		await runtime.dispose()
+	} finally {
+		process.exit(code)
+	}
+}
+
+runtime.runPromise(program).then(
+	() => exit(0),
+	(err) => exit(1, err),
+)

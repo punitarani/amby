@@ -4,7 +4,13 @@
 		"lib": ["dom", "dom.iterable", "es2022"],
 		"jsx": "preserve",
 		"incremental": true,
-		"plugins": [{ "name": "next" }],
+		"plugins": [
+			{
+				"name": "@effect/language-service",
+				"ignoreEffectWarningsInTscExitCode": true
+			},
+			{ "name": "next" }
+		],
 		"types": ["node"],
 		"paths": {
 			"@/*": ["./*"]
