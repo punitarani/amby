@@ -12,7 +12,11 @@
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/shared.ts ./src/local.ts ./src/workers.ts --outdir dist --target bun"
 	},
+	"dependencies": {
+		"@effect/experimental": "^0.60.0",
+		"@effect/platform": "^0.96.0"
+	},
 	"peerDependencies": {
-		"effect": "^3.19.19"
+		"effect": "^3.21.0"
 	}
 }

@@ -4,10 +4,12 @@
 	"private": true,
 	"description": "Amby - your personal ambient assistant",
 	"scripts": {
+		"prepare": "effect-language-service patch",
 		"format": "bunx @biomejs/biome format --write .",
 		"format:check": "bunx @biomejs/biome format .",
 		"lint": "bunx @biomejs/biome check .",
 		"lint:fix": "bunx @biomejs/biome check --fix .",
+		"devtools:check": "effect-language-service check",
 		"typecheck": "turbo typecheck",
 		"build": "turbo build",
 		"dev": "doppler run -- turbo dev",
@@ -39,10 +41,11 @@
 	],
 	"dependencies": {
 		"ai": "^6.0.116",
-		"effect": "^3.19.19",
+		"effect": "^3.21.0",
 		"zod": "^3.24.0"
 	},
 	"devDependencies": {
+		"@effect/language-service": "^0.83.1",
 		"@biomejs/biome": "^2.4.7",
 		"bun-types": "^1.3.10",
 		"turbo": "^2.8.19",
