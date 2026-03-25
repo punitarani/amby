@@ -12,7 +12,11 @@ import { ConnectorsServiceLive } from "@amby/connectors"
 import { DbService, DbServiceLive, eq, schema } from "@amby/db"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
-import { Effect, Layer, ManagedRuntime } from "effect"
+import { Data, Effect, Layer, ManagedRuntime } from "effect"
+
+class CliError extends Data.TaggedError("CliError")<{
+	readonly message: string
+}> {}
 
 const userId: string = (() => {
 	const flag = process.argv.indexOf("--user")
@@ -56,8 +60,9 @@ const verifyUser = Effect.gen(function* () {
 
 	const user = rows[0]
 	if (!user) {
-		console.error(`User "${userId}" not found. Run \`bun run seed\` first.`)
-		process.exit(1)
+		return yield* new CliError({
+			message: `User "${userId}" not found. Run \`bun run seed\` first.`,
+		})
 	}
 
 	// Auto-detect system timezone and update if user is still on the default
@@ -120,10 +125,19 @@ const program = Effect.gen(function* () {
 	yield* agent.shutdown()
 })
 
-runtime
-	.runPromise(program)
-	.then(() => process.exit(0))
-	.catch((err) => {
+const exit = async (code: 0 | 1, err?: unknown) => {
+	if (err) {
 		console.error("Fatal error:", err)
-		process.exit(1)
-	})
+	}
+
+	try {
+		await runtime.dispose()
+	} finally {
+		process.exit(code)
+	}
+}
+
+runtime.runPromise(program).then(
+	() => exit(0),
+	(err) => exit(1, err),
+)

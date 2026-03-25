@@ -103,7 +103,7 @@ const isEnabled = (value: string | undefined) => {
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
 }
 
-export const makeEffectDevToolsLive = () => {
+export const makeEffectDevToolsLive = (): Layer.Layer<never> => {
 	if (!isEnabled(process.env.EFFECT_DEVTOOLS)) {
 		return Layer.empty
 	}
