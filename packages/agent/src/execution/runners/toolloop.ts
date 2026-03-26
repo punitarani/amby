@@ -145,33 +145,54 @@ export async function runToolloopSpecialist(params: {
 		},
 	})
 
-	const result = await agent.generate({
-		prompt: buildPrompt(params.task),
-	})
+	try {
+		const result = await agent.generate({
+			prompt: buildPrompt(params.task),
+		})
 
-	const toolEvents = (result.steps ?? []).flatMap((step) => [
-		...step.toolCalls.map((toolCall) => ({
-			kind: "tool_call" as const,
-			payload: {
-				toolCallId: toolCall.toolCallId,
-				toolName: toolCall.toolName,
-				input: toolCall.input,
-			},
-		})),
-		...step.toolResults.map((toolResult) => ({
-			kind: "tool_result" as const,
-			payload: {
-				toolCallId: toolResult.toolCallId,
-				toolName: toolResult.toolName,
-				output: toolResult.output,
-			},
-		})),
-	])
+		const toolEvents = (result.steps ?? []).flatMap((step) => [
+			...step.toolCalls.map((toolCall) => ({
+				kind: "tool_call" as const,
+				payload: {
+					toolCallId: toolCall.toolCallId,
+					toolName: toolCall.toolName,
+					input: toolCall.input,
+				},
+			})),
+			...step.toolResults.map((toolResult) => ({
+				kind: "tool_result" as const,
+				payload: {
+					toolCallId: toolResult.toolCallId,
+					toolName: toolResult.toolName,
+					output: toolResult.output,
+				},
+			})),
+		])
 
-	return {
-		result: mapOutput(params.task, result.output, params.trace.traceId, {
-			modelId,
-		}),
-		toolEvents,
+		return {
+			result: mapOutput(params.task, result.output, params.trace.traceId, {
+				modelId,
+			}),
+			toolEvents,
+		}
+	} catch (error) {
+		// When the model exhausts steps without producing structured output,
+		// the ToolLoopAgent throws "No output generated." Synthesize a result
+		// from the last text response so the conversation agent can still proceed.
+		const message = error instanceof Error ? error.message : String(error)
+		const lastText = (error as { text?: string })?.text
+		const fallbackResult: ExecutionTaskResult = {
+			taskId: params.task.id,
+			rootTaskId: params.task.rootTaskId,
+			parentTaskId: params.task.parentTaskId,
+			depth: params.task.depth,
+			specialist: params.task.specialist,
+			status: "partial",
+			summary: lastText?.trim() || message,
+			issues: [{ code: "no_structured_output", message }],
+			traceRef: { traceId: params.trace.traceId },
+			runtimeData: { modelId },
+		}
+		return { result: fallbackResult, toolEvents: [] }
 	}
 }

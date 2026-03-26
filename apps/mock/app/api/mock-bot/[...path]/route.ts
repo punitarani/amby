@@ -93,6 +93,19 @@ export async function POST(
 				},
 			})
 
+		case "getUpdates":
+			// Long-polling: return empty array (no pending updates)
+			return NextResponse.json({ ok: true, result: [] })
+
+		case "deleteWebhook":
+			return NextResponse.json({ ok: true, result: true })
+
+		case "getWebhookInfo":
+			return NextResponse.json({
+				ok: true,
+				result: { url: "", has_custom_certificate: false, pending_update_count: 0 },
+			})
+
 		default:
 			console.log(`[mock-bot] Unhandled method: ${method}`, body)
 			return NextResponse.json({ ok: true, result: {} })

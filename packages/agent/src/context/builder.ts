@@ -7,7 +7,7 @@ import {
 	loadThreadTail,
 } from "../context"
 import type { ResolveThreadResult } from "../router"
-import { buildConversationPrompt } from "../specialists/prompts"
+import { buildConversationPrompt, type ConversationPromptRuntime } from "../specialists/prompts"
 
 type QueryFn = <T>(
 	fn: (db: import("@amby/db").Database) => Promise<T>,
@@ -33,8 +33,9 @@ export function prepareConversationContext(params: {
 	conversationId: string
 	threadCtx: ResolveThreadResult
 	memoryContext?: string
+	runtime?: ConversationPromptRuntime
 }): Effect.Effect<PreparedConversationContext, import("@amby/db").DbError> {
-	const { query, userId, conversationId, threadCtx, memoryContext } = params
+	const { query, userId, conversationId, threadCtx, memoryContext, runtime } = params
 
 	return Effect.gen(function* () {
 		const userRows = yield* query((db) =>
@@ -105,7 +106,7 @@ export function prepareConversationContext(params: {
 			.join("\n\n")
 
 		const systemPrompt = [
-			buildConversationPrompt(formattedNow, userTimezone),
+			buildConversationPrompt(formattedNow, userTimezone, runtime),
 			memoryContext ? `# User Memory Context\n${memoryContext}` : "",
 			extraContext,
 		]

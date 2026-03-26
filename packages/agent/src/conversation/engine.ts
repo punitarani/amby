@@ -252,6 +252,7 @@ export function handleTurn(
 			conversationId,
 			threadCtx,
 			memoryContext: pluginContext || undefined,
+			runtime: config.runtime,
 		})
 
 		const runConfig = buildRunConfig({
@@ -311,10 +312,16 @@ export function handleTurn(
 			send_message: sendMessageTool,
 			execute_plan: tool({
 				description:
-					"Execute specialist work through the internal execution runtime. Use this when the request needs browser, code, research, integration, memory, settings, computer, or durable execution.",
-				inputSchema: z.object({ request: z.string(), context: z.string().optional() }).strict(),
+					"Execute specialist work through the internal execution runtime. Use this when the request needs browser, code, research, integration, memory, settings, computer, or durable execution. Pass the full user request in the 'request' field — do not extract or summarize it.",
+				inputSchema: z
+					.object({
+						request: z.string().describe("The full user request text"),
+						context: z.string().optional(),
+					})
+					.strict(),
 				async execute({ request: req, context }) {
-					if (state.execution) {
+					// Block retries only if a previous execution succeeded
+					if (state.execution && state.execution.status !== "failed") {
 						return {
 							mode: state.execution.mode,
 							status: state.execution.status,
@@ -323,7 +330,15 @@ export function handleTurn(
 							summary: "Execution already completed this turn.",
 						}
 					}
-					const composed = context?.trim() ? `${req}\n\nAdditional context:\n${context}` : req
+					// Enrich the request with the original user message to ensure
+					// the heuristic planner has enough context for routing
+					const enrichedRequest =
+						inboundText !== req.trim() && inboundText.length > req.length
+							? `${inboundText}\n\n${req}`
+							: req
+					const composed = context?.trim()
+						? `${enrichedRequest}\n\nAdditional context:\n${context}`
+						: enrichedRequest
 					const summary = await executeRequestPlan({
 						request: composed,
 						query,

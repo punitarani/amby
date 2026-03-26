@@ -48,9 +48,20 @@ describe("buildHeuristicPlan — precedence ordering", () => {
 		expect(plan.tasks[0]?.specialist).toBe("computer")
 	})
 
-	it("browser+research produces parallel plan", () => {
+	it("browser+research with URL routes to browser-only sequential", () => {
 		const plan = buildHeuristicPlan({
 			request: "Open the browser and research the website https://example.com",
+			config,
+		})
+		// When a URL is present, browser handles both browsing and summarization
+		expect(plan.strategy).toBe("sequential")
+		expect(plan.tasks).toHaveLength(1)
+		expect(plan.tasks[0]?.specialist).toBe("browser")
+	})
+
+	it("browser+research without URL produces parallel plan", () => {
+		const plan = buildHeuristicPlan({
+			request: "Browse the web and research current AI trends",
 			config,
 		})
 		expect(plan.strategy).toBe("parallel")
@@ -205,6 +216,89 @@ describe("buildHeuristicPlan — settings sub-routing", () => {
 		if (task?.input.kind === "settings") {
 			expect(task.input.task.kind).toBe("codex_auth")
 		}
+	})
+})
+
+describe("buildHeuristicPlan — bare domain detection", () => {
+	it("bare domain like nytimes.com routes to browser", () => {
+		const plan = buildHeuristicPlan({
+			request: "Go to nytimes.com and summarize the top headlines",
+			config,
+		})
+		expect(plan.tasks[0]?.specialist).toBe("browser")
+		if (plan.tasks[0]?.input.kind === "browser") {
+			expect(plan.tasks[0].input.task.startUrl).toContain("nytimes.com")
+		}
+	})
+
+	it("bare domain docs.google.com routes to browser", () => {
+		const plan = buildHeuristicPlan({
+			request: "Check docs.google.com for my latest document",
+			config,
+		})
+		expect(plan.tasks[0]?.specialist).toBe("browser")
+	})
+
+	it("multiple bare domains produce parallel browser tasks", () => {
+		const plan = buildHeuristicPlan({
+			request: "Compare reddit.com and hackernews.com",
+			config,
+		})
+		expect(plan.strategy).toBe("parallel")
+		expect(plan.tasks).toHaveLength(2)
+		expect(plan.tasks.every((t) => t.specialist === "browser")).toBe(true)
+	})
+})
+
+describe("buildHeuristicPlan — expanded computer patterns", () => {
+	it("'run htop' routes to computer", () => {
+		const plan = buildHeuristicPlan({
+			request: "Run htop and let me know what's using CPU",
+			config,
+		})
+		expect(plan.tasks[0]?.specialist).toBe("computer")
+	})
+
+	it("'check disk space' routes to computer", () => {
+		const plan = buildHeuristicPlan({
+			request: "Check disk space on the machine",
+			config,
+		})
+		expect(plan.tasks[0]?.specialist).toBe("computer")
+	})
+
+	it("'how much storage' routes to computer", () => {
+		const plan = buildHeuristicPlan({
+			request: "How much storage do I have on my computer?",
+			config,
+		})
+		expect(plan.tasks[0]?.specialist).toBe("computer")
+	})
+})
+
+describe("buildHeuristicPlan — expanded browser patterns", () => {
+	it("'go to' phrase routes to browser", () => {
+		const plan = buildHeuristicPlan({
+			request: "Go to the New York Times homepage and summarize headlines",
+			config,
+		})
+		expect(plan.tasks[0]?.specialist).toBe("browser")
+	})
+
+	it("'navigate to' phrase routes to browser", () => {
+		const plan = buildHeuristicPlan({
+			request: "Navigate to the React documentation",
+			config,
+		})
+		expect(plan.tasks[0]?.specialist).toBe("browser")
+	})
+
+	it("'what's on' phrase routes to browser", () => {
+		const plan = buildHeuristicPlan({
+			request: "What's on the front page of Hacker News?",
+			config,
+		})
+		expect(plan.tasks[0]?.specialist).toBe("browser")
 	})
 })
 
