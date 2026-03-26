@@ -1,5 +1,6 @@
 {
 	"$schema": "https://turbo.build/schema.json",
+	"ui": "tui",
 	"tasks": {
 		"test": {},
 		"build": {
@@ -9,7 +10,10 @@
 		"typecheck": {
 			"dependsOn": ["^typecheck"]
 		},
+		"format": {},
+		"format:check": {},
 		"lint": {},
+		"lint:fix": {},
 		"dev": {
 			"cache": false,
 			"persistent": true
