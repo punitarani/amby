@@ -1,260 +1,189 @@
 # Agent
 
-Amby's agent is a conversation-first coordinator with a separate execution runtime.
+The agent is a conversation-first coordinator with a separate execution runtime. The user talks to one assistant; internally the system resolves threads, builds context, runs a conversation tool loop, and optionally delegates to specialist execution.
 
-That distinction matters.
+## Composition
 
-The user talks to one assistant. Internally, the system does **not** stuff all work into one flat tool loop anymore. It:
-1. resolves the active thread,
-2. builds thread-aware context,
-3. runs the conversation loop,
-4. optionally plans specialist execution,
-5. persists both the visible response and the hidden execution record.
+`AgentService` (`packages/agent/src/agent.ts`) wires together:
 
-## Core responsibilities
+- **DbService** — persistence
+- **ModelService** — LLM access
+- **MemoryService** — user memory read/write
+- **SandboxService** — code execution sandbox
+- **BrowserService** — headless browser
+- **TaskSupervisor** — durable background tasks
+- **ConnectorsService** — third-party integrations
+- **EnvService** — environment config
 
-The conversation agent owns:
-- thread resolution,
-- context assembly,
-- direct answering,
-- deciding when specialist execution is needed,
-- synthesis of final user-facing text,
-- linking transcript rows to execution traces.
-
-The execution runtime owns:
-- specialist planning,
-- task dependency ordering,
-- lock-aware batching,
-- background handoff,
-- validation when required,
-- durable task persistence.
-
-## Current mental model
-
-The cleanest way to document the current design is this:
-
-> The top-level agent is a conversation orchestrator. When work exceeds a direct answer, it calls the internal execution runtime, which plans and runs specialist tasks.
-
-That is more accurate than describing the system as a loose bag of exposed subagent delegation tools.
+It exposes `handleMessage`, `handleBatchedMessages`, and `streamMessage` as entry points.
 
 ## Request lifecycle
 
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant Ch as Channel / Workflow
+    participant Ch as Channel
     participant A as AgentService
     participant R as Thread Router
     participant Ctx as Context Builder
     participant X as Execution Runtime
-    participant DB as Database
 
-    U->>Ch: Send message
-    Ch->>A: handleMessage / handleBatchedMessages
-    A->>R: resolveThread(conversationId, inboundText)
-    R-->>A: threadId + routing decision
-    A->>Ctx: prepareConversationContext(...)
+    U->>Ch: message
+    Ch->>A: handleMessage
+    A->>R: resolveThread
+    R-->>A: threadId + decision
+    A->>Ctx: prepareConversationContext
     Ctx-->>A: history + system prompt + shared context
-    A->>DB: create root trace
-    A->>A: run conversation ToolLoopAgent
+    A->>A: run ToolLoopAgent
 
     alt direct answer
-        A->>DB: save user + assistant messages
-        A->>DB: complete trace
-        A-->>Ch: final response
+        A-->>Ch: response
     else specialist execution needed
-        A->>X: execute_plan(request, context?)
+        A->>X: execute_plan
         X-->>A: execution summary
-        A->>DB: save user + assistant messages
-        A->>DB: complete trace
         A-->>Ch: synthesized response
     end
 ```
 
-## Current direct tools
+## Thread routing
 
-Document these as the actual direct tools of the conversation loop:
-
-| Tool | Purpose |
-|---|---|
-| `search_memories` | Read user memory before or during response generation |
-| `send_message` | Emit short progress updates in runtimes that support incremental replies |
-| `execute_plan` | Hand work to the internal execution runtime |
-| `query_execution` | Inspect durable execution state for work that is running or recently completed |
-
-That is the authoritative surface in the current code.
-
-## Agent configuration policy
-
-The current runtime policy is intentionally constrained:
-
-- direct answers are allowed,
-- background tasks are allowed only when sandbox execution is enabled,
-- memory writes are allowed,
-- external writes are allowed,
-- write confirmation is required,
-- max specialist depth is currently **1**,
-- max conversation steps is **8**,
-- max parallel agents is **3**,
-- max tool calls per run is **32**.
-
-Those settings are important because they define the actual operational envelope.
-
-## Thread-aware context model
-
-The agent is not replaying one giant flat transcript.
-
-The context builder currently composes:
-- active thread history,
-- user timezone,
-- formatted current time,
-- deduplicated user memory profile,
-- summaries of other threads,
-- resumed-thread synopsis when coming back to a dormant thread,
-- artifact recap for recent thread execution outputs.
-
-That means the effective context window is already thread-aware and execution-aware.
-
-## Thread routing model
-
-The resolver has four conceptual stages:
-1. ensure a default thread exists,
-2. archive stale threads,
-3. resolve native platform thread identity when available,
-4. otherwise use derived routing with heuristics first and a model fallback second.
-
-### Current derived routing rules
-
-These are real, not aspirational:
-- continue the last active thread when the gap is under 2 minutes,
-- switch when a thread label matches clearly,
-- switch when at least 2 stored keywords match,
-- otherwise ask a model to choose `continue`, `switch`, or `new`.
-
-### Current lifecycle thresholds
-
-- dormant thread threshold: **1 hour**
-- stale archive threshold: **24 hours**
-- recent tail budget: **20 messages**
-
-## Internal execution runtime
-
-The execution runtime is the actual backbone for specialist work.
-
-It has four core parts:
-
-### 1. Planner
-The planner decides whether the request should be:
-- `direct`
-- `sequential`
-- `parallel`
-- `background`
-
-It uses heuristics first and falls back to model planning only when warranted.
-
-### 2. Specialist registry
-The current specialist set is:
-- `conversation`
-- `planner`
-- `research`
-- `builder`
-- `integration`
-- `computer`
-- `browser`
-- `memory`
-- `settings`
-- `validator`
-
-Each specialist has:
-- a runner kind,
-- a model policy,
-- a max step budget,
-- allowed tool groups,
-- input and result schema.
-
-### 3. Coordinator
-The coordinator:
-- materializes task IDs and dependency IDs,
-- computes ready batches,
-- honors dependency failures,
-- executes tasks inline or in parallel when safe,
-- persists traces and durable tasks,
-- runs validator work when required.
-
-### 4. Reducer / summary synthesis
-Execution returns a structured summary that the conversation agent turns into the final user-facing answer.
-
-## Specialist tool groups
-
-The current group model is the right abstraction to document:
-
-| Group | Meaning |
-|---|---|
-| `memory-read` | Search/retrieve memory |
-| `memory-write` | Save memory |
-| `sandbox-read` | Read files / inspect sandbox state |
-| `sandbox-write` | Modify files / sandbox state |
-| `settings` | Scheduling, timezone, Codex auth, related settings actions |
-| `cua` | Desktop-computer tools |
-| `integration` | Connected-app tools |
-
-This is cleaner and more future-proof than documenting per-subagent tool names as the main architecture.
-
-## Execution modes
+Four-stage resolution in `packages/agent/src/router.ts`:
 
 ```mermaid
 flowchart TD
-    Request[Inbound user request] --> Decide{Can answer directly?}
-    Decide -->|Yes| Direct[Direct answer]
-    Decide -->|No| Plan[Build execution plan]
-
-    Plan --> Strategy{Strategy}
-    Strategy -->|sequential| Seq[Run tasks in order]
-    Strategy -->|parallel| Par[Run independent tasks concurrently]
-    Strategy -->|background| Bg[Create durable background task]
-
-    Seq --> Reduce[Build execution summary]
-    Par --> Reduce
-    Bg --> Reduce
-    Reduce --> Final[Conversation agent synthesizes final response]
+    Start[Inbound message] --> S1[Ensure default thread]
+    S1 --> S2[Archive stale threads >24h]
+    S2 --> S3{Platform thread key?}
+    S3 -->|Yes| Native[Use native thread]
+    S3 -->|No| S4{Heuristic match?}
+    S4 -->|Gap <2min| Continue[Continue last thread]
+    S4 -->|Label match| Switch[Switch thread]
+    S4 -->|2+ keyword match| Switch
+    S4 -->|No match| Model[Model decides: continue / switch / new]
 ```
 
-## Persistence contract
+### Thresholds
 
-The agent now writes to three different categories of state:
+| Parameter | Value |
+|---|---|
+| Continue gap | 2 min |
+| Dormant threshold | 1 hour |
+| Stale archive threshold | 24 hours |
+| Open thread cap | 10 |
+| Message tail budget | 20 |
 
-### Transcript state
-- `messages`
+## Context assembly
 
-### Execution trace state
-- `traces`
-- `trace_events`
+`packages/agent/src/context/builder.ts` composes the prompt in this order:
 
-### Durable work state
-- `tasks`
-- `task_events`
+1. **Conversation prompt** — base system instructions with current time and timezone
+2. **User memory** — deduplicated static + dynamic memories
+3. **Other thread summaries** — synopsis of sibling open threads
+4. **Resumed-thread synopsis** — included when returning to a dormant thread
+5. **Artifact recap** — recent execution outputs for the thread
+6. **Thread history** — 20-message tail from the active thread
 
-This split should be documented explicitly. It is one of the biggest improvements in the current system.
+## Tool loop
 
-## Clear statements to include
+Uses Vercel AI SDK `ToolLoopAgent` with these limits:
 
-- `messages` contains only user-visible transcript.
-- Tool calls and tool results are not flattened into `messages`.
-- Orchestrator execution is represented by a root trace.
-- Specialist execution is represented by child traces and, when durable, task rows.
-- Background handoff is a first-class execution mode, not a hack around synchronous chat.
+| Limit | Value |
+|---|---|
+| Max conversation steps | 8 |
+| Max tool calls per run | 32 |
+| Max parallel agents | 3 |
+| Max specialist depth | 1 |
 
-## Near-future direction
+After `execute_plan` or `query_execution` is called, all tools are deactivated for the remaining steps (the agent synthesizes the final response).
 
-The current abstractions already support the next step cleanly:
-- deeper specialist nesting,
-- better validation passes,
-- richer execution retry/resume,
-- better surfaced progress updates,
-- more structured user-visible approvals before write actions.
+## Direct tools
 
-## Open questions
+These are always available in the conversation loop:
 
-1. Should `execute_plan` remain a single execution boundary tool, or should the conversation loop eventually expose narrower internal tools for planning vs execution vs validation?
-2. Should the validator become mandatory for all mutating specialist plans, or remain conditional?
-3. Should thread routing move to a dedicated service boundary once more channels with native threading are live?
+| Tool | Purpose |
+|---|---|
+| `search_memories` | Read user memory before or during response |
+| `send_message` | Emit progress updates (no-op if runtime lacks incremental replies) |
+| `execute_plan` | Delegate work to the execution runtime |
+| `query_execution` | Inspect running or recently completed durable executions |
+
+## Execution planner
+
+`packages/agent/src/execution/planner.ts` routes requests using heuristic pattern matching, falling back to model planning.
+
+### Modes
+
+| Mode | When used |
+|---|---|
+| `direct` | Simple answer, no specialist needed |
+| `sequential` | Multi-step work with dependencies |
+| `parallel` | Independent tasks that can run concurrently |
+| `background` | Long-running work via durable task handoff |
+
+```mermaid
+flowchart TD
+    Req[Request] --> H{Heuristic match?}
+    H -->|Yes| Route[Route to specialist + mode]
+    H -->|No| MP[Model plans tasks]
+    Route --> Coord[Coordinator executes]
+    MP --> Coord
+    Coord --> Reduce[Reducer builds summary]
+    Reduce --> Conv[Conversation agent synthesizes response]
+```
+
+## Specialist types
+
+Defined in `packages/agent/src/execution/registry.ts`:
+
+| Specialist | Runner | Tool groups | Max steps |
+|---|---|---|---|
+| `conversation` | toolloop | (none) | 8 |
+| `planner` | toolloop | (none) | 3 |
+| `research` | toolloop | memory-read, sandbox-read | 8 |
+| `builder` | toolloop | memory-read, sandbox-read, sandbox-write | 10 |
+| `integration` | toolloop | integration | 10 |
+| `computer` | toolloop | cua | 16 |
+| `browser` | browser_service | (none, uses BrowserService) | 24 |
+| `memory` | toolloop | memory-read, memory-write | 5 |
+| `settings` | toolloop | settings | 6 |
+| `validator` | toolloop | (none) | 4 |
+
+## Tool groups
+
+| Group | Contents |
+|---|---|
+| `memory-read` | `search_memories` |
+| `memory-write` | `save_memory` |
+| `sandbox-read` | File read / sandbox inspection |
+| `sandbox-write` | File modification / sandbox mutation |
+| `settings` | Scheduling, timezone, Codex auth |
+| `cua` | Desktop computer-use tools |
+| `integration` | Connected third-party app tools |
+
+## Persistence
+
+| Category | Tables | What it stores |
+|---|---|---|
+| Transcript | `messages` | User-visible conversation only |
+| Execution trace | `traces`, `trace_events` | OTel-style execution recording |
+| Durable work | `tasks`, `task_events` | Background task state |
+
+Tool calls and results are recorded in traces, not flattened into `messages`.
+
+## Related docs
+
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — full system map
+- [COMPUTER.md](./COMPUTER.md) — sandbox and computer-use execution
+- [MEMORY.md](./MEMORY.md) — memory system
+- [CHANNELS.md](./CHANNELS.md) — channel adapters
+- [WORKFLOWS.md](./WORKFLOWS.md) — workflow runtime
+
+## Key source files
+
+- `packages/agent/src/agent.ts` — AgentService composition
+- `packages/agent/src/router.ts` — thread routing
+- `packages/agent/src/context/builder.ts` — context assembly
+- `packages/agent/src/execution/planner.ts` — execution planning
+- `packages/agent/src/execution/registry.ts` — specialist registry
+- `packages/agent/src/execution/coordinator.ts` — task coordination
+- `packages/agent/src/execution/reducer.ts` — result synthesis
