@@ -1,4 +1,4 @@
-import { Context, Data, type Effect } from "effect"
+import { Context, Data, Duration, type Effect, Schedule } from "effect"
 import type { z } from "zod"
 
 export type JsonPrimitive = string | number | boolean | null
@@ -196,6 +196,31 @@ export function buildBrowserSummary(
 			? `Completed browser action${where}.`
 			: `Completed browser workflow${where}.`
 }
+
+/** Errors that are safe to retry (transient infrastructure issues). */
+export function isRetryableBrowserTaskError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error)
+	return (
+		message.includes("504") ||
+		message.includes("502") ||
+		message.includes("503") ||
+		message.includes("Gateway Time-out") ||
+		message.includes("InferenceUpstreamError") ||
+		message.includes("ECONNRESET") ||
+		message.includes("fetch failed")
+	)
+}
+
+/** Base step for linear backoff (3s then 6s via `fromDelays`). */
+export const BROWSER_TASK_RETRY_DELAY_MS = 3_000
+
+/**
+ * Two backoff steps after failures: 3s then 6s (same as `delayMs * (attempt + 1)`).
+ */
+export const browserTaskRetrySchedule = Schedule.fromDelays(
+	Duration.millis(BROWSER_TASK_RETRY_DELAY_MS * 1),
+	Duration.millis(BROWSER_TASK_RETRY_DELAY_MS * 2),
+)
 
 export class BrowserService extends Context.Tag("BrowserService")<
 	BrowserService,
