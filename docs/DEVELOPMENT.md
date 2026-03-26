@@ -110,4 +110,4 @@ Update documentation when code changes affect setup, commands, architecture, or 
 
 - [ARCHITECTURE.md](../ARCHITECTURE.md) -- system map and module boundaries
 - [CHANNELS.md](./CHANNELS.md) -- channel integration details
-- [DATABASE.md](./DATABASE.md) -- schema and migration conventions
+- [DATA_MODEL.md](./DATA_MODEL.md) -- data model and schema reference

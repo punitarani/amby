@@ -49,4 +49,4 @@ import * as schema from "@amby/db/schema"
 ## Links
 
 - [Architecture](../../docs/ARCHITECTURE.md)
-- [Database design](../../docs/DATABASE.md)
+- [Data model](../../docs/DATA_MODEL.md)

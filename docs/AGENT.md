@@ -8,12 +8,11 @@ The agent is a conversation-first coordinator with a separate execution runtime.
 
 - **DbService** — persistence
 - **ModelService** — LLM access
-- **MemoryService** — user memory read/write
 - **SandboxService** — code execution sandbox
 - **BrowserService** — headless browser
 - **TaskSupervisor** — durable background tasks
-- **ConnectorsService** — third-party integrations
 - **EnvService** — environment config
+- **PluginRegistry** — all plugins (memory, integrations, automations, browser-tools, computer-tools, skills) are registered here; they contribute tools, context, and task runners
 
 It exposes `handleMessage`, `handleBatchedMessages`, and `streamMessage` as entry points.
 
@@ -173,10 +172,11 @@ Tool calls and results are recorded in traces, not flattened into `messages`.
 ## Related docs
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — full system map
-- [COMPUTER.md](./COMPUTER.md) — sandbox and computer-use execution
+- [BROWSER_AND_COMPUTER.md](./BROWSER_AND_COMPUTER.md) — browser and sandbox execution
 - [MEMORY.md](./MEMORY.md) — memory system
-- [CHANNELS.md](./CHANNELS.md) — channel adapters
-- [WORKFLOWS.md](./WORKFLOWS.md) — workflow runtime
+- [CHANNELS.md](./CHANNELS.md) — Telegram integration
+- [PLUGINS_AND_SKILLS.md](./PLUGINS_AND_SKILLS.md) — plugin and skill system
+- [RUNTIME.md](./RUNTIME.md) — runtime flows and workflows
 
 ## Key source files
 

@@ -37,7 +37,7 @@ bun run --filter @amby/web lint
 
 ## Dependencies
 
-Next.js 16, React 19, Tailwind CSS 4, framer-motion, lucide-react, PostHog, `@amby/connectors`.
+Next.js 16, React 19, Tailwind CSS 4, framer-motion, lucide-react, PostHog, `@amby/plugins`.
 
 ## Links
 

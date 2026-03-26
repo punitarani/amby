@@ -36,7 +36,7 @@ Exported from `src/index.ts`: `SandboxService`, `TaskSupervisor`, `createCompute
 
 ## Dependency rules
 
-- **Depends on:** `@amby/db`, `@amby/env`, `@amby/connectors`
+- **Depends on:** `@amby/core`, `@amby/db`, `@amby/env`
 - **Depended on by:** `@amby/agent`
 
 ## Links

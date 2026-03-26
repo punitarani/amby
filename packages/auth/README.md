@@ -11,7 +11,7 @@ User authentication and API key management for the Amby platform.
 
 ## Non-responsibilities
 
-- No integration OAuth flows (handled by `@amby/connectors`)
+- No integration OAuth flows (handled by `@amby/plugins/integrations`)
 - No user profile management or business logic
 - No direct route/handler definitions
 

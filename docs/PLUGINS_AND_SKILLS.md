@@ -140,4 +140,4 @@ Skills declare required capabilities in their front matter (e.g., `browser`, `sa
 
 - [AGENT.md](./AGENT.md) -- agent architecture and execution flow
 - [MEMORY.md](./MEMORY.md) -- memory system details
-- [COMPUTER.md](./COMPUTER.md) -- sandbox and browser tool internals
+- [BROWSER_AND_COMPUTER.md](./BROWSER_AND_COMPUTER.md) -- browser and sandbox execution

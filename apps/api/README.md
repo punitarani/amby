@@ -45,10 +45,10 @@ bun run --filter @amby/api typecheck
 
 ## Dependencies
 
-Hono, Effect, Sentry, PostHog, grammy (chat/chat-adapter-telegram), plus workspace packages: `@amby/agent`, `@amby/auth`, `@amby/browser`, `@amby/computer`, `@amby/connectors`, `@amby/db`, `@amby/env`, `@amby/memory`.
+Hono, Effect, Sentry, PostHog, @chat-adapter/telegram, plus workspace packages: `@amby/agent`, `@amby/auth`, `@amby/browser`, `@amby/computer`, `@amby/core`, `@amby/db`, `@amby/env`, `@amby/memory`, `@amby/plugins`, `@amby/skills`.
 
 ## Links
 
 - [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
-- [docs/WORKFLOWS.md](../../docs/WORKFLOWS.md)
+- [docs/RUNTIME.md](../../docs/RUNTIME.md)
 - [docs/CHANNELS.md](../../docs/CHANNELS.md)

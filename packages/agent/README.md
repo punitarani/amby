@@ -12,8 +12,8 @@ Agent orchestration, model inference, tool routing, and execution coordination.
 
 ## Non-responsibilities
 
-- No direct Telegram or channel handling (that is `@amby/channels`)
-- No HTTP endpoints or webhook processing (that is the Cloudflare worker)
+- No direct Telegram or channel handling (that is `apps/api` via `@chat-adapter/telegram`)
+- No HTTP endpoints or webhook processing (that is the Cloudflare worker in `apps/api`)
 - No memory storage or embedding (that is `@amby/memory` and `@amby/db`)
 
 ## Key modules
@@ -36,7 +36,7 @@ Exported from `src/index.ts`: `AgentService`, `AgentError`, job utilities, model
 
 ## Dependency rules
 
-- **Depends on:** core (`@amby/db`, `@amby/env`), `@amby/memory`, `@amby/browser`, `@amby/computer`, `@amby/connectors`, `@amby/channels`
+- **Depends on:** `@amby/core`, `@amby/browser`, `@amby/computer`, `@amby/db`, `@amby/env`
 - **Depended on by:** Cloudflare worker runtime (`apps/`)
 
 ## Links
