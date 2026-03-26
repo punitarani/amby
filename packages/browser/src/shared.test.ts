@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import {
 	inferBrowserSideEffectLevel,
 	isBrowserEscalationSignal,
+	isRetryableBrowserTaskError,
 	sanitizeBrowserStartUrl,
 } from "./shared"
 
@@ -26,5 +27,22 @@ describe("browser task normalization", () => {
 	it("sanitizes wrapped start URLs before browser execution", () => {
 		expect(sanitizeBrowserStartUrl('"https://www.nytimes.com"')).toBe("https://www.nytimes.com/")
 		expect(sanitizeBrowserStartUrl("(https://example.com/path)")).toBe("https://example.com/path")
+	})
+})
+
+describe("isRetryableBrowserTaskError", () => {
+	it("treats transient HTTP and upstream signals as retryable", () => {
+		expect(isRetryableBrowserTaskError(new Error("504 Gateway Time-out"))).toBe(true)
+		expect(isRetryableBrowserTaskError(new Error("502 Bad Gateway"))).toBe(true)
+		expect(isRetryableBrowserTaskError(new Error("503 Service Unavailable"))).toBe(true)
+		expect(isRetryableBrowserTaskError(new Error("Gateway Time-out"))).toBe(true)
+		expect(isRetryableBrowserTaskError(new Error("InferenceUpstreamError: timeout"))).toBe(true)
+		expect(isRetryableBrowserTaskError(new Error("ECONNRESET"))).toBe(true)
+		expect(isRetryableBrowserTaskError(new Error("fetch failed"))).toBe(true)
+	})
+
+	it("does not treat unrelated failures as retryable", () => {
+		expect(isRetryableBrowserTaskError(new Error("invalid API key"))).toBe(false)
+		expect(isRetryableBrowserTaskError(new Error("validation failed"))).toBe(false)
 	})
 })

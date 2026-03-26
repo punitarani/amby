@@ -12,7 +12,14 @@ import {
 
 // biome-ignore lint/suspicious/noExplicitAny: Runtime type is complex; correctness verified at the call site
 export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, botToken: string) {
-	const telegram = createTelegramAdapter({ botToken, mode: "auto" })
+	// Use webhook mode when TELEGRAM_API_BASE_URL is set (mock channel or custom endpoint).
+	// Otherwise use auto (which defaults to polling for local dev with real Telegram).
+	const mode = process.env.TELEGRAM_API_BASE_URL ? "webhook" : "auto"
+	const telegram = createTelegramAdapter({
+		botToken,
+		apiBaseUrl: process.env.TELEGRAM_API_BASE_URL,
+		mode,
+	})
 	const bot = new Chat({
 		userName: "amby",
 		adapters: { telegram },

@@ -1,5 +1,5 @@
 import type { Database, DbError, TaskStatus } from "@amby/db"
-import { and, eq, inArray, isNotNull, isNull, lt, ne, or, schema } from "@amby/db"
+import { and, eq, inArray, isNotNull, isNull, lt, lte, ne, or, schema } from "@amby/db"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Effect } from "effect"
 import { STALE_HEARTBEAT_MS, TASK_BASE } from "../config"
@@ -23,6 +23,8 @@ export interface ReconciliationContext {
 	isDev: boolean
 	/** If set, sends templated completion messages for Telegram tasks. */
 	sendTelegram?: (chatId: number, text: string) => Promise<void>
+	/** If set, computes the next run time for recurring cron automations. */
+	computeNextCronRun?: (schedule: string, tz: string) => Date | undefined
 }
 
 const ACTIVE = ["preparing", "running"] as const
@@ -357,15 +359,6 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 			continue
 		}
 
-		if (target.channel === "cli" || target.channel === "web") {
-			console.info(
-				`[Reconciliation] skip notification for task ${task.id}: channel "${target.channel}" not implemented`,
-			)
-			continue
-		}
-
-		if (target.channel !== "telegram") continue
-
 		const chatId = target.chatId
 		if (!Number.isFinite(chatId)) continue
 
@@ -385,6 +378,71 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 				.where(eq(schema.tasks.id, task.id))
 		} catch (e) {
 			console.error(`[Reconciliation] Telegram notify failed for task ${task.id}:`, e)
+		}
+	}
+
+	// --- 4) Automation dispatch: fire due automations ---
+	await dispatchDueAutomations(ctx)
+}
+
+async function dispatchDueAutomations(ctx: ReconciliationContext): Promise<void> {
+	const { db, sendTelegram, computeNextCronRun } = ctx
+	if (!sendTelegram) return
+
+	const now = new Date()
+	const dueAutomations = await db
+		.select()
+		.from(schema.automations)
+		.where(
+			and(
+				eq(schema.automations.status, "active"),
+				isNotNull(schema.automations.nextRunAt),
+				lte(schema.automations.nextRunAt, now),
+			),
+		)
+
+	for (const automation of dueAutomations) {
+		try {
+			const target = parseReplyTarget(automation.deliveryTargetJson)
+			if (!target) {
+				console.info(`[Reconciliation] skip automation ${automation.id}: no delivery target`)
+				continue
+			}
+
+			const payload = automation.payloadJson as { description?: string } | null
+			const description = payload?.description ?? "Reminder"
+			await sendTelegram(target.chatId, `Reminder: ${description}`)
+
+			if (automation.kind === "scheduled") {
+				await db
+					.update(schema.automations)
+					.set({ status: "completed", nextRunAt: null, lastRunAt: now, updatedAt: now })
+					.where(eq(schema.automations.id, automation.id))
+			} else if (automation.kind === "cron") {
+				const schedule = (automation.scheduleJson as { schedule?: string })?.schedule
+				const tz = (automation.scheduleJson as { timezone?: string })?.timezone ?? "UTC"
+				const nextRunAt =
+					schedule && computeNextCronRun ? computeNextCronRun(schedule, tz) : undefined
+
+				if (nextRunAt) {
+					await db
+						.update(schema.automations)
+						.set({ lastRunAt: now, nextRunAt, updatedAt: now })
+						.where(eq(schema.automations.id, automation.id))
+				} else {
+					await db
+						.update(schema.automations)
+						.set({ status: "failed", lastRunAt: now, updatedAt: now })
+						.where(eq(schema.automations.id, automation.id))
+				}
+			}
+		} catch (e) {
+			console.error(`[Reconciliation] automation dispatch failed for ${automation.id}:`, e)
+			await db
+				.update(schema.automations)
+				.set({ status: "failed", updatedAt: new Date() })
+				.where(eq(schema.automations.id, automation.id))
+				.catch(() => {})
 		}
 	}
 }

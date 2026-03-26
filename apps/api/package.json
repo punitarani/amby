@@ -4,6 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
 		"dev": "bun run --hot src/index.ts",
@@ -12,7 +13,8 @@
 		"sentry:release": "sentry-cli releases info \"$SENTRY_RELEASE\" >/dev/null 2>&1 || sentry-cli releases new \"$SENTRY_RELEASE\"",
 		"sentry:sourcemaps": "bun run sentry:release && sentry-cli sourcemaps upload --release=\"$SENTRY_RELEASE\" --strip-prefix \"$PWD\" dist-worker && sentry-cli releases finalize \"$SENTRY_RELEASE\"",
 		"cf-typegen": "wrangler types --env-interface CloudflareBindings",
-		"start": "bun run src/index.ts"
+		"start": "bun run src/index.ts",
+		"test:telegram": "bun run src/scripts/test-telegram-flow.ts"
 	},
 	"devDependencies": {
 		"@sentry/cli": "^2.58.2",
@@ -25,10 +27,12 @@
 		"@amby/auth": "workspace:*",
 		"@amby/browser": "workspace:*",
 		"@amby/computer": "workspace:*",
-		"@amby/connectors": "workspace:*",
+		"@amby/core": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/memory": "workspace:*",
+		"@amby/plugins": "workspace:*",
+		"@amby/skills": "workspace:*",
 		"@chat-adapter/state-memory": "^4.20.2",
 		"@chat-adapter/telegram": "^4.20.2",
 		"@sentry/cloudflare": "^10.44.0",

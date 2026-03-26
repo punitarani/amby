@@ -14,6 +14,7 @@
 		"build": "bun build ./src/shared.ts ./src/local.ts --outdir dist --target bun && cp ./src/workers.ts ./dist/workers.ts"
 	},
 	"dependencies": {
+		"@amby/core": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@browserbasehq/stagehand": "2.5.x",
 		"@cloudflare/playwright": "^1.0.0",

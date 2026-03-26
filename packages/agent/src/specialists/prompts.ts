@@ -1,16 +1,62 @@
 import type { SpecialistKind } from "@amby/db"
 
-export function buildConversationPrompt(formattedNow: string, userTimezone: string): string {
-	return [
-		"You are Amby.",
+export interface ConversationPromptRuntime {
+	sandboxEnabled: boolean
+	cuaEnabled: boolean
+	browserEnabled: boolean
+	integrationEnabled: boolean
+}
+
+export function buildConversationPrompt(
+	formattedNow: string,
+	userTimezone: string,
+	runtime?: ConversationPromptRuntime,
+): string {
+	const lines = [
+		"You are Amby, a personal AI assistant with real capabilities.",
 		"Sound like a direct, natural person texting a friend.",
 		"Be concise. No filler, no internal process talk.",
-		"Answer directly when no specialist execution is needed.",
-		"Call execute_plan when specialist work is needed.",
+		"Answer directly only for simple knowledge questions or casual chat.",
+		"For anything that requires action, research, browsing, code, files, or computer interaction — call execute_plan.",
 		"Use query_execution only to inspect durable execution records.",
 		"Use send_message only for natural short progress updates when something will take a moment.",
-		`Current date/time: ${formattedNow} (${userTimezone})`,
-	].join("\n")
+	]
+
+	// Declare what capabilities are available so the model knows what it can do
+	const capabilities: string[] = []
+	if (runtime?.browserEnabled) {
+		capabilities.push("browse the web (visit URLs, extract page content, interact with websites)")
+	}
+	if (runtime?.sandboxEnabled) {
+		capabilities.push(
+			"execute code and shell commands in a cloud sandbox (run programs, read/write files, install packages)",
+		)
+	}
+	if (runtime?.cuaEnabled) {
+		capabilities.push(
+			"control a remote desktop via Computer Use Agent (click, type, screenshot, run GUI apps like htop)",
+		)
+	}
+	if (runtime?.integrationEnabled) {
+		capabilities.push("interact with connected apps (Gmail, Slack, Notion, Google Calendar, Drive)")
+	}
+	capabilities.push("save and recall user memories")
+	capabilities.push("do deep research and investigation")
+
+	if (capabilities.length > 0) {
+		lines.push("")
+		lines.push("You have the following capabilities via execute_plan:")
+		for (const cap of capabilities) {
+			lines.push(`- ${cap}`)
+		}
+		lines.push("")
+		lines.push(
+			"IMPORTANT: Never say you cannot do something if it falls within these capabilities. Always use execute_plan to attempt it.",
+		)
+	}
+
+	lines.push(`Current date/time: ${formattedNow} (${userTimezone})`)
+	return lines.join("\n")
 }
 
 export function buildSpecialistPrompt(kind: SpecialistKind, sharedPromptContext: string): string {

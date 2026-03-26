@@ -1,0 +1,22 @@
+{
+	"name": "@amby/skills",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/index.ts --outdir dist --target bun"
+	},
+	"dependencies": {
+		"@amby/core": "workspace:*"
+	},
+	"peerDependencies": {
+		"ai": "^6.0.116",
+		"effect": "^3.21.0",
+		"zod": "^3.24.0"
+	}
+}

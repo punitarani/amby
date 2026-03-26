@@ -18,7 +18,6 @@ export {
 export * from "./errors"
 export type {
 	ExecutionMode,
-	JobStatus,
 	Platform,
 	RunnerKind,
 	SpecialistKind,

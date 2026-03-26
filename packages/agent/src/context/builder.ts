@@ -1,5 +1,4 @@
 import { eq, schema } from "@amby/db"
-import { buildMemoriesText, deduplicateMemories, type MemoryService } from "@amby/memory"
 import { Effect } from "effect"
 import {
 	formatArtifactRecap,
@@ -7,9 +6,8 @@ import {
 	loadThreadArtifacts,
 	loadThreadTail,
 } from "../context"
-import { AgentError } from "../errors"
 import type { ResolveThreadResult } from "../router"
-import { buildConversationPrompt } from "../specialists/prompts"
+import { buildConversationPrompt, type ConversationPromptRuntime } from "../specialists/prompts"
 
 type QueryFn = <T>(
 	fn: (db: import("@amby/db").Database) => Promise<T>,
@@ -23,34 +21,29 @@ export type PreparedConversationContext = {
 	formattedNow: string
 }
 
+/**
+ * Prepare conversation context for a turn.
+ *
+ * Memory context is injected via plugin context contributors in the engine,
+ * NOT loaded here. This keeps agent decoupled from @amby/memory.
+ */
 export function prepareConversationContext(params: {
 	query: QueryFn
 	userId: string
 	conversationId: string
 	threadCtx: ResolveThreadResult
-	memory: import("effect").Context.Tag.Service<typeof MemoryService>
-}): Effect.Effect<PreparedConversationContext, AgentError | import("@amby/db").DbError> {
-	const { query, userId, conversationId, threadCtx, memory } = params
+	memoryContext?: string
+	runtime?: ConversationPromptRuntime
+}): Effect.Effect<PreparedConversationContext, import("@amby/db").DbError> {
+	const { query, userId, conversationId, threadCtx, memoryContext, runtime } = params
 
 	return Effect.gen(function* () {
-		const [userRows, profile] = yield* Effect.all(
-			[
-				query((db) =>
-					db
-						.select({ timezone: schema.users.timezone })
-						.from(schema.users)
-						.where(eq(schema.users.id, userId))
-						.limit(1),
-				),
-				memory
-					.getProfile(userId)
-					.pipe(
-						Effect.mapError(
-							(cause) => new AgentError({ message: "Failed to load memory profile", cause }),
-						),
-					),
-			],
-			{ concurrency: 2 },
+		const userRows = yield* query((db) =>
+			db
+				.select({ timezone: schema.users.timezone })
+				.from(schema.users)
+				.where(eq(schema.users.id, userId))
+				.limit(1),
 		)
 
 		const userTimezone = userRows[0]?.timezone ?? "UTC"
@@ -59,9 +52,6 @@ export function prepareConversationContext(params: {
 			dateStyle: "full",
 			timeStyle: "long",
 		}).format(new Date())
-
-		const deduped = deduplicateMemories(profile.static, profile.dynamic)
-		const memoryContext = buildMemoriesText(deduped)
 
 		const [threadRows, history, otherThreads, artifactRows] = yield* Effect.all(
 			[
@@ -116,7 +106,7 @@ export function prepareConversationContext(params: {
 			.join("\n\n")
 
 		const systemPrompt = [
-			buildConversationPrompt(formattedNow, userTimezone),
+			buildConversationPrompt(formattedNow, userTimezone, runtime),
 			memoryContext ? `# User Memory Context\n${memoryContext}` : "",
 			extraContext,
 		]

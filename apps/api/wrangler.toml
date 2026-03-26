@@ -27,6 +27,35 @@ mode = "smart"
 [limits]
 cpu_ms = 300_000
 
+# Non-secret config with production defaults
+[vars]
+NODE_ENV = "production"
+API_URL = "https://api.hiamby.com"
+APP_URL = "https://hiamby.com"
+DAYTONA_API_URL = "https://app.daytona.io/api"
+DAYTONA_TARGET = "us"
+SENTRY_ENVIRONMENT = "production"
+
+# Required secrets — deploy will fail if any are missing
+[secrets]
+required = [
+  "BETTER_AUTH_SECRET",
+  "BETTER_AUTH_URL",
+  "BRAINTRUST_API_KEY",
+  "BRAINTRUST_PROJECT_ID",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN",
+  "CLOUDFLARE_AI_GATEWAY_BASE_URL",
+  "CLOUDFLARE_AI_GATEWAY_ID",
+  "COMPOSIO_API_KEY",
+  "COMPOSIO_WEBHOOK_SECRET",
+  "DAYTONA_API_KEY",
+  "OPENROUTER_API_KEY",
+  "SENTRY_DSN",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_WEBHOOK_SECRET",
+]
+
 # Observability
 [observability]
 enabled = true

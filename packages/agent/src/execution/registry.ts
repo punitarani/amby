@@ -92,7 +92,7 @@ export const SPECIALIST_REGISTRY: Record<SpecialistKind, SpecialistDefinition> =
 		model: defaultModel,
 		maxSteps: getBudget("memory", 5),
 	}),
-	settings: specialist("settings", "toolloop", ["settings"], {
+	settings: specialist("settings", "toolloop", ["settings", "automation"], {
 		model: defaultModel,
 		maxSteps: getBudget("settings", 6),
 		inputSchema: settingsTaskInputSchema,

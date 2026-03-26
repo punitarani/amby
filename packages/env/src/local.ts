@@ -1,5 +1,5 @@
 import { DevTools } from "@effect/experimental"
-import { Config, Effect, Layer, Redacted } from "effect"
+import { Config, Effect, Layer, Option, Redacted } from "effect"
 import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService } from "./shared"
 
 const EnvConfig = Config.all({
@@ -29,6 +29,7 @@ const EnvConfig = Config.all({
 	TELEGRAM_WEBHOOK_SECRET: Config.redacted("TELEGRAM_WEBHOOK_SECRET").pipe(
 		Config.withDefault(Redacted.make("")),
 	),
+	TELEGRAM_API_BASE_URL: Config.string("TELEGRAM_API_BASE_URL").pipe(Config.option),
 	COMPOSIO_API_KEY: Config.redacted("COMPOSIO_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 	COMPOSIO_WEBHOOK_SECRET: Config.redacted("COMPOSIO_WEBHOOK_SECRET").pipe(
 		Config.withDefault(Redacted.make("")),
@@ -79,6 +80,7 @@ export const EnvServiceLive = Layer.effect(
 			TELEGRAM_BOT_TOKEN: Redacted.value(raw.TELEGRAM_BOT_TOKEN),
 			TELEGRAM_BOT_USERNAME: raw.TELEGRAM_BOT_USERNAME,
 			TELEGRAM_WEBHOOK_SECRET: Redacted.value(raw.TELEGRAM_WEBHOOK_SECRET),
+			TELEGRAM_API_BASE_URL: Option.getOrUndefined(raw.TELEGRAM_API_BASE_URL),
 			COMPOSIO_API_KEY: Redacted.value(raw.COMPOSIO_API_KEY),
 			COMPOSIO_WEBHOOK_SECRET: Redacted.value(raw.COMPOSIO_WEBHOOK_SECRET),
 			COMPOSIO_AUTH_CONFIG_GMAIL: raw.COMPOSIO_AUTH_CONFIG_GMAIL,

@@ -39,12 +39,12 @@ function makeBrowserService(result: BrowserTaskResult) {
 
 const trace = {
 	traceId: "trace-1",
-	append: () => Effect.succeed<void>(undefined),
-	appendMany: () => Effect.succeed<void>(undefined),
-	setMode: () => Effect.succeed<void>(undefined),
-	updateMetadata: () => Effect.succeed<void>(undefined),
-	linkMessage: () => Effect.succeed<void>(undefined),
-	complete: () => Effect.succeed<void>(undefined),
+	append: () => Effect.void,
+	appendMany: () => Effect.void,
+	setMode: () => Effect.void,
+	updateMetadata: () => Effect.void,
+	linkMessage: () => Effect.void,
+	complete: () => Effect.void,
 }
 
 describe("runBrowserSpecialist", () => {

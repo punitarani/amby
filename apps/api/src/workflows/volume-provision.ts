@@ -7,6 +7,7 @@ import {
 	upsertVolumeRow,
 	volumeName,
 } from "@amby/computer/sandbox-config"
+import { CoreError } from "@amby/core"
 import { DbService } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
@@ -25,7 +26,7 @@ export interface VolumeProvisionParams {
 
 export interface VolumeProvisionResult {
 	id: string
-	daytonaVolumeId: string
+	externalVolumeId: string
 	status: "creating" | "ready" | "error" | "deleted"
 }
 
@@ -74,13 +75,13 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 						return yield* Effect.tryPromise({
 							try: () => ensureProvisionableVolume(daytona, db, userId, isDev),
 							catch: (cause) =>
-								new Error(
-									`Failed to ensure provisionable volume: ${cause instanceof Error ? cause.message : String(cause)}`,
-								),
+								new CoreError({
+									message: `Failed to ensure provisionable volume: ${cause instanceof Error ? cause.message : String(cause)}`,
+								}),
 						})
 					}),
 				)
-				return { id: row.id, daytonaVolumeId: row.daytonaVolumeId, status: row.status }
+				return { id: row.id, externalVolumeId: row.externalVolumeId, status: row.status }
 			},
 		)
 
@@ -109,14 +110,14 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 								return yield* Effect.tryPromise({
 									try: () => upsertVolumeRow(db, userId, volume.id, status),
 									catch: (cause) =>
-										new Error(
-											`Failed to upsert volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
-										),
+										new CoreError({
+											message: `Failed to upsert volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
+										}),
 								})
 							}),
 						)
 
-						return { id: row.id, daytonaVolumeId: row.daytonaVolumeId, status: row.status }
+						return { id: row.id, externalVolumeId: row.externalVolumeId, status: row.status }
 					},
 				)
 
@@ -145,7 +146,7 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 						type: VOLUME_READY_EVENT,
 						payload: {
 							id: volumeRow.id,
-							daytonaVolumeId: volumeRow.daytonaVolumeId,
+							externalVolumeId: volumeRow.externalVolumeId,
 							status: volumeRow.status,
 						},
 					})
@@ -157,12 +158,12 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 			workflow_instance_id: event.instanceId,
 			user_id: userId,
 			volume_id: volumeRow.id,
-			daytona_volume_id: volumeRow.daytonaVolumeId,
+			external_volume_id: volumeRow.externalVolumeId,
 		})
 
 		return {
 			id: volumeRow.id,
-			daytonaVolumeId: volumeRow.daytonaVolumeId,
+			externalVolumeId: volumeRow.externalVolumeId,
 			status: volumeRow.status,
 		}
 	}

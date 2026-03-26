@@ -1,0 +1,27 @@
+{
+	"name": "@amby/plugins",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./integrations": "./src/integrations/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/index.ts --outdir dist --target bun"
+	},
+	"dependencies": {
+		"@amby/core": "workspace:*",
+		"@amby/db": "workspace:*",
+		"@amby/env": "workspace:*",
+		"@composio/core": "0.6.5",
+		"@composio/vercel": "0.6.5",
+		"croner": "^9.0.0"
+	},
+	"peerDependencies": {
+		"ai": "^6.0.116",
+		"effect": "^3.21.0",
+		"zod": "^3.24.0"
+	}
+}

@@ -17,13 +17,20 @@ type PlannerInput = {
 
 const TZ_RE = /(?:to|as)\s+([A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?|UTC|GMT[+-]?\d*)/i
 const URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g
+/** Matches bare domain names like "nytimes.com", "docs.google.com" */
+const BARE_DOMAIN_RE =
+	/\b([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com|org|net|io|dev|co|ai|app|xyz|me|info|edu|gov)\b/i
 const INTEGRATION_RE = /\b(gmail|google calendar|calendar|notion|slack|drive|google drive)\b/i
 const SETTINGS_RE =
 	/\b(timezone|remind|reminder|schedule|every day|every week|codex|api key|auth)\b/i
 const MEMORY_RE = /\b(remember this|remember that|don't forget|save this|keep this in mind)\b/i
 const COMPUTER_RE =
-	/\b(desktop|computer|upload|download|file picker|native dialog|captcha|mfa|multi-tab|popup|screenshot)\b/i
-const BROWSER_RE = /\b(browser|website|web page|site|open the page|visit)\b/i
+	/\b(desktop|computer|upload|download|file picker|native dialog|captcha|mfa|multi-tab|popup|screenshot|htop|terminal|command line|run\s+\w+|execute command|check disk|disk space|storage|cpu usage|process list|system info|system monitor)\b/i
+const BROWSER_RE =
+	/\b(browser|website|web page|webpage|site|open the page|visit|go to|navigate to|browse|look at .+ page|homepage|check out|pull up|open .+\.com|open .+\.org|open .+\.io|scrape|crawl|what's on)\b/i
+/** Matches common shell commands that indicate sandbox/code execution is needed */
+const SANDBOX_CMD_RE =
+	/\b(ls|cat|grep|find|df|du|ps|top|pwd|echo|curl|wget|pip|npm|bun|node|python|bash|sh|mkdir|touch|chmod|apt|brew|git|make|cargo|go run|java|javac)\b/i
 const BUILDER_RE =
 	/\b(implement|refactor|rewrite|fix|patch|edit|modify|create file|write code|build|test)\b/i
 const RESEARCH_RE = /\b(research|investigate|look up|analyze|inspect|summarize|read|compare)\b/i
@@ -36,13 +43,22 @@ function contains(text: string, pattern: RegExp) {
 }
 
 function extractUrls(text: string): string[] {
-	return [
-		...new Set(
-			[...text.matchAll(URL_RE)]
-				.map((match) => sanitizeBrowserStartUrl(match[0]))
-				.filter((url): url is string => Boolean(url)),
-		),
-	]
+	// Match full URLs first
+	const fullUrls = [...text.matchAll(URL_RE)]
+		.map((match) => sanitizeBrowserStartUrl(match[0]))
+		.filter((url): url is string => Boolean(url))
+
+	// Also match bare domains and convert to https URLs
+	const bareDomains = [...text.matchAll(new RegExp(BARE_DOMAIN_RE, "gi"))]
+		.map((match) => {
+			const domain = match[0]
+			// Skip if this domain is already part of a full URL we found
+			if (fullUrls.some((url) => url.includes(domain))) return null
+			return sanitizeBrowserStartUrl(`https://${domain}`)
+		})
+		.filter((url): url is string => Boolean(url))
+
+	return [...new Set([...fullUrls, ...bareDomains])]
 }
 
 function extractPathHints(text: string): string[] {
@@ -165,6 +181,7 @@ export function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 	const wantsBrowser = urls.length > 0 || contains(normalized, BROWSER_RE)
 	const wantsBuilder = contains(normalized, BUILDER_RE)
 	const wantsResearch = contains(normalized, RESEARCH_RE)
+	const wantsSandboxCmd = contains(normalized, SANDBOX_CMD_RE)
 
 	if (
 		!wantsBackground &&
@@ -174,7 +191,8 @@ export function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 		!wantsComputer &&
 		!wantsBrowser &&
 		!wantsBuilder &&
-		!wantsResearch
+		!wantsResearch &&
+		!wantsSandboxCmd
 	) {
 		return {
 			strategy: "direct",
@@ -310,6 +328,25 @@ export function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 	}
 
 	if (wantsBrowser && wantsResearch) {
+		// When URLs are present, the browser can handle both browsing and summarization
+		// in one task. Only split into parallel when there's genuine non-browser research.
+		if (urls.length > 0) {
+			return {
+				strategy: "sequential",
+				rationale:
+					"The request needs web content from a specific URL — browser handles extraction and summarization.",
+				tasks: [
+					createBrowserTask({
+						instruction: normalized,
+						startUrl: urls[0],
+						outputMode: "agent",
+						sideEffectLevel: "read",
+						expectedOutcome: "Extract and summarize the relevant content from the page.",
+					}),
+				],
+				reducer: "conversation",
+			}
+		}
 		return {
 			strategy: "parallel",
 			rationale: "The request contains independent read-heavy browser and research work.",
@@ -399,6 +436,32 @@ export function buildHeuristicPlan({ request }: PlannerInput): ExecutionPlan {
 					outputMode: contains(normalized, HARD_WRITE_RE) ? "agent" : "extract",
 					sideEffectLevel: contains(normalized, HARD_WRITE_RE) ? "soft-write" : "read",
 				}),
+			],
+			reducer: "conversation",
+		}
+	}
+
+	// Shell commands or sandbox-oriented requests route to research (read-only) or builder (write)
+	if (wantsSandboxCmd) {
+		const needsWrite = contains(normalized, HARD_WRITE_RE) || contains(normalized, BUILDER_RE)
+		return {
+			strategy: "sequential",
+			rationale: "The request involves shell commands or code execution in the sandbox.",
+			tasks: [
+				createSpecialistTask(
+					needsWrite ? "builder" : "research",
+					{
+						kind: "specialist",
+						goal: normalized,
+						payload: { request: normalized },
+					},
+					needsWrite
+						? {
+								resourceLocks: ["sandbox-workdir:/"],
+								mutates: true,
+							}
+						: undefined,
+				),
 			],
 			reducer: "conversation",
 		}

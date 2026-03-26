@@ -8,14 +8,15 @@
 		"./sandbox-config": "./src/sandbox-config.ts"
 	},
 	"scripts": {
+		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
 		"create-snapshot": "bun run src/scripts/create-snapshot.ts"
 	},
 	"dependencies": {
+		"@amby/core": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
-		"@amby/connectors": "workspace:*",
 		"@daytonaio/sdk": "^0.153.0"
 	},
 	"peerDependencies": {

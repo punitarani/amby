@@ -1,9 +1,6 @@
-import {
-	ConnectorsService,
-	getIntegrationExpiredMessage,
-	getTelegramChatId,
-} from "@amby/connectors"
+import { getTelegramChatId } from "@amby/computer"
 import { and, DbService, eq, inArray, schema } from "@amby/db"
+import { ConnectorsService, getIntegrationExpiredMessage } from "@amby/plugins/integrations"
 import { Effect } from "effect"
 import { TelegramSender } from "../telegram"
 

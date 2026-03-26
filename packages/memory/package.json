@@ -7,10 +7,12 @@
 		".": "./src/index.ts"
 	},
 	"scripts": {
+		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun"
 	},
 	"dependencies": {
+		"@amby/core": "workspace:*",
 		"@amby/db": "workspace:*"
 	},
 	"peerDependencies": {

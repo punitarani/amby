@@ -1,3 +1,4 @@
+import type { WorkerBindings } from "@amby/env/workers"
 import {
 	buildSafeComposioRedirectUrl,
 	ConnectorsService,
@@ -5,8 +6,7 @@ import {
 	getWebhookType,
 	normalizeWebhookPayload,
 	WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
-} from "@amby/connectors"
-import type { WorkerBindings } from "@amby/env/workers"
+} from "@amby/plugins/integrations"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect, Either } from "effect"
 import { Hono } from "hono"

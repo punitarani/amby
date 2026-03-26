@@ -2,35 +2,42 @@ import { ModelServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import {
-	buildSafeComposioRedirectUrl,
-	ConnectorsService,
-	ConnectorsServiceLive,
-} from "@amby/connectors"
 import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
+import { AutomationServiceLive } from "@amby/plugins"
+import {
+	buildSafeComposioRedirectUrl,
+	ConnectorsService,
+	ConnectorsServiceLive,
+} from "@amby/plugins/integrations"
+import type { Chat } from "chat"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
 import { createAmbyBot } from "./bot"
 import { getHomeResponse } from "./home"
+import { PluginRegistryLive } from "./shared/plugin-registry"
 import { TelegramSenderLite } from "./telegram"
 
 // Shared layers — constructed once at startup
-const SharedLive = Layer.mergeAll(
-	makeEffectDevToolsLive(),
+// Layer order: infra (env, db) → services (memory, connectors, etc.) → PluginRegistry (depends on services)
+const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
+	Layer.provideMerge(DbServiceLive),
+	Layer.provideMerge(EnvServiceLive),
+)
+
+const ServicesLive = Layer.mergeAll(
 	MemoryServiceLive,
+	AutomationServiceLive,
 	TaskSupervisorLive,
 	ModelServiceLive,
 	AuthServiceLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
-).pipe(
-	Layer.provideMerge(SandboxServiceLive),
-	Layer.provideMerge(DbServiceLive),
-	Layer.provideMerge(EnvServiceLive),
-)
+).pipe(Layer.provideMerge(InfraLive))
+
+const SharedLive = PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 
 const runtime = ManagedRuntime.make(SharedLive)
 
@@ -51,12 +58,14 @@ app.get("/link/:id", async (c) => {
 	return url ? c.redirect(url, 302) : c.notFound()
 })
 
-// OAuth callback proxy — same as Cloudflare Worker; local dev uses ngrok/API_URL for OAuth redirect URIs
+// OAuth callback proxy
 app.get("/composio/redirect", (c) => {
 	return c.redirect(buildSafeComposioRedirectUrl(c.req.url), 302)
 })
 
 const port = Number(process.env.PORT) || 3001
+
+let chatBot: Chat | null = null
 
 console.log("Starting Amby API...")
 
@@ -74,23 +83,25 @@ runtime
 				TelegramSenderLite.pipe(Layer.provideMerge(SharedLive)),
 			)
 
-			// Register bot commands via Telegram API
 			yield* Effect.tryPromise(() =>
-				fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						commands: [
-							{ command: "start", description: "Start or resume the assistant" },
-							{ command: "stop", description: "Pause the assistant" },
-							{ command: "help", description: "Show help" },
-						],
-					}),
-				}),
+				fetch(
+					`${env.TELEGRAM_API_BASE_URL || "https://api.telegram.org"}/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
+					{
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							commands: [
+								{ command: "start", description: "Start or resume the assistant" },
+								{ command: "stop", description: "Pause the assistant" },
+								{ command: "help", description: "Show help" },
+							],
+						}),
+					},
+				),
 			)
 
-			// Initialize Chat SDK bot (auto mode: polling in dev, webhook when deployed)
 			const bot = createAmbyBot(botRuntime, env.TELEGRAM_BOT_TOKEN)
+			chatBot = bot
 			yield* Effect.tryPromise(() => bot.initialize())
 
 			console.log("Telegram bot: configured and running")
@@ -99,6 +110,22 @@ runtime
 	.then(() => {
 		console.log(`Amby API listening on port ${port}`)
 	})
+
+// Webhook endpoint for local dev mock Telegram channel
+app.post("/telegram/webhook", async (c) => {
+	if (!chatBot) {
+		return c.json({ error: "Bot not initialized" }, 503)
+	}
+	const handler = chatBot.webhooks.telegram
+	if (!handler) {
+		return c.json({ error: "Telegram adapter not available" }, 500)
+	}
+	return handler(c.req.raw, {
+		waitUntil: (p: Promise<unknown>) => {
+			p.catch((err) => console.error("[waitUntil]", err))
+		},
+	})
+})
 
 export default {
 	port,

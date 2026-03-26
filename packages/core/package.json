@@ -1,0 +1,17 @@
+{
+	"name": "@amby/core",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/index.ts --outdir dist --target bun"
+	},
+	"peerDependencies": {
+		"effect": "^3.21.0"
+	}
+}

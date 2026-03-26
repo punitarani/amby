@@ -14,6 +14,7 @@ import {
 	VOLUME_MOUNT_PATH,
 	volumeWorkflowId,
 } from "@amby/computer/sandbox-config"
+import { CoreError } from "@amby/core"
 import { DbService } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
@@ -61,7 +62,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 		}
 
 		const upsertMainSandbox = async (
-			daytonaSandboxId: string | null,
+			externalInstanceId: string | null,
 			status: "volume_creating" | "creating" | "running" | "stopped" | "archived" | "error",
 			volumeId: string,
 			snapshot?: string | null,
@@ -71,11 +72,11 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 					const { db } = yield* DbService
 					yield* Effect.tryPromise({
 						try: () =>
-							upsertMainSandboxRow(db, userId, daytonaSandboxId, status, volumeId, snapshot),
+							upsertMainSandboxRow(db, userId, externalInstanceId, status, volumeId, snapshot),
 						catch: (cause) =>
-							new Error(
-								`Failed to upsert sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,
-							),
+							new CoreError({
+								message: `Failed to upsert sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,
+							}),
 					})
 				}),
 			)
@@ -113,13 +114,13 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 						return yield* Effect.tryPromise({
 							try: () => ensureVolume(daytona, db, userId, isDev),
 							catch: (cause) =>
-								new Error(
-									`Failed to ensure volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
-								),
+								new CoreError({
+									message: `Failed to ensure volume row: ${cause instanceof Error ? cause.message : String(cause)}`,
+								}),
 						})
 					}),
 				)
-				return { id: row.id, daytonaVolumeId: row.daytonaVolumeId, status: row.status }
+				return { id: row.id, externalVolumeId: row.externalVolumeId, status: row.status }
 			},
 		)
 
@@ -159,7 +160,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				const daytona = makeDaytona()
 				const createSpec = {
 					...buildSandboxCreateParams(userId, isDev),
-					volumes: [{ volumeId: volumeRow.daytonaVolumeId, mountPath: VOLUME_MOUNT_PATH }],
+					volumes: [{ volumeId: volumeRow.externalVolumeId, mountPath: VOLUME_MOUNT_PATH }],
 				}
 
 				const existing = await tryGetSandboxByName(daytona, name)
@@ -167,7 +168,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 					await existing.refreshData()
 
 					if (
-						!sandboxHasExpectedVolume(existing, volumeRow.daytonaVolumeId) ||
+						!sandboxHasExpectedVolume(existing, volumeRow.externalVolumeId) ||
 						inferDbStatusFromSandbox(existing) === "error"
 					) {
 						console.warn("[SandboxProvision] Replacing stale sandbox", {
@@ -192,7 +193,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 							await recovered.refreshData()
 
 							if (
-								!sandboxHasExpectedVolume(recovered, volumeRow.daytonaVolumeId) ||
+								!sandboxHasExpectedVolume(recovered, volumeRow.externalVolumeId) ||
 								inferDbStatusFromSandbox(recovered) === "error"
 							) {
 								await deleteSandboxIfPresent(recovered)

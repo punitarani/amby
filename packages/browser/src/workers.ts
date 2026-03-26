@@ -12,14 +12,38 @@ import {
 	type BrowserTaskResult,
 	type BrowserTaskRunOptions,
 	type BrowserTaskStatus,
+	browserTaskRetrySchedule,
 	buildBrowserSummary,
 	DEFAULT_BROWSER_MAX_STEPS,
 	isBrowserEscalationSignal,
+	isRetryableBrowserTaskError,
 	sanitizeBrowserStartUrl,
 	summarizePageArtifact,
 } from "./shared"
 
 export const STAGEHAND_MODEL = "@cf/moonshotai/kimi-k2.5"
+
+/**
+ * AI Gateway configuration for browser LLM calls.
+ *
+ * kimi-k2.5 is a large reasoning model — inference can exceed 30s on complex
+ * accessibility trees. The gateway handles timeouts and retries transparently
+ * so individual Stagehand calls don't need retry logic.
+ *
+ * @see https://developers.cloudflare.com/ai-gateway/configuration/
+ */
+const AI_GATEWAY_OPTIONS = {
+	/** Allow up to 120s for inference (kimi-k2.5 reasoning on large DOM trees) */
+	requestTimeoutMs: 120_000,
+	/** Retry on transient 5xx / timeout errors */
+	retries: {
+		maxAttempts: 3 as const,
+		retryDelayMs: 2_000,
+		backoff: "exponential" as const,
+	},
+	/** Cache identical LLM calls for 5 minutes to avoid re-inferring the same content */
+	cacheTtl: 300,
+}
 
 const BROWSER_AGENT_SYSTEM_PROMPT = [
 	"You are a browser specialist.",
@@ -75,15 +99,22 @@ function createStagehandWorkersAiClient(
 } {
 	const gatewayId = trim(aiGatewayId)
 	const binding = ai as NonNullable<Parameters<typeof createWorkersAI>[0]["binding"]>
+
+	// Merge AI Gateway options (timeout, retry, caching) into gateway config.
+	// The runtime binding.run() supports these fields even though the
+	// workers-ai-provider@0.7.5 type stubs only declare { id, cacheTtl, ... }.
+	const gateway = gatewayId
+		? ({ id: gatewayId, ...AI_GATEWAY_OPTIONS } as Parameters<typeof createWorkersAI>[0]["gateway"])
+		: undefined
+
 	const workersai = createWorkersAI({
 		binding,
-		gateway: gatewayId ? { id: gatewayId } : undefined,
+		gateway,
 	} as Parameters<typeof createWorkersAI>[0])
 	const stagehandModel = STAGEHAND_MODEL as Parameters<typeof workersai>[0]
 
 	return {
 		llmClient: new AISdkClient({
-			// `workers-ai-provider@0.7.5` model unions lag the current Workers AI catalog.
 			model: workersai(stagehandModel),
 		}),
 		model: STAGEHAND_MODEL,
@@ -526,17 +557,35 @@ export const makeBrowserServiceFromBindings = (bindings: BrowserWorkerBindings) 
 
 	return Layer.succeed(BrowserService, {
 		enabled: settings.enabled,
-		runTask: (input, options) =>
-			Effect.tryPromise({
+		runTask: (input, options) => {
+			const mapCause = (cause: unknown) =>
+				cause instanceof BrowserError
+					? cause
+					: new BrowserError({
+							message: cause instanceof Error ? cause.message : "Browser task failed unexpectedly.",
+							cause,
+						})
+
+			const singleAttempt = Effect.tryPromise({
 				try: () => runBrowserTask(settings, input, options),
-				catch: (cause) =>
-					cause instanceof BrowserError
-						? cause
-						: new BrowserError({
-								message:
-									cause instanceof Error ? cause.message : "Browser task failed unexpectedly.",
-								cause,
-							}),
-			}),
+				catch: mapCause,
+			})
+
+			return Effect.retry(
+				singleAttempt.pipe(
+					Effect.tapError((e) =>
+						isRetryableBrowserTaskError(e)
+							? Effect.logWarning(
+									`[BrowserService] Retryable browser task error: ${e instanceof Error ? e.message : String(e)}`,
+								)
+							: Effect.void,
+					),
+				),
+				{
+					schedule: browserTaskRetrySchedule,
+					while: isRetryableBrowserTaskError,
+				},
+			)
+		},
 	})
 }

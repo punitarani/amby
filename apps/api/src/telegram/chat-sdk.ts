@@ -16,6 +16,7 @@ export function getOrCreateChat(env: WorkerBindings) {
 
 	const adapter = createTelegramAdapter({
 		botToken: env.TELEGRAM_BOT_TOKEN ?? "",
+		apiBaseUrl: env.TELEGRAM_API_BASE_URL,
 		secretToken: env.TELEGRAM_WEBHOOK_SECRET,
 		mode: "webhook",
 	})
