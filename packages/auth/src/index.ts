@@ -6,14 +6,16 @@ import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { Context, Effect, Layer } from "effect"
 
-const createAuth = (db: Database, secret: string, baseURL: string) =>
+// Return type annotated as Auth because betterAuth()'s inferred type references
+// internal better-call types that TypeScript cannot serialize portably.
+const createAuth = (db: Database, secret: string, baseURL: string): Auth =>
 	betterAuth({
 		database: drizzleAdapter(db, { provider: "pg" }),
 		secret,
 		baseURL,
 		emailAndPassword: { enabled: true },
 		plugins: [apiKey()],
-	})
+	}) as unknown as Auth
 
 export class AuthService extends Context.Tag("AuthService")<AuthService, Auth>() {}
 
@@ -22,7 +24,6 @@ export const AuthServiceLive = Layer.effect(
 	Effect.gen(function* () {
 		const env = yield* EnvService
 		const { db } = yield* DbService
-		// Cast needed: betterAuth() returns a branded internal type incompatible with the public Auth interface
-		return createAuth(db, env.BETTER_AUTH_SECRET, env.BETTER_AUTH_URL) as unknown as Auth
+		return createAuth(db, env.BETTER_AUTH_SECRET, env.BETTER_AUTH_URL)
 	}),
 )

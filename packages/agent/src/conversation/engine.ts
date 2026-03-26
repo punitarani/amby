@@ -128,6 +128,7 @@ async function flushConversationToolEvents(
 		}>
 	},
 	trace: TraceWriter,
+	rt: Runtime.Runtime<never>,
 ) {
 	const events = (result.steps ?? []).flatMap((step) => [
 		...step.toolCalls.map((toolCall) => ({
@@ -149,7 +150,7 @@ async function flushConversationToolEvents(
 	])
 
 	if (events.length > 0) {
-		await Effect.runPromise(trace.appendMany(events))
+		await Runtime.runPromise(rt)(trace.appendMany(events))
 	}
 }
 
@@ -484,7 +485,7 @@ export function handleTurn(
 			catch: (cause) => new AgentError({ message: "Agent request failed", cause }),
 		})
 
-		yield* Effect.tryPromise(() => flushConversationToolEvents(result, rootTrace)).pipe(
+		yield* Effect.tryPromise(() => flushConversationToolEvents(result, rootTrace, rt)).pipe(
 			Effect.catchAll(() => Effect.void),
 		)
 
