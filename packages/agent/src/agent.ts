@@ -139,9 +139,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				return registryTools
 			}
 
-			const makeEngineConfig = (
-				conversationId: string,
-			): ConversationEngineConfig => ({
+			const makeEngineConfig = (conversationId: string): ConversationEngineConfig => ({
 				userId,
 				defaultModelId: models.defaultModelId,
 				highReasoningModelId: HIGH_INTELLIGENCE_MODEL_ID,
@@ -174,8 +172,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				onReply?: ReplyFn
 				onTextDelta?: (text: string) => void
 				onPart?: (part: StreamPart) => void
-			}) =>
-				withTelemetryFlush(handleTurn(makeEngineConfig(params.conversationId), params))
+			}) => withTelemetryFlush(handleTurn(makeEngineConfig(params.conversationId), params))
 
 			return {
 				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>

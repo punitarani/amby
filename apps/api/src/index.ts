@@ -118,7 +118,11 @@ app.post("/telegram/webhook", async (c) => {
 	if (!handler) {
 		return c.json({ error: "Telegram adapter not available" }, 500)
 	}
-	return handler(c.req.raw, { waitUntil: (p: Promise<unknown>) => { p.catch((err) => console.error("[waitUntil]", err)) } })
+	return handler(c.req.raw, {
+		waitUntil: (p: Promise<unknown>) => {
+			p.catch((err) => console.error("[waitUntil]", err))
+		},
+	})
 })
 
 export default {
