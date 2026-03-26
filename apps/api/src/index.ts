@@ -16,6 +16,7 @@ import type { Chat } from "chat"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
 import { createAmbyBot } from "./bot"
+import { checkDatabaseHealthWithRuntime, registerHealthRoutes } from "./health"
 import { getHomeResponse } from "./home"
 import { PluginRegistryLive } from "./shared/plugin-registry"
 import { TelegramSenderLite } from "./telegram"
@@ -44,7 +45,9 @@ const runtime = ManagedRuntime.make(SharedLive)
 const app = new Hono()
 
 app.get("/", (c) => c.json(getHomeResponse()))
-app.get("/health", (c) => c.json({ status: "ok" }))
+registerHealthRoutes(app, {
+	checkDatabase: () => checkDatabaseHealthWithRuntime(runtime, "direct"),
+})
 
 // White-label connect link — resolves UUID to the underlying Composio auth URL
 app.get("/link/:id", async (c) => {

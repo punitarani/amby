@@ -2,7 +2,11 @@ import { Context, Data } from "effect"
 
 export class EnvError extends Data.TaggedError("EnvError")<{
 	readonly message: string
+	readonly code?: "config"
+	readonly cause?: unknown
 }> {}
+
+export type DbConnectionMode = "hyperdrive" | "direct"
 
 export interface WorkflowInstanceStatus {
 	readonly status:
@@ -63,6 +67,7 @@ export interface Env {
 	readonly COMPOSIO_AUTH_CONFIG_SLACK: string
 	readonly COMPOSIO_AUTH_CONFIG_GOOGLEDRIVE: string
 	readonly DATABASE_URL: string
+	readonly DB_CONNECTION_MODE: DbConnectionMode
 	readonly BETTER_AUTH_SECRET: string
 	readonly BETTER_AUTH_URL: string
 	readonly ENABLE_CUA: boolean

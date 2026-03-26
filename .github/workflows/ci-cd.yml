@@ -300,6 +300,24 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Verify Database Health
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            response=$(curl --silent --show-error --location https://api.hiamby.com/health/db || true)
+            if [ -n "$response" ] && echo "$response" | jq -e '
+              .status == "ok" and
+              (.database.mode == "hyperdrive" or .database.mode == "direct")
+            ' >/dev/null; then
+              echo "Verified /health/db"
+              exit 0
+            fi
+            echo "Waiting for /health/db to become healthy (attempt $attempt/10)"
+            sleep 15
+          done
+          echo "ERROR: /health/db did not report healthy after deploy"
+          echo "${response:-<empty response>}"
+          exit 1
       - name: Log deployment
         run: |
           echo "Deployed worker amby-api"

@@ -12,6 +12,11 @@ import { Effect, Either } from "effect"
 import { Hono } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { handleExpiredConnectedAccount } from "./composio/expired-account"
+import {
+	buildDatabaseHealthErrorResponse,
+	checkDatabaseHealthWithRuntime,
+	registerHealthRoutes,
+} from "./health"
 import { ConversationSession as ConversationSessionBase } from "./durable-objects/conversation-session"
 import { handleScheduledReconciliation } from "./handlers/reconciliation"
 import { handleTaskEventPost } from "./handlers/task-events"
@@ -22,6 +27,7 @@ import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "./queue/run
 import { getSentryOptions, getSentryOptionsOrFallback } from "./sentry"
 import { getOrCreateChat } from "./telegram/chat-sdk"
 import type { TelegramQueueMessage } from "./telegram/utils"
+import { getWorkerDatabaseModeHint } from "@amby/env/workers"
 import { AgentExecutionWorkflow as AgentExecutionWorkflowBase } from "./workflows/agent-execution"
 import { SandboxProvisionWorkflow as SandboxProvisionWorkflowBase } from "./workflows/sandbox-provision"
 import { VolumeProvisionWorkflow as VolumeProvisionWorkflowBase } from "./workflows/volume-provision"
@@ -102,7 +108,20 @@ app.onError(async (err, c) => {
 })
 
 app.get("/", (c) => c.json(getHomeResponse()))
-app.get("/health", (c) => c.json({ status: "ok" }))
+registerHealthRoutes(app, {
+	checkDatabase: async (c) => {
+		const fallbackMode = getWorkerDatabaseModeHint(c.env)
+		let runtime: ReturnType<typeof makeRuntimeForConsumer> | undefined
+		try {
+			runtime = makeRuntimeForConsumer(c.env)
+			return await checkDatabaseHealthWithRuntime(runtime, fallbackMode)
+		} catch (error) {
+			return buildDatabaseHealthErrorResponse(fallbackMode, error)
+		} finally {
+			await runtime?.dispose()
+		}
+	},
+})
 
 // White-label connect link — resolves UUID to the underlying Composio auth URL
 app.get("/link/:id", async (c) => {

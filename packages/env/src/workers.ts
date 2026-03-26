@@ -1,5 +1,11 @@
 import { Layer } from "effect"
-import { DEFAULT_TELEGRAM_BOT_USERNAME, EnvService, type WorkflowBinding } from "./shared"
+import {
+	DEFAULT_TELEGRAM_BOT_USERNAME,
+	DbConnectionMode,
+	EnvError,
+	EnvService,
+	type WorkflowBinding,
+} from "./shared"
 
 export interface WorkerBindings {
 	NODE_ENV?: string
@@ -28,6 +34,7 @@ export interface WorkerBindings {
 	COMPOSIO_AUTH_CONFIG_SLACK?: string
 	COMPOSIO_AUTH_CONFIG_GOOGLEDRIVE?: string
 	DATABASE_URL?: string
+	DB_CONNECTION_MODE?: DbConnectionMode
 	BETTER_AUTH_SECRET: string
 	BETTER_AUTH_URL?: string
 	ENABLE_CUA?: string
@@ -55,7 +62,59 @@ export interface WorkerBindings {
 	VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
 }
 
-export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
+export interface WorkerDatabaseConnection {
+	readonly mode: DbConnectionMode
+	readonly connectionString: string
+}
+
+const parseDbConnectionMode = (rawMode?: string): DbConnectionMode => {
+	const normalized = rawMode?.trim().toLowerCase()
+	if (!normalized) return "direct"
+	if (normalized === "hyperdrive" || normalized === "direct") {
+		return normalized
+	}
+	throw new EnvError({
+		message: `Invalid DB_CONNECTION_MODE "${rawMode}". Expected "hyperdrive" or "direct".`,
+		code: "config",
+	})
+}
+
+export const getWorkerDatabaseModeHint = (bindings: WorkerBindings): DbConnectionMode => {
+	const normalized = bindings.DB_CONNECTION_MODE?.trim().toLowerCase()
+	if (normalized === "hyperdrive") return "hyperdrive"
+	return "direct"
+}
+
+export const resolveWorkerDatabaseConnection = (
+	bindings: WorkerBindings,
+): WorkerDatabaseConnection => {
+	const mode = parseDbConnectionMode(bindings.DB_CONNECTION_MODE)
+	if (mode === "hyperdrive") {
+		const connectionString = bindings.HYPERDRIVE?.connectionString?.trim()
+		if (!connectionString) {
+			throw new EnvError({
+				message: 'DB_CONNECTION_MODE="hyperdrive" requires the HYPERDRIVE binding.',
+				code: "config",
+			})
+		}
+		return { mode, connectionString }
+	}
+
+	const connectionString = bindings.DATABASE_URL?.trim()
+	if (!connectionString) {
+		throw new EnvError({
+			message: 'DB_CONNECTION_MODE="direct" requires DATABASE_URL.',
+			code: "config",
+		})
+	}
+
+	return { mode, connectionString }
+}
+
+export const makeEnvServiceFromBindings = (
+	bindings: WorkerBindings,
+	connection = resolveWorkerDatabaseConnection(bindings),
+) =>
 	Layer.succeed(EnvService, {
 		NODE_ENV: bindings.NODE_ENV ?? "production",
 		API_URL: bindings.API_URL ?? "https://api.hiamby.com",
@@ -79,7 +138,8 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		COMPOSIO_AUTH_CONFIG_NOTION: bindings.COMPOSIO_AUTH_CONFIG_NOTION ?? "",
 		COMPOSIO_AUTH_CONFIG_SLACK: bindings.COMPOSIO_AUTH_CONFIG_SLACK ?? "",
 		COMPOSIO_AUTH_CONFIG_GOOGLEDRIVE: bindings.COMPOSIO_AUTH_CONFIG_GOOGLEDRIVE ?? "",
-		DATABASE_URL: bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? "",
+		DATABASE_URL: connection.connectionString,
+		DB_CONNECTION_MODE: connection.mode,
 		BETTER_AUTH_SECRET: bindings.BETTER_AUTH_SECRET,
 		BETTER_AUTH_URL: bindings.BETTER_AUTH_URL ?? "http://localhost:3000",
 		ENABLE_CUA: bindings.ENABLE_CUA === "true",

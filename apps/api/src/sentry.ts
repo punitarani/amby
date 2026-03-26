@@ -1,4 +1,5 @@
 import type { WorkerBindings } from "@amby/env/workers"
+import type { DbConnectionMode } from "@amby/env"
 import type { CloudflareOptions, Scope } from "@sentry/cloudflare"
 import * as Sentry from "@sentry/cloudflare"
 import type { TelegramFrom } from "./telegram/utils"
@@ -60,6 +61,25 @@ export const getSentryOptionsOrFallback = (env: WorkerBindings): CloudflareOptio
 
 const setScopeAttributes = (scope: Scope, attributes: Record<string, ScopeAttribute>) => {
 	scope.setAttributes(withDefinedAttributes(attributes))
+}
+
+export const setDatabaseScopeAttributes = (
+	scope: Scope,
+	params: {
+		mode?: DbConnectionMode
+		failureStage?: "config" | "reconciliation_preflight" | "reconciliation_run"
+	},
+) => {
+	if (params.mode) {
+		scope.setTag("db.connection_mode", params.mode)
+	}
+	if (params.failureStage) {
+		scope.setTag("db.failure_stage", params.failureStage)
+	}
+	setScopeAttributes(scope, {
+		"db.connection_mode": params.mode,
+		"db.failure_stage": params.failureStage,
+	})
 }
 
 export const setWorkerScope = (

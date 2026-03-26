@@ -4,6 +4,10 @@ import type { Sandbox } from "@daytonaio/sdk"
 import { Effect } from "effect"
 import { STALE_HEARTBEAT_MS, TASK_BASE } from "../config"
 import { CodexProvider } from "./codex-provider"
+import {
+	RECONCILIATION_ACTIVE_TASK_STATUSES,
+	runReconciliationDatabasePreflight,
+} from "./reconciliation-health"
 import { parseReplyTarget } from "./reply-target"
 import { collectTaskExecutionData } from "./task-execution-data"
 import { isTerminal, TERMINAL_STATUSES } from "./task-state"
@@ -26,8 +30,6 @@ export interface ReconciliationContext {
 	/** If set, computes the next run time for recurring cron automations. */
 	computeNextCronRun?: (schedule: string, tz: string) => Date | undefined
 }
-
-const ACTIVE = ["preparing", "running"] as const
 
 /** Intentionally module-level: CodexProvider is stateless (no mutable fields). */
 const provider = new CodexProvider()
@@ -281,13 +283,8 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 export async function runScheduledReconciliation(ctx: ReconciliationContext): Promise<void> {
 	const { db, ensureSandbox, sendTelegram } = ctx
 
-	// --- 1) Keep-alive: refresh activity for each user with active tasks ---
-	const activeRows = await db
-		.selectDistinct({ userId: schema.tasks.userId })
-		.from(schema.tasks)
-		.where(and(eq(schema.tasks.runtime, "sandbox"), inArray(schema.tasks.status, [...ACTIVE])))
-
-	const userIds = activeRows.map((r) => r.userId)
+	// --- 1) DB preflight + keep-alive: refresh activity for each user with active tasks ---
+	const userIds = await runReconciliationDatabasePreflight(db)
 	const sandboxCache = new Map<string, Sandbox>()
 	for (const uid of userIds) {
 		try {
@@ -308,7 +305,7 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 		.where(
 			and(
 				eq(schema.tasks.runtime, "sandbox"),
-				inArray(schema.tasks.status, [...ACTIVE]),
+				inArray(schema.tasks.status, [...RECONCILIATION_ACTIVE_TASK_STATUSES]),
 				or(isNull(schema.tasks.heartbeatAt), lt(schema.tasks.heartbeatAt, staleBefore)),
 			),
 		)
