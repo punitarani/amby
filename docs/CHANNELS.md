@@ -1,168 +1,126 @@
 # Channels
 
-Channels are transport adapters that connect external communication surfaces to the Amby runtime.
+Channels are transport adapters that connect external messaging surfaces to the Amby agent runtime. They own message ingress, egress, and delivery semantics. They do not own reasoning, memory, or execution planning.
 
-They do not own reasoning.
-They do not own memory.
-They do not own execution planning.
+## Platform enum
 
-They own message ingress, message egress, and channel-specific delivery semantics.
+The platform type is defined in `packages/db/src/schema/conversations.ts`:
 
-## Current truth
-
-There are two important facts right now:
-
-1. The shared package-level channel abstraction currently defines **`cli`** and **`telegram`** as concrete channel types.
-2. The deployed production path is **Telegram-first** through Cloudflare Worker + Queue + Durable Object + Workflow.
-
-Both facts should be documented.
-
-## Channel contract
-
-The shared abstraction currently revolves around:
-- incoming message shape,
-- outgoing message shape,
-- a message handler,
-- optional streaming message handling,
-- lifecycle start/stop hooks.
-
-This is the right page to explain the contract in platform-neutral terms.
-
-```mermaid
-flowchart LR
-    Surface[External surface] --> Adapter[Channel adapter]
-    Adapter --> Runtime[Agent runtime]
-    Runtime --> Adapter
-    Adapter --> Surface
+```typescript
+type Platform = "cli" | "telegram" | "slack" | "discord"
 ```
 
-## Channel responsibilities
+Only **Telegram** is implemented today. `slack` and `discord` are reserved for future use. `cli` exists for local development.
 
-A channel is responsible for:
-- identifying the conversation boundary used by that surface,
-- normalizing inbound text and metadata,
-- delivering outbound content,
-- optionally supporting streaming responses,
-- preserving delivery-specific metadata that the runtime may need later.
-
-A channel is **not** responsible for:
-- selecting tools,
-- managing threads,
-- deciding whether work becomes durable,
-- owning user memory,
-- writing business logic.
-
-## Current channel types
-
-| Channel type | Status | Notes |
-|---|---|---|
-| `telegram` | active | production path through Worker + Queue + Durable Object + Workflow |
-| `cli` | supported in package contract | useful as a local/dev transport |
-
-The broader platform enum already includes `slack` and `discord`, but those are not current channel implementations.
-
-## Canonical Telegram inbound flow
+## Telegram inbound flow
 
 ```mermaid
 sequenceDiagram
     participant TG as Telegram
-    participant W as Worker webhook
-    participant Q as Queue
-    participant DO as ConversationSession DO
-    participant WF as AgentExecutionWorkflow
-    participant A as AgentService
+    participant WH as Webhook (POST /telegram/webhook)
+    participant CA as @chat-adapter/telegram
+    participant Bot as bot.ts handler
+    participant DB as Database
+    participant Agent as AgentService
 
-    TG->>W: webhook update
-    W->>Q: enqueue message
-    Q->>DO: ingestMessage(...)
-    DO->>DO: buffer + debounce
-    DO->>WF: create workflow
-    WF->>A: handleMessage / handleBatchedMessages
-    A-->>WF: final response
-    WF-->>TG: send/edit Telegram messages
-    WF->>DO: completeExecution(...)
+    TG->>WH: Update JSON
+    WH->>CA: verify secret, parse update
+    CA->>Bot: onNewMention / onSubscribedMessage
+    Bot->>Bot: parseTelegramCommand (check /start, /stop, /help)
+    Bot->>DB: findOrCreateUser(from, chatId)
+    DB-->>Bot: userId
+    Bot->>Agent: ensureConversation("telegram", chatId)
+    Agent-->>Bot: conversationId
+    Bot->>Agent: handleMessage(conversationId, text, metadata, sendReply)
+    Agent-->>Bot: response
+    Bot->>CA: thread.post(response.text)
+    CA->>TG: sendMessage via Bot API
 ```
 
-## Telegram channel behavior
+## Telegram outbound flow
 
-The production Telegram path currently adds three important runtime behaviors:
+```mermaid
+sequenceDiagram
+    participant Agent as AgentService
+    participant Bot as bot.ts handler
+    participant CA as @chat-adapter/telegram
+    participant TG as Telegram Bot API
 
-### 1. Debouncing
-Multiple rapid inbound user messages are buffered and grouped before the workflow starts.
+    Agent->>Bot: response / streaming callback
+    Bot->>CA: thread.post(text)
+    CA->>TG: sendMessage
+    Note over CA,TG: Streaming uses editMessageText for progressive updates
+```
 
-### 2. Interrupt forwarding
-If a new user message arrives while processing is underway, the Durable Object forwards it to the active workflow.
+## Identity mapping
 
-### 3. Streaming delivery
-The workflow can post and edit Telegram messages while the agent is still generating output.
+| Layer | Key | Example |
+|---|---|---|
+| Telegram user | `from.id` (numeric) | `123456789` |
+| DB account | `accounts.providerId="telegram"`, `accounts.accountId=from.id` | provider lookup |
+| DB user | `users.id` (UUID) | created on first message |
+| Conversation | `userId + platform + workspaceKey + externalConversationKey` | unique index |
 
-Those behaviors belong in the docs because they materially affect user experience and future channel design.
+For Telegram, `externalConversationKey` = `String(chatId)` and `workspaceKey` = `""`.
 
-## Durable Object session model
+The `findOrCreateUser` function in `apps/api/src/telegram/utils.ts` handles upsert logic: find existing account by `(providerId=telegram, accountId=from.id)`, or create a new user + account in a transaction.
 
-The Telegram ConversationSession Durable Object currently acts as the per-chat coordination point.
+## Webhook and env vars
 
-Its state machine is:
-- `idle`
-- `debouncing`
-- `processing`
+| Variable | Purpose |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Bot API authentication |
+| `TELEGRAM_BOT_USERNAME` | Used to filter commands addressed to this bot in groups |
+| `TELEGRAM_WEBHOOK_SECRET` | Verifies inbound webhook requests |
+| `TELEGRAM_API_BASE_URL` | Override Bot API URL (used for mock channel) |
 
-This is the right abstraction to document because it explains how Amby avoids racing or duplicating agent runs per chat.
+The bot initializes in `apps/api/src/index.ts` via `@chat-adapter/telegram` in `"auto"` mode: polling in dev, webhook when deployed.
 
-## Conversation identity
+Bot commands (`/start`, `/stop`, `/help`) are registered via `setMyCommands` at startup.
 
-The runtime persists conversations independently from channels, but channel input must still provide enough identity to locate or create the conversation row.
+## Mock channel (`apps/mock`)
 
-For Telegram, the external conversation key is effectively the chat identity.
+A Next.js app (port 3100) that emulates the Telegram Bot API for local development without a real Telegram bot.
 
-The future-proof rule should be documented like this:
+### What it provides
 
-> Each channel must provide a stable external conversation key. The application runtime maps that key into a canonical conversation row.
+- Chat UI with message display and input
+- Debug panel showing API request/response logs
+- Configurable mock user identity (userId, chatId, name, username)
+- SSE-based real-time message delivery to the browser
 
-## Native threading vs derived threading
+### Mocked Bot API methods
 
-The thread resolver already accepts platform-native thread context, but current Telegram and CLI flows primarily rely on derived thread routing.
+| Method | Behavior |
+|---|---|
+| `sendMessage` | Stores message, emits SSE to UI |
+| `editMessageText` | Emits edit SSE event |
+| `deleteMessage` | Emits delete SSE event |
+| `sendChatAction` | Emits typing indicator |
+| `setMyCommands` | No-op (returns ok) |
+| `getMe` | Returns static bot identity |
 
-That means the channel design should explicitly state:
-- channels **may** provide native thread identifiers,
-- the runtime **does not require** them for correctness,
-- the runtime can derive thread continuity even when the channel has only a flat conversation stream.
+### How to use
 
-## Recommended channel blueprint
+1. Start mock app: `cd apps/mock && bun dev` (runs on port 3100)
+2. Set env: `TELEGRAM_API_BASE_URL=http://localhost:3100/api/mock-bot`
+3. Start API: `cd apps/api && bun dev`
+4. Open `http://localhost:3100` to chat
 
-Each new channel should follow this contract:
+The mock constructs realistic `TelegramUpdate` JSON payloads (`lib/webhook-builder.ts`) and sends them to the real API webhook, so the full inbound path executes against actual bot handler code.
 
-1. **Ingress adapter**
-   - verify platform authenticity
-   - normalize payload
-   - derive stable external conversation key
-   - enqueue or forward to runtime
+### Key files
 
-2. **Session coordinator**
-   - optional per-conversation debounce or serialization layer
-   - required when the platform can deliver bursts or overlapping replies
+- `apps/mock/app/api/mock-bot/[...path]/route.ts` -- Bot API endpoint router
+- `apps/mock/lib/webhook-builder.ts` -- constructs Telegram Update payloads
 
-3. **Execution entrypoint**
-   - durable workflow or equivalent runtime wrapper
-   - attaches channel delivery methods and progress behavior
+## Adding a new channel
 
-4. **Outbound adapter**
-   - send final response
-   - optionally stream / edit partial response
-   - record delivery metadata when relevant
+To add a new channel (e.g., Slack):
 
-## Near-future channel direction
-
-This page should frame channels as a stable shell around the same runtime core.
-
-The near-future design likely includes:
-- more messaging channels,
-- richer web/native app surfaces,
-- push-capable surfaces for proactive messages,
-- eventual native thread support for platforms that expose it.
-
-## Open questions
-
-1. Should the formal channel contract include a first-class native thread field now, or keep it as optional metadata until a second threaded channel exists?
-2. Should all future channels use the same Queue + session-coordinator + workflow pattern, or should low-volume direct channels be allowed to skip the queue?
-3. Should the CLI still be documented as a real channel page subsection, or treated as a developer harness once Telegram is the primary runtime?
+1. Add the platform value to the `Platform` type in `packages/db/src/schema/conversations.ts` (already present for slack/discord)
+2. Create an adapter package or use an existing chat-adapter library
+3. Implement an inbound webhook handler that parses platform updates and calls `findOrCreateUser` + `AgentService.ensureConversation` + `AgentService.handleMessage`
+4. Implement outbound delivery (send/edit/stream via platform API)
+5. Provide a stable `externalConversationKey` for conversation identity (e.g., Slack channel ID)
+6. Register the webhook route in `apps/api/src/index.ts`
