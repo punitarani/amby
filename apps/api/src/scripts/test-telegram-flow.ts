@@ -15,6 +15,7 @@ import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { and, DbService, DbServiceLive, eq, schema } from "@amby/db"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
+import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { PluginRegistryLive } from "../shared/plugin-registry"
@@ -39,6 +40,7 @@ const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).p
 
 const ServicesLive = Layer.mergeAll(
 	MemoryServiceLive,
+	AutomationServiceLive,
 	TaskSupervisorLive,
 	ModelServiceLive,
 	AuthServiceLive,

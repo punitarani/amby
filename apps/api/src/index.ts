@@ -6,6 +6,7 @@ import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
+import { AutomationServiceLive } from "@amby/plugins"
 import {
 	buildSafeComposioRedirectUrl,
 	ConnectorsService,
@@ -28,6 +29,7 @@ const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).p
 
 const ServicesLive = Layer.mergeAll(
 	MemoryServiceLive,
+	AutomationServiceLive,
 	TaskSupervisorLive,
 	ModelServiceLive,
 	AuthServiceLive,

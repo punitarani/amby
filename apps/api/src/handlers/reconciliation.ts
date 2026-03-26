@@ -2,6 +2,7 @@ import { runScheduledReconciliation, SandboxService } from "@amby/computer"
 import { CoreError } from "@amby/core"
 import { DbService } from "@amby/db"
 import type { WorkerBindings } from "@amby/env/workers"
+import { computeNextCronRun } from "@amby/plugins"
 import { Effect } from "effect"
 import { makeRuntimeForConsumer } from "../queue/runtime"
 import { TelegramSender } from "../telegram"
@@ -23,6 +24,7 @@ export async function handleScheduledReconciliation(env: WorkerBindings): Promis
 							sendTelegram: async (chatId, text) => {
 								await telegram.sendMessage(chatId, text)
 							},
+							computeNextCronRun,
 						}),
 					catch: (e) => {
 						console.error("[ReconciliationCron]", e)

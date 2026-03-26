@@ -1,6 +1,10 @@
 import { CoreError, createPluginRegistry, PluginRegistryService, registerPlugins } from "@amby/core"
+import { DbService } from "@amby/db"
 import { createMemoryPlugin, MemoryService } from "@amby/memory"
 import {
+	AutomationService,
+	adaptAutomationService,
+	computeNextCronRun,
 	createAutomationsPlugin,
 	createBrowserToolsPlugin,
 	createComputerToolsPlugin,
@@ -20,6 +24,8 @@ export const PluginRegistryLive = Layer.effect(
 	Effect.gen(function* () {
 		const memory = yield* MemoryService
 		const connectors = yield* ConnectorsService
+		const automationSvc = yield* AutomationService
+		const { db } = yield* DbService
 
 		const registry = createPluginRegistry()
 
@@ -27,18 +33,15 @@ export const PluginRegistryLive = Layer.effect(
 
 		const notAvailable = new CoreError({ message: "not available" })
 
+		const automationRepo = adaptAutomationService(automationSvc)
+
 		registerPlugins(registry, [
 			createMemoryPlugin(memory),
 			createIntegrationsPlugin({ connectors }),
 			createAutomationsPlugin({
-				automationRepo: {
-					create: () => Effect.fail(notAvailable),
-					findById: () => Effect.void.pipe(Effect.as(undefined)),
-					findByUser: () => Effect.succeed([]),
-					findDue: () => Effect.succeed([]),
-					updateStatus: () => Effect.void,
-					delete: () => Effect.void,
-				},
+				automationRepo,
+				db,
+				computeNextCronRun,
 			}),
 			createBrowserToolsPlugin({
 				browserProvider: {

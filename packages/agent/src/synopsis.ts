@@ -125,5 +125,5 @@ export function synopsisCurrentThreadIfOverflowsAfterSave(
 			conversationId,
 			threadCtx.threadId === threadCtx.defaultThreadId,
 		)
-	}).pipe(Effect.catchAll(() => Effect.void))
+	})
 }

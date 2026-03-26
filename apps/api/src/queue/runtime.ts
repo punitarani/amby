@@ -5,6 +5,7 @@ import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { makeDbServiceFromHyperdrive } from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
 import { MemoryServiceLive } from "@amby/memory"
+import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
 import { Layer, ManagedRuntime } from "effect"
 import { PluginRegistryLive } from "../shared/plugin-registry"
@@ -25,6 +26,7 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 
 	const ServicesLive = Layer.mergeAll(
 		MemoryServiceLive,
+		AutomationServiceLive,
 		ModelServiceLive,
 		AuthServiceLive,
 		TelegramSenderLite,

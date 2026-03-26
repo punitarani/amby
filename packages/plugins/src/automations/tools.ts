@@ -11,10 +11,12 @@ export interface AutomationToolsConfig {
 	readonly userTimezone?: string
 	/** Injected by the composition root (e.g. wrapping cron-parser). */
 	readonly computeNextCronRun?: CronNextRunFn
+	/** Resolved delivery target (e.g. { channel: "telegram", chatId }) for notifications. */
+	readonly deliveryTarget?: Record<string, unknown>
 }
 
 export function createAutomationTools(config: AutomationToolsConfig) {
-	const { automationRepo, userId, userTimezone, computeNextCronRun } = config
+	const { automationRepo, userId, userTimezone, computeNextCronRun, deliveryTarget } = config
 
 	return {
 		schedule_automation: tool({
@@ -47,7 +49,7 @@ export function createAutomationTools(config: AutomationToolsConfig) {
 						scheduleJson: { description, schedule, timezone: tz },
 						nextRunAt,
 						payloadJson: { description, timezone: tz },
-						deliveryTargetJson: {},
+						deliveryTargetJson: deliveryTarget ?? {},
 					}),
 				)
 
