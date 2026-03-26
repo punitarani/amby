@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { Crimson_Pro, Instrument_Serif, Inter } from "next/font/google"
+import { Instrument_Serif, Inter } from "next/font/google"
 import { Providers } from "@/app/providers"
 import { APP_URL } from "@/lib/app-url"
 
@@ -8,13 +8,6 @@ import "./globals.css"
 const inter = Inter({
 	subsets: ["latin"],
 	variable: "--font-inter",
-})
-
-const crimson = Crimson_Pro({
-	subsets: ["latin"],
-	weight: ["300", "400", "500", "600"],
-	style: ["normal", "italic"],
-	variable: "--font-crimson",
 })
 
 const instrument = Instrument_Serif({
@@ -54,8 +47,8 @@ type RootLayoutProps = Readonly<{
 
 export default function RootLayout({ children }: RootLayoutProps) {
 	return (
-		<html className={`${inter.variable} ${crimson.variable} ${instrument.variable}`} lang="en">
-			<body>
+		<html className={`${inter.variable} ${instrument.variable}`} lang="en">
+			<body className="antialiased">
 				<Providers>{children}</Providers>
 			</body>
 		</html>

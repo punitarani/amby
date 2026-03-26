@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 export default function GitHubPage() {
 	return (
 		<MarketingPageShell>
-			<section className="mx-auto max-w-[1440px] px-6 pb-18 pt-8 md:px-8 lg:px-[112px] lg:pb-24 lg:pt-16">
+			<section className="mx-auto max-w-[1480px] px-6 pb-20 pt-8 md:px-8 lg:px-[88px] lg:pb-24 lg:pt-16">
 				<div className="grid gap-10 lg:grid-cols-[minmax(0,0.96fr)_minmax(22rem,1.04fr)] lg:items-center lg:gap-14">
 					<div className="max-w-[38rem]">
 						<SectionLabel className="text-primary">GitHub</SectionLabel>
@@ -103,7 +103,7 @@ export default function GitHubPage() {
 			</section>
 
 			<section className="section-band border-y border-foreground/8 py-20 lg:py-24">
-				<div className="mx-auto max-w-[1440px] px-6 md:px-8 lg:px-[112px]">
+				<div className="mx-auto max-w-[1480px] px-6 md:px-8 lg:px-[88px]">
 					<div className="max-w-3xl">
 						<SectionLabel>Why open source matters here</SectionLabel>
 						<h2 className="headline-wrap mt-5 [font-family:var(--font-instrument)] text-5xl leading-[0.97] tracking-[-0.045em] text-foreground md:text-6xl">
@@ -121,7 +121,7 @@ export default function GitHubPage() {
 				</div>
 			</section>
 
-			<section className="mx-auto max-w-[1440px] px-6 py-20 md:px-8 lg:px-[112px] lg:py-24">
+			<section className="mx-auto max-w-[1480px] px-6 py-20 md:px-8 lg:px-[88px] lg:py-24">
 				<div className="grid gap-6 lg:grid-cols-[minmax(0,1.06fr)_minmax(18rem,0.94fr)]">
 					<div className="marketing-card px-8 py-12 sm:px-10">
 						<SectionLabel className="text-primary">What you'll find</SectionLabel>

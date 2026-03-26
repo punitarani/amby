@@ -46,7 +46,7 @@ export default function TelegramAccessPage() {
 				external: true,
 			}}
 		>
-			<section className="mx-auto max-w-[1440px] px-6 pb-18 pt-10 md:px-8 lg:px-[112px] lg:pb-24 lg:pt-14">
+			<section className="mx-auto max-w-[1480px] px-6 pb-20 pt-10 md:px-8 lg:px-[88px] lg:pb-24 lg:pt-14">
 				<div className="grid gap-6 lg:grid-cols-12 lg:gap-8">
 					<div className="marketing-card p-8 sm:p-10 lg:col-span-6">
 						<SectionLabel className="text-primary">Telegram access</SectionLabel>
@@ -104,7 +104,7 @@ export default function TelegramAccessPage() {
 				</div>
 			</section>
 
-			<section className="mx-auto max-w-[1440px] px-6 pb-22 md:px-8 lg:px-[112px]">
+			<section className="mx-auto max-w-[1480px] px-6 pb-22 md:px-8 lg:px-[88px]">
 				<div className="grid gap-5 lg:grid-cols-[0.62fr,0.38fr]">
 					<div className="marketing-card p-7 sm:p-8">
 						<SectionLabel className="text-primary">What you can do right now</SectionLabel>
@@ -135,7 +135,7 @@ export default function TelegramAccessPage() {
 				</div>
 			</section>
 
-			<section className="mx-auto max-w-[1440px] px-6 pb-24 md:px-8 lg:px-[112px]">
+			<section className="mx-auto max-w-[1480px] px-6 pb-24 md:px-8 lg:px-[88px]">
 				<div className="marketing-card px-8 py-12 sm:px-10 lg:px-14 lg:py-14">
 					<div className="grid gap-6 lg:grid-cols-[0.6fr,0.4fr] lg:items-center">
 						<div>

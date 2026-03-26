@@ -1,18 +1,29 @@
-import { APP_URL } from "@/lib/app-url"
 import { TELEGRAM_BOT_URL } from "@/lib/telegram"
 
 export const marketingLinks = {
-	website: APP_URL,
 	github: "https://github.com/punitarani/amby",
 	telegram: TELEGRAM_BOT_URL,
 } as const
 
 export const marketingBrandLine =
-	"Personal assistant computer. Always on, permission-based, and reviewable."
-
-export const marketingWebsiteLabel = new URL(APP_URL).host
+	"Your personal assistant computer. Always on, permission-based, and reviewable."
 
 export const marketingNavigation = [
+	{
+		label: "Product",
+		href: "/#how-it-works",
+		analyticsPlacement: "header_nav_product",
+	},
+	{
+		label: "Methodology",
+		href: "/#why-amby",
+		analyticsPlacement: "header_nav_methodology",
+	},
+	{
+		label: "Privacy",
+		href: "/#trust",
+		analyticsPlacement: "header_nav_privacy",
+	},
 	{
 		label: "Vision",
 		href: "/vision",
@@ -30,13 +41,13 @@ export type MarketingFooterItem = {
 export const marketingFooterLinks: MarketingFooterItem[] = [
 	{ label: "Vision", href: "/vision", analyticsPlacement: "footer_vision" },
 	{
-		label: "Telegram Bot",
+		label: "Telegram",
 		href: marketingLinks.telegram,
 		external: true,
 		analyticsPlacement: "footer_telegram",
 	},
 	{
-		label: "GitHub Repo",
+		label: "GitHub",
 		href: marketingLinks.github,
 		external: true,
 		analyticsPlacement: "footer_github",

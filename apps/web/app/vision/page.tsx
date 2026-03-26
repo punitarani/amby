@@ -2,37 +2,36 @@ import type { Metadata } from "next"
 
 import { MarketingActionLink } from "@/components/marketing/action-link"
 import { marketingLinks } from "@/components/marketing/constants"
-import { DreamyImageCard } from "@/components/marketing/dreamy-image-card"
 import { MarketingPageShell } from "@/components/marketing/page-shell"
 import { SectionLabel } from "@/components/marketing/section-label"
 import { GitHubIcon, TelegramIcon } from "@/components/marketing/social-icons"
 
 const visionSections = [
 	{
-		body: "Amby is a private assistant computer that lives online and stays on. It keeps one working memory, prepares follow-up and prep in the background, and gives you clean review points before anything important moves.",
+		body: "Amby is not a better prompt box. It is one persistent assistant state that stays with your work across the places you already live.",
 		label: "What Amby is",
-		title: "One assistant state, not a new prompt every time.",
+		title: "A personal assistant computer, not a chat log.",
 	},
 	{
-		body: "AI is already useful for writing, summarizing, and organization. What is still missing is a product that remembers safely, acts with permission, and stays understandable under pressure.",
-		label: "Why now",
-		title: "The gap is continuity, not capability.",
+		body: "It runs once in the cloud, keeps the context there, and becomes reachable from messaging, desktop, email, calendar, and whatever comes next.",
+		label: "Why this shape",
+		title: "Runs once in the cloud. Reaches you everywhere.",
 	},
 	{
-		body: "Amby is for people whose work really does spill across inboxes, calendars, and messages: operators, founders, recruiters, consultants, and small-team professionals who feel the cost when follow-ups slip.",
-		label: "Who it is for",
-		title: "Busy people with real workflow load.",
+		body: "Trust is the product. Memory should be reviewable. Actions should be permission-based. The assistant should stay understandable under pressure.",
+		label: "Trust",
+		title: "Clear memory. Clear permissions. Clear actions.",
 	},
 	{
-		body: "The long-term direction is one persistent assistant you can reach from messaging, email, calendar, desktop, and phone without fragmenting the work. New surfaces should extend the same assistant, not create a new one.",
+		body: "Telegram is the launch surface because it is fast and familiar. Over time, more surfaces should extend the same assistant without creating new silos.",
 		label: "Where it goes next",
-		title: "From prep layer to continuous personal computing.",
+		title: "Messaging first. More surfaces over time.",
 	},
 ] as const
 
 const principleChips = [
 	"Persistent memory",
-	"Review before send",
+	"Background execution",
 	"Permission-based actioning",
 	"Cross-surface continuity",
 ] as const
@@ -41,6 +40,24 @@ const successSignals = [
 	"Meetings are prepped before they start.",
 	"Follow-ups do not depend on memory alone.",
 	"Returning to work does not require re-explaining it.",
+] as const
+
+const roadmapPhases = [
+	{
+		body: "Start with follow-up, meeting prep, reminder queues, and continuity inside the surface people already open all day.",
+		label: "Phase 1",
+		title: "Telegram launch surface",
+	},
+	{
+		body: "Extend to more access points without changing the core model: same assistant state, more ways to reach it.",
+		label: "Phase 2",
+		title: "Cross-surface assistant",
+	},
+	{
+		body: "Long-term, Amby becomes a durable personal computing layer that more agents and devices can plug into with permission.",
+		label: "Phase 3",
+		title: "Ambient personal infrastructure",
+	},
 ] as const
 
 export const metadata: Metadata = {
@@ -58,25 +75,21 @@ export default function VisionPage() {
 			headerAction={{
 				external: true,
 				href: marketingLinks.telegram,
-				label: "Try Telegram Bot",
+				label: "Open Telegram",
 			}}
 		>
-			<section className="mx-auto max-w-[1440px] px-6 pb-18 pt-8 md:px-8 lg:px-[112px] lg:pb-24 lg:pt-16">
-				<div className="grid gap-10 lg:grid-cols-[minmax(0,0.96fr)_minmax(22rem,1.04fr)] lg:items-center lg:gap-14">
-					<div className="max-w-[39rem]">
-						<SectionLabel className="text-primary">Vision</SectionLabel>
-						<h1 className="headline-wrap mt-7 [font-family:var(--font-instrument)] text-[clamp(3.8rem,8vw,6.2rem)] leading-[0.91] tracking-[-0.05em] text-foreground">
-							A personal assistant
-							<br />
-							computer you can
-							<br />
-							actually trust.
+			<section className="mx-auto max-w-[1480px] px-6 pb-20 pt-10 md:px-8 lg:px-[88px] lg:pb-24 lg:pt-20">
+				<div className="grid gap-8 lg:grid-cols-[1.02fr_0.98fr] lg:items-end lg:gap-12">
+					<div className="max-w-[44rem]">
+						<SectionLabel>Vision</SectionLabel>
+						<h1 className="headline-wrap mt-6 font-display text-[clamp(3.35rem,7vw,6.4rem)] leading-[0.89] tracking-[-0.06em] text-foreground">
+							A personal assistant computer you can actually trust.
 						</h1>
-						<p className="mt-7 max-w-2xl text-[1.08rem] leading-8 text-foreground/64">
+						<p className="mt-6 max-w-[42rem] text-[1.04rem] leading-8 text-foreground/68 sm:text-[1.1rem] sm:leading-9">
 							Like having a great assistant who has their own computer: one persistent workspace,
 							clear permissions, and continuity that follows the work instead of restarting per app.
 						</p>
-						<div className="mt-8 flex flex-wrap gap-4">
+						<div className="mt-8 flex flex-wrap gap-3">
 							<MarketingActionLink
 								analyticsPlacement="vision_hero_primary"
 								href={marketingLinks.telegram}
@@ -85,7 +98,7 @@ export default function VisionPage() {
 								target="_blank"
 							>
 								<TelegramIcon className="size-3.5" />
-								Open Telegram Bot
+								Open Telegram
 							</MarketingActionLink>
 							<MarketingActionLink
 								analyticsPlacement="vision_hero_secondary"
@@ -99,56 +112,77 @@ export default function VisionPage() {
 								Review the codebase
 							</MarketingActionLink>
 						</div>
-						<p className="mt-7 max-w-xl text-[0.98rem] leading-7 text-foreground/56">
-							Short-term mission: reduce dropped balls without asking people to adopt a brand new
+						<p className="mt-6 max-w-xl text-[0.97rem] leading-7 text-foreground/54">
+							Short-term mission: reduce dropped balls without asking people to adopt a brand-new
 							inbox or workflow.
 						</p>
 					</div>
 
-					<div className="space-y-5">
-						<div className="marketing-card p-4">
-							<DreamyImageCard
-								alt="Soft system image representing one assistant state across work surfaces"
-								className="aspect-[6/5] rounded-[2rem]"
-								priority
-								sizes="(min-width: 1024px) 40rem, 100vw"
-								src="/images/dreamy-system-square.png"
-							/>
+					<div className="space-y-4">
+						<div className="liquid-glass rounded-[2.2rem] p-6 sm:p-8">
+							<SectionLabel>Core thesis</SectionLabel>
+							<h2 className="headline-wrap mt-4 max-w-[12ch] font-display text-[2.35rem] leading-[0.94] tracking-[-0.04em] text-foreground sm:text-[2.8rem]">
+								Runs once in the cloud. Reaches you from wherever you are.
+							</h2>
+							<p className="mt-4 text-[1rem] leading-7 text-foreground/62">
+								The product only works if new surfaces extend the same assistant instead of creating
+								a fresh chat history and a fresh trust problem.
+							</p>
 						</div>
 						<div className="grid gap-4 sm:grid-cols-2">
 							<div className="marketing-card p-6">
-								<SectionLabel className="text-primary">Current wedge</SectionLabel>
+								<SectionLabel>Current wedge</SectionLabel>
 								<p className="mt-4 text-[1rem] leading-7 text-foreground/62">
-									Start with follow-up, meeting prep, and context recovery. Earn trust with useful
-									work, then expand the surface area.
+									Follow-up, meeting prep, reminders, and context recovery for busy people whose day
+									lives in messaging, email, and calendar.
 								</p>
 							</div>
 							<div className="marketing-card p-6">
-								<SectionLabel className="text-primary">Why it matters</SectionLabel>
+								<SectionLabel>Why it matters</SectionLabel>
 								<p className="mt-4 text-[1rem] leading-7 text-foreground/62">
-									The product only works if it stays legible. Memory, actioning, and approval have
-									to feel calm and reviewable.
+									Continuity is the missing layer. The work should survive the gaps between apps,
+									meetings, and moments of attention.
 								</p>
 							</div>
+						</div>
+						<div className="flex flex-wrap gap-2.5">
+							{principleChips.map((chip) => (
+								<span
+									className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 font-sans text-[0.66rem] tracking-[0.18em] text-foreground/58 uppercase"
+									key={chip}
+								>
+									{chip}
+								</span>
+							))}
 						</div>
 					</div>
 				</div>
 			</section>
 
-			<section className="section-band border-y border-foreground/8 py-20 lg:py-24">
-				<div className="mx-auto max-w-[1440px] px-6 md:px-8 lg:px-[112px]">
-					<div className="grid gap-6 lg:grid-cols-12">
+			<section className="section-band border-y border-white/10 py-20 lg:py-24">
+				<div className="mx-auto max-w-[1480px] px-6 md:px-8 lg:px-[88px]">
+					<div className="max-w-[44rem]">
+						<SectionLabel>Model</SectionLabel>
+						<h2 className="headline-wrap mt-5 font-display text-[clamp(2.85rem,5vw,4.8rem)] leading-[0.92] tracking-[-0.05em] text-foreground">
+							The product thesis needs to stay simple.
+						</h2>
+						<p className="mt-5 text-[1rem] leading-8 text-foreground/64 sm:text-[1.04rem]">
+							Amby should feel like personal infrastructure for follow-through: always on,
+							permission-based, and understandable enough to live with every day.
+						</p>
+					</div>
+					<div className="mt-10 grid gap-4 lg:grid-cols-2">
 						{visionSections.map((section, index) => (
 							<article
 								className={
 									index % 2 === 0
-										? "marketing-card p-7 sm:p-8 lg:col-span-7"
-										: "marketing-card p-7 sm:p-8 lg:col-span-5"
+										? "marketing-card p-7 sm:p-8"
+										: "liquid-glass rounded-[2rem] p-7 sm:p-8"
 								}
 								key={section.label}
 							>
-								<SectionLabel className="text-primary">{section.label}</SectionLabel>
-								<h2 className="headline-wrap mt-5 max-w-[12ch] [font-family:var(--font-instrument)] text-[2.9rem] leading-[0.98] tracking-[-0.04em] text-foreground sm:text-[3.4rem]">
+								<SectionLabel>{section.label}</SectionLabel>
+								<h2 className="headline-wrap mt-5 max-w-[13ch] font-display text-[2.45rem] leading-[0.96] tracking-[-0.04em] text-foreground sm:text-[3rem]">
 									{section.title}
 								</h2>
 								<p className="mt-5 max-w-2xl text-[1rem] leading-8 text-foreground/62">
@@ -160,41 +194,78 @@ export default function VisionPage() {
 				</div>
 			</section>
 
-			<section className="mx-auto max-w-[1440px] px-6 py-20 md:px-8 lg:px-[112px] lg:py-24">
-				<div className="grid gap-6 lg:grid-cols-[minmax(0,1.02fr)_minmax(18rem,0.98fr)]">
+			<section className="mx-auto max-w-[1480px] px-6 py-20 md:px-8 lg:px-[88px] lg:py-24">
+				<div className="grid gap-4 lg:grid-cols-[0.78fr_1.22fr]">
 					<div className="marketing-card px-8 py-12 sm:px-10">
-						<SectionLabel className="text-primary">Operating principle</SectionLabel>
-						<h2 className="headline-wrap mt-5 max-w-[11ch] [font-family:var(--font-instrument)] text-5xl leading-[0.96] tracking-[-0.045em] text-foreground md:text-6xl">
-							Your personal follow-up and prep layer.
+						<SectionLabel>Near-term job</SectionLabel>
+						<h2 className="headline-wrap mt-5 max-w-[11ch] font-display text-[clamp(2.7rem,4.6vw,4.4rem)] leading-[0.94] tracking-[-0.05em] text-foreground">
+							Capture, remember, and act without losing the thread.
 						</h2>
-						<p className="mt-5 max-w-3xl text-[1.03rem] leading-8 text-foreground/62">
-							Amby should feel always on, permission-based, and reviewable. The product earns trust
-							by keeping memory coherent, actions explicit, and cross-surface access simple.
+						<p className="mt-5 max-w-3xl text-[1.02rem] leading-8 text-foreground/62">
+							That is the consumer promise at launch. If Amby can reduce dropped balls in the places
+							people already work, it earns the right to become a broader personal computing layer.
 						</p>
-						<div className="mt-7 flex flex-wrap gap-2.5">
-							{principleChips.map((chip) => (
-								<span
-									className="rounded-full border border-foreground/10 bg-background px-3 py-1.5 font-sans text-[0.63rem] tracking-[0.18em] text-foreground/62 uppercase"
-									key={chip}
-								>
-									{chip}
-								</span>
-							))}
-						</div>
 					</div>
 
-					<div className="marketing-card px-8 py-12 sm:px-10">
-						<SectionLabel className="text-primary">What success looks like</SectionLabel>
-						<div className="mt-5 space-y-4">
-							{successSignals.map((signal) => (
-								<p
-									className="border-t border-foreground/8 pt-4 text-[1rem] leading-7 text-foreground/62"
-									key={signal}
-								>
-									{signal}
-								</p>
-							))}
+					<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+						<div className="liquid-glass rounded-[2rem] px-8 py-12 sm:px-10">
+							<SectionLabel>What success looks like</SectionLabel>
+							<div className="mt-5 space-y-4">
+								{successSignals.map((signal) => (
+									<p
+										className="border-t border-white/10 pt-4 text-[1rem] leading-7 text-foreground/62"
+										key={signal}
+									>
+										{signal}
+									</p>
+								))}
+							</div>
 						</div>
+						{roadmapPhases.map((phase) => (
+							<article className="marketing-card px-8 py-12 sm:px-10" key={phase.label}>
+								<SectionLabel>{phase.label}</SectionLabel>
+								<h3 className="headline-wrap mt-4 font-display text-[2rem] leading-[0.96] tracking-[-0.04em] text-foreground">
+									{phase.title}
+								</h3>
+								<p className="mt-4 text-[0.98rem] leading-7 text-foreground/62">{phase.body}</p>
+							</article>
+						))}
+					</div>
+				</div>
+			</section>
+
+			<section className="mx-auto max-w-[1480px] px-6 pb-20 md:px-8 lg:px-[88px] lg:pb-24">
+				<div className="liquid-glass rounded-[2.4rem] px-6 py-12 text-center sm:px-8 sm:py-14 lg:px-12">
+					<SectionLabel>Start</SectionLabel>
+					<h2 className="headline-wrap mt-5 font-display text-[clamp(2.8rem,5vw,4.7rem)] leading-[0.92] tracking-[-0.05em] text-foreground">
+						Start with the real launch surface.
+					</h2>
+					<p className="mx-auto mt-5 max-w-[38rem] text-[1rem] leading-8 text-foreground/64 sm:text-[1.04rem]">
+						Open Amby on Telegram today. If you want the broader context, the repo shows the product
+						direction and implementation in public.
+					</p>
+					<div className="mt-8 flex flex-wrap justify-center gap-3">
+						<MarketingActionLink
+							analyticsPlacement="vision_hero_primary"
+							href={marketingLinks.telegram}
+							rel="noreferrer"
+							size="large"
+							target="_blank"
+						>
+							<TelegramIcon className="size-3.5" />
+							Open Telegram
+						</MarketingActionLink>
+						<MarketingActionLink
+							analyticsPlacement="vision_hero_secondary"
+							href={marketingLinks.github}
+							rel="noreferrer"
+							size="large"
+							target="_blank"
+							variant="secondary"
+						>
+							<GitHubIcon className="size-3.5" />
+							Review the codebase
+						</MarketingActionLink>
 					</div>
 				</div>
 			</section>
