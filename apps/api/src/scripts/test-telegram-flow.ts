@@ -12,22 +12,12 @@ import { AgentService, ModelServiceLive, makeAgentServiceLive } from "@amby/agen
 import { AuthServiceLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { CoreError, createPluginRegistry, PluginRegistryService, registerPlugins } from "@amby/core"
 import { and, DbService, DbServiceLive, eq, schema } from "@amby/db"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
-import { createMemoryPlugin, MemoryService, MemoryServiceLive } from "@amby/memory"
-import {
-	createAutomationsPlugin,
-	createBrowserToolsPlugin,
-	createComputerToolsPlugin,
-} from "@amby/plugins"
-import {
-	ConnectorsService,
-	ConnectorsServiceLive,
-	createIntegrationsPlugin,
-} from "@amby/plugins/integrations"
-import { createSkillService, createSkillsPlugin } from "@amby/skills"
+import { MemoryServiceLive } from "@amby/memory"
+import { ConnectorsServiceLive } from "@amby/plugins/integrations"
 import { Effect, Layer, ManagedRuntime } from "effect"
+import { PluginRegistryLive } from "../shared/plugin-registry"
 
 // --- Test Configuration ---
 
@@ -41,48 +31,6 @@ const SIMULATED_FROM = {
 }
 
 // --- Runtime Setup (mirrors apps/api/src/index.ts) ---
-
-const PluginRegistryLive = Layer.effect(
-	PluginRegistryService,
-	Effect.gen(function* () {
-		const memory = yield* MemoryService
-		const connectors = yield* ConnectorsService
-		const registry = createPluginRegistry()
-		const skillService = createSkillService({ skillsDir: "./skills" })
-		const notAvailable = new CoreError({ message: "not available" })
-
-		registerPlugins(registry, [
-			createMemoryPlugin(memory),
-			createIntegrationsPlugin({ connectors, userId: "" }),
-			createAutomationsPlugin({
-				automationRepo: {
-					create: () => Effect.fail(notAvailable),
-					findById: () => Effect.void.pipe(Effect.as(undefined)),
-					findByUser: () => Effect.succeed([]),
-					findDue: () => Effect.succeed([]),
-					updateStatus: () => Effect.void,
-					delete: () => Effect.void,
-				},
-			}),
-			createBrowserToolsPlugin({
-				browserProvider: {
-					execute: () => Effect.fail(notAvailable),
-					isAvailable: () => Effect.succeed(false),
-				},
-			}),
-			createComputerToolsPlugin({
-				computerProvider: {
-					startTask: () => Effect.fail(notAvailable),
-					queryTask: () => Effect.fail(notAvailable),
-					isAvailable: () => Effect.succeed(false),
-				},
-			}),
-			createSkillsPlugin(skillService),
-		])
-
-		return registry
-	}),
-)
 
 const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
 	Layer.provideMerge(DbServiceLive),
@@ -402,7 +350,7 @@ async function main() {
 				const { query } = yield* DbService
 
 				if (conversationId) {
-					yield* query((db) => db.delete(schema.traceEvents))
+					// traceEvents cascade-deletes via FK on traces.id
 					yield* query((db) =>
 						db.delete(schema.traces).where(eq(schema.traces.conversationId, conversationId)),
 					)

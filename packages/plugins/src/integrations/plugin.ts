@@ -5,11 +5,10 @@ import { createConnectorManagementTools } from "./tools"
 
 export type IntegrationsPluginConfig = {
 	readonly connectors: Context.Tag.Service<typeof ConnectorsService>
-	readonly userId: string
 }
 
 export function createIntegrationsPlugin(config: IntegrationsPluginConfig): AmbyPlugin {
-	const { connectors, userId } = config
+	const { connectors } = config
 
 	return {
 		id: "integrations",
@@ -17,7 +16,7 @@ export function createIntegrationsPlugin(config: IntegrationsPluginConfig): Amby
 			registry.addToolProvider({
 				id: "integrations:management",
 				group: "integration",
-				async getTools() {
+				async getTools({ userId }) {
 					return createConnectorManagementTools(connectors, userId)
 				},
 			})
@@ -25,7 +24,7 @@ export function createIntegrationsPlugin(config: IntegrationsPluginConfig): Amby
 			registry.addToolProvider({
 				id: "integrations:external",
 				group: "integration",
-				async getTools() {
+				async getTools({ userId }) {
 					if (!connectors.isEnabled()) return {}
 					const tools = await import("effect").then(({ Effect }) =>
 						Effect.runPromise(connectors.getAgentTools(userId)),

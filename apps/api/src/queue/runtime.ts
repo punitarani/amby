@@ -2,66 +2,13 @@ import { ModelServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { CoreError, createPluginRegistry, PluginRegistryService, registerPlugins } from "@amby/core"
 import { makeDbServiceFromHyperdrive } from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
-import { createMemoryPlugin, MemoryService, MemoryServiceLive } from "@amby/memory"
-import {
-	createAutomationsPlugin,
-	createBrowserToolsPlugin,
-	createComputerToolsPlugin,
-} from "@amby/plugins"
-import {
-	ConnectorsService,
-	ConnectorsServiceLive,
-	createIntegrationsPlugin,
-} from "@amby/plugins/integrations"
-import { createSkillService, createSkillsPlugin } from "@amby/skills"
-import { Effect, Layer, ManagedRuntime } from "effect"
+import { MemoryServiceLive } from "@amby/memory"
+import { ConnectorsServiceLive } from "@amby/plugins/integrations"
+import { Layer, ManagedRuntime } from "effect"
+import { PluginRegistryLive } from "../shared/plugin-registry"
 import { TelegramSenderLite } from "../telegram"
-
-const PluginRegistryLive = Layer.effect(
-	PluginRegistryService,
-	Effect.gen(function* () {
-		const memory = yield* MemoryService
-		const connectors = yield* ConnectorsService
-		const registry = createPluginRegistry()
-		const skillService = createSkillService({ skillsDir: "./skills" })
-
-		const notAvailable = new CoreError({ message: "not available" })
-
-		registerPlugins(registry, [
-			createMemoryPlugin(memory),
-			createIntegrationsPlugin({ connectors, userId: "" }),
-			createAutomationsPlugin({
-				automationRepo: {
-					create: () => Effect.fail(notAvailable),
-					findById: () => Effect.void.pipe(Effect.as(undefined)),
-					findByUser: () => Effect.succeed([]),
-					findDue: () => Effect.succeed([]),
-					updateStatus: () => Effect.void,
-					delete: () => Effect.void,
-				},
-			}),
-			createBrowserToolsPlugin({
-				browserProvider: {
-					execute: () => Effect.fail(notAvailable),
-					isAvailable: () => Effect.succeed(false),
-				},
-			}),
-			createComputerToolsPlugin({
-				computerProvider: {
-					startTask: () => Effect.fail(notAvailable),
-					queryTask: () => Effect.fail(notAvailable),
-					isAvailable: () => Effect.succeed(false),
-				},
-			}),
-			createSkillsPlugin(skillService),
-		])
-
-		return registry
-	}),
-)
 
 const makeBaseLive = (bindings: WorkerBindings) => {
 	const connectionString = bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? ""

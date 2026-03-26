@@ -5,11 +5,6 @@ export class CoreError extends Data.TaggedError("CoreError")<{
 	readonly cause?: unknown
 }> {}
 
-export class AgentError extends Data.TaggedError("AgentError")<{
-	readonly message: string
-	readonly cause?: unknown
-}> {}
-
 export class DbError extends Data.TaggedError("DbError")<{
 	readonly message: string
 	readonly cause?: unknown

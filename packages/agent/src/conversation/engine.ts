@@ -171,8 +171,8 @@ export interface ConversationEngineConfig {
 		readonly integrationEnabled: boolean
 		readonly browserEnabled: boolean
 	}
-	/** Tool groups assembled from plugin registry by the composition root. */
-	readonly toolGroups: ToolGroups
+	/** Build tool groups lazily — called after thread resolution so providers receive a real threadId. */
+	readonly buildToolGroups: (threadId: string) => Promise<ToolGroups>
 	/** DB query function for persistence. */
 	readonly query: <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, DbError>
 	/** Direct DB instance for raw inserts. */
@@ -220,6 +220,11 @@ export function handleTurn(
 		const inboundText = requestMessages.map((m) => m.content).join("\n\n")
 		const baseModel = config.getModel()
 		const threadCtx = yield* config.resolveThread(query, conversationId, inboundText, baseModel)
+
+		const toolGroups = yield* Effect.tryPromise({
+			try: () => config.buildToolGroups(threadCtx.threadId),
+			catch: (cause) => new AgentError({ message: "Failed to build tool groups", cause }),
+		})
 
 		yield* config.synopsisPreviousThreadIfDormantSwitch(query, baseModel, conversationId, threadCtx)
 
@@ -300,7 +305,7 @@ export function handleTurn(
 				})
 
 		// Build conversation-level tools
-		const searchMemoriesTool = config.toolGroups["memory-read"]?.search_memories
+		const searchMemoriesTool = toolGroups["memory-read"]?.search_memories
 		const conversationTools: Record<string, unknown> = {
 			...(searchMemoriesTool ? { search_memories: searchMemoriesTool } : {}),
 			send_message: sendMessageTool,
@@ -324,7 +329,7 @@ export function handleTurn(
 						query,
 						config: runConfig,
 						getModel: config.getModel,
-						toolGroups: config.toolGroups,
+						toolGroups: toolGroups,
 						browser: config.browser,
 						supervisor: config.supervisor,
 						rootTrace,

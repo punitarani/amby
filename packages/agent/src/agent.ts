@@ -132,17 +132,16 @@ export const makeAgentServiceLive = (userId: string) =>
 				// CUA tools if enabled
 				const cuaEnabled = env.ENABLE_CUA && sandbox.enabled
 				if (cuaEnabled) {
-					registryTools.cua = createCuaTools(sandbox, userId, "", computer.getSandbox)
+					registryTools.cua = createCuaTools(sandbox, userId, conversationId, computer.getSandbox)
 						.tools as ToolSet
 				}
 
 				return registryTools
 			}
 
-			const makeEngineConfig = async (
+			const makeEngineConfig = (
 				conversationId: string,
-				threadId: string,
-			): Promise<ConversationEngineConfig> => ({
+			): ConversationEngineConfig => ({
 				userId,
 				defaultModelId: models.defaultModelId,
 				highReasoningModelId: HIGH_INTELLIGENCE_MODEL_ID,
@@ -154,7 +153,7 @@ export const makeAgentServiceLive = (userId: string) =>
 					integrationEnabled: pluginRegistry.toolProviders.some((p) => p.group === "integration"),
 					browserEnabled: browserService.enabled,
 				},
-				toolGroups: await buildToolGroups(conversationId, threadId),
+				buildToolGroups: (threadId: string) => buildToolGroups(conversationId, threadId),
 				query,
 				db,
 				pluginRegistry,
@@ -176,13 +175,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				onTextDelta?: (text: string) => void
 				onPart?: (part: StreamPart) => void
 			}) =>
-				Effect.gen(function* () {
-					const config = yield* Effect.tryPromise({
-						try: () => makeEngineConfig(params.conversationId, ""),
-						catch: (cause) => new AgentError({ message: "Failed to build engine config", cause }),
-					})
-					return yield* withTelemetryFlush(handleTurn(config, params))
-				})
+				withTelemetryFlush(handleTurn(makeEngineConfig(params.conversationId), params))
 
 			return {
 				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>

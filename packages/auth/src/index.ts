@@ -22,6 +22,7 @@ export const AuthServiceLive = Layer.effect(
 	Effect.gen(function* () {
 		const env = yield* EnvService
 		const { db } = yield* DbService
+		// Cast needed: betterAuth() returns a branded internal type incompatible with the public Auth interface
 		return createAuth(db, env.BETTER_AUTH_SECRET, env.BETTER_AUTH_URL) as unknown as Auth
 	}),
 )

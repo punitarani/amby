@@ -58,4 +58,5 @@ CREATE TABLE IF NOT EXISTS "automations" (
 -- Step 4: Drop obsolete tables
 -- connector_auth_requests and connector_preferences are still queried by
 -- the integrations service and will be migrated in a follow-up PR.
+-- SAFETY: jobs table expected empty; automations subsystem not yet active.
 DROP TABLE IF EXISTS "jobs";
