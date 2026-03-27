@@ -164,6 +164,7 @@ export interface ConversationEngineConfig {
 	readonly userId: string
 	readonly defaultModelId: string
 	readonly highReasoningModelId: string
+	readonly routerModelId?: string
 	readonly getModel: () => LanguageModel
 	readonly environment: string
 	readonly runtime: {
@@ -267,6 +268,7 @@ export function handleTurn(
 			requestMetadata: metadata,
 			modelId: config.defaultModelId,
 			highReasoningModelId: config.highReasoningModelId,
+			routerModelId: config.routerModelId,
 			userTimezone: prepared.userTimezone,
 			sharedPromptContext: prepared.sharedPromptContext,
 			runtime: {
@@ -600,6 +602,7 @@ function buildRunConfig(params: {
 	requestMetadata?: Record<string, unknown>
 	modelId: string
 	highReasoningModelId: string
+	routerModelId?: string
 	userTimezone: string
 	sharedPromptContext: string
 	runtime: {
@@ -624,6 +627,7 @@ function buildRunConfig(params: {
 			defaultModelId: params.modelId,
 			lowLatencyModelId: params.modelId,
 			highReasoningModelId: params.highReasoningModelId,
+			routerModelId: params.routerModelId,
 			validatorModelId: params.highReasoningModelId,
 		},
 		runtime: params.runtime,

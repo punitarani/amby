@@ -11,7 +11,7 @@ import { ensureConversation } from "./conversation/ensure"
 import { resolveToolGroupsFromRegistry } from "./conversation/tools"
 import { AgentError } from "./errors"
 import type { ToolGroups } from "./execution/registry"
-import { HIGH_INTELLIGENCE_MODEL_ID, ModelService } from "./models"
+import { HIGH_INTELLIGENCE_MODEL_ID, ModelService, ROUTER_MODEL_ID } from "./models"
 import { resolveThread } from "./router"
 import {
 	synopsisCurrentThreadIfOverflowsAfterSave,
@@ -116,6 +116,7 @@ export const makeConversationRuntimeLive = (userId: string) =>
 				userId,
 				defaultModelId: models.defaultModelId,
 				highReasoningModelId: HIGH_INTELLIGENCE_MODEL_ID,
+				routerModelId: ROUTER_MODEL_ID,
 				getModel: models.getModel,
 				environment: env.NODE_ENV,
 				runtime: {

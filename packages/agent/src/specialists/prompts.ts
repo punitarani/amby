@@ -53,6 +53,15 @@ export function buildConversationPrompt(
 		lines.push(
 			"IMPORTANT: Never say you cannot do something if it falls within these capabilities. Always use execute_plan to attempt it.",
 		)
+		lines.push("")
+		lines.push("When to use execute_plan vs answer directly:")
+		lines.push("- Answer directly: simple knowledge questions, casual chat, greetings, opinions")
+		lines.push(
+			"- Use execute_plan: anything requiring web browsing, code execution, file operations, app interactions, research, or memory operations",
+		)
+		lines.push(
+			"Pass the FULL user request to execute_plan — do not summarize, extract, or rephrase it.",
+		)
 	}
 
 	lines.push(`Current date/time: ${formattedNow} (${userTimezone})`)
@@ -74,13 +83,13 @@ export function buildSpecialistPrompt(kind: SpecialistKind, sharedPromptContext:
 		case "planner":
 			return `${common}\n\nChoose the cheapest correct execution strategy. Use parallel only for independent safe work. Use background only for long-running autonomous work.`
 		case "research":
-			return `${common}\n\nFocus on read-only investigation. Prefer facts, evidence, and concise findings.`
+			return `${common}\n\nFocus on read-only investigation using sandbox tools.\n\nYou can: examine files, run read-only shell commands, analyze code, inspect logs, summarize findings.\nYou cannot: modify files (use builder), visit websites (use browser), control the desktop (use computer).\nPrefer facts, evidence, and concise structured findings.`
 		case "builder":
 			return `${common}\n\nFocus on filesystem/code changes. Verify what you changed when practical.`
 		case "integration":
 			return `${common}\n\nUse connected-app tools only for the requested app workflow. Require confirmation before external writes unless the request is explicit.`
 		case "computer":
-			return `${common}\n\nOperate the desktop only when the task truly requires screen-level interaction.`
+			return `${common}\n\nYou control a remote desktop via Computer Use Agent.\n\nYour capabilities:\n- Launch and interact with desktop applications (browsers, editors, terminals, etc.)\n- Use native file dialogs and file pickers\n- Perform cross-application workflows (download from one app, use in another)\n- Monitor system resources (htop, disk usage, process management)\n- Control a real browser with full capabilities (multiple tabs, extensions, dev tools)\n- Access the filesystem via GUI\n\nTake screenshots to verify your actions. Work step by step — screenshot, act, verify.`
 		case "memory":
 			return `${common}\n\nSave or inspect user memory carefully and avoid duplicates.`
 		case "settings":
@@ -88,7 +97,7 @@ export function buildSpecialistPrompt(kind: SpecialistKind, sharedPromptContext:
 		case "validator":
 			return `${common}\n\nReview the execution results critically. Call out conflicts, missing validation, or risky side effects.`
 		case "browser":
-			return `${common}\n\nBrowser execution is handled by the browser service runner.`
+			return `${common}\n\nYou operate a headless browser for single-website interactions.\n\nModes:\n- extract: Read and extract content from a page\n- act: Perform a single action (click, fill, submit)\n- agent: Multi-step interaction within one site (login flows, multi-page navigation)\n\nYou handle: content extraction, form filling, button clicking, single-site navigation, login flows, page screenshots.\nYou do NOT handle: desktop apps, filesystem access, cross-site workflows, native dialogs.`
 		case "conversation":
 			return common
 	}
