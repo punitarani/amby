@@ -66,11 +66,11 @@ erDiagram
 
 | Table | Purpose | Key constraints |
 |---|---|---|
-| `conversations` | Platform-scoped container. One per user + platform + workspace + external key. | unique on `(userId, platform, workspaceKey, externalConversationKey)` |
+| `conversations` | Platform-scoped container. One per user + platform + external key. | unique on `(userId, platform, externalConversationKey)` |
 | `conversation_threads` | Internal routing layer (topic threads). Source: `native`, `reply_chain`, `derived`, `manual`. | Exactly one `isDefault=true` per conversation (partial unique index). Unique `externalThreadKey` per conversation when non-null. |
 | `messages` | User-visible transcript only. Role: `user` or `assistant`. | **Not** the execution log. Indexed by `(conversationId, createdAt)`. |
 
-Platform types: `cli`, `telegram`, `slack`, `discord`.
+Platform types: `telegram`.
 
 ### Execution traces
 

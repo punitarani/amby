@@ -7,10 +7,10 @@ Channels are transport adapters that connect external messaging surfaces to the 
 The platform type is defined in `packages/db/src/schema/conversations.ts`:
 
 ```typescript
-type Platform = "cli" | "telegram" | "slack" | "discord"
+type Platform = "telegram"
 ```
 
-Only **Telegram** is implemented today. `slack` and `discord` are reserved for future use. `cli` exists for local development.
+Only **Telegram** is implemented today. New platform values will be added when additional channels are built.
 
 ## Telegram inbound flow
 
@@ -59,9 +59,9 @@ sequenceDiagram
 | Telegram user | `from.id` (numeric) | `123456789` |
 | DB account | `accounts.providerId="telegram"`, `accounts.accountId=from.id` | provider lookup |
 | DB user | `users.id` (UUID) | created on first message |
-| Conversation | `userId + platform + workspaceKey + externalConversationKey` | unique index |
+| Conversation | `userId + platform + externalConversationKey` | unique index |
 
-For Telegram, `externalConversationKey` = `String(chatId)` and `workspaceKey` = `""`.
+For Telegram, `externalConversationKey` = `String(chatId)`.
 
 The `findOrCreateUser` function in `apps/api/src/telegram/utils.ts` handles upsert logic: find existing account by `(providerId=telegram, accountId=from.id)`, or create a new user + account in a transaction.
 
@@ -118,7 +118,7 @@ The mock constructs realistic `TelegramUpdate` JSON payloads (`lib/webhook-build
 
 To add a new channel (e.g., Slack):
 
-1. Add the platform value to the `Platform` type in `packages/db/src/schema/conversations.ts` (already present for slack/discord)
+1. Add the platform value to the `Platform` type in `packages/db/src/schema/conversations.ts` and `packages/core/src/domain/platform.ts`
 2. Create an adapter package or use an existing chat-adapter library
 3. Implement an inbound webhook handler that parses platform updates and calls `findOrCreateUser` + `AgentService.ensureConversation` + `AgentService.handleMessage`
 4. Implement outbound delivery (send/edit/stream via platform API)

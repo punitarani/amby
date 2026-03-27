@@ -45,7 +45,6 @@ export class AgentService extends Context.Tag("AgentService")<
 		readonly ensureConversation: (
 			platform: Platform,
 			externalConversationKey: string,
-			workspaceKey?: string,
 		) => Effect.Effect<string, AgentError>
 		readonly shutdown: () => Effect.Effect<void, AgentError>
 	}
@@ -203,7 +202,7 @@ export const makeAgentServiceLive = (userId: string) =>
 						onPart,
 					}),
 
-				ensureConversation: (platform, externalConversationKey, workspaceKey) =>
+				ensureConversation: (platform, externalConversationKey) =>
 					query((database) =>
 						database
 							.insert(schema.conversations)
@@ -211,13 +210,11 @@ export const makeAgentServiceLive = (userId: string) =>
 								userId,
 								platform,
 								externalConversationKey,
-								workspaceKey: workspaceKey ?? "",
 							})
 							.onConflictDoUpdate({
 								target: [
 									schema.conversations.userId,
 									schema.conversations.platform,
-									schema.conversations.workspaceKey,
 									schema.conversations.externalConversationKey,
 								],
 								set: { updatedAt: new Date() },
