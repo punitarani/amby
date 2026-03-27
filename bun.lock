@@ -217,8 +217,8 @@
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@amby/skills": "workspace:*",
-        "@composio/core": "0.6.5",
-        "@composio/vercel": "0.6.5",
+        "@composio/core": "0.6.7",
+        "@composio/vercel": "0.6.7",
         "croner": "^9.0.0",
       },
       "peerDependencies": {
@@ -433,6 +433,8 @@
 
     "@browserbasehq/stagehand": ["@browserbasehq/stagehand@2.5.8", "", { "dependencies": { "@anthropic-ai/sdk": "0.39.0", "@browserbasehq/sdk": "^2.4.0", "@google/genai": "^1.22.0", "@modelcontextprotocol/sdk": "^1.17.2", "ai": "^4.3.9", "devtools-protocol": "^0.0.1464554", "fetch-cookie": "^3.1.0", "openai": "^4.87.1", "pino": "^9.6.0", "pino-pretty": "^13.0.0", "playwright": "^1.52.0", "ws": "^8.18.0", "zod-to-json-schema": "^3.23.5" }, "optionalDependencies": { "@ai-sdk/anthropic": "^1.2.6", "@ai-sdk/azure": "^1.3.19", "@ai-sdk/cerebras": "^0.2.6", "@ai-sdk/deepseek": "^0.2.13", "@ai-sdk/google": "^1.2.6", "@ai-sdk/groq": "^1.2.4", "@ai-sdk/mistral": "^1.2.7", "@ai-sdk/openai": "^1.0.14", "@ai-sdk/perplexity": "^1.1.7", "@ai-sdk/togetherai": "^0.2.6", "@ai-sdk/xai": "^1.2.15", "ollama-ai-provider": "^1.2.0" }, "peerDependencies": { "deepmerge": "^4.3.1", "dotenv": "^16.4.5", "zod": ">=3.25.0 <3.25.68" }, "bin": { "evals": "dist/evals/cli.js" } }, "sha512-uKmrYnhAzM37Urt9Zg4yZmWXi/+D+WXdZ0tZHv90AlEXkBbohxsTztrbyMOn6hNknHSgdgOB0taeT0NfPaWGKw=="],
 
+    "@cfworker/json-schema": ["@cfworker/json-schema@4.1.1", "", {}, "sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og=="],
+
     "@chat-adapter/shared": ["@chat-adapter/shared@4.20.2", "", { "dependencies": { "chat": "4.20.2" } }, "sha512-cTtTVHgH/2l9/+ILSExCr/kZwzz2Y8tp7WKRweMRWFOBcXZ0U5ZtviZCCDWBqU/YOBilQUgON8vIP9eo1w0m5w=="],
 
     "@chat-adapter/state-memory": ["@chat-adapter/state-memory@4.20.2", "", { "dependencies": { "chat": "4.20.2" } }, "sha512-4388hp9Wsp87jMgSpkPfN4abflgIgQn5M3MLSDYdU4f20PNKrUkzhb8elkyPmYliF4MInZUau+llc26b7hZsng=="],
@@ -459,13 +461,13 @@
 
     "@colors/colors": ["@colors/colors@1.5.0", "", {}, "sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ=="],
 
-    "@composio/client": ["@composio/client@0.1.0-alpha.61", "", {}, "sha512-VSU20mTtMe0TIPHkBBRdCU4IYSy3886U9O69PURU8+ItLXCD2MjIN0S8VTDL8wpA4zFXamUFnvtwQyow11O2KA=="],
+    "@composio/client": ["@composio/client@0.1.0-alpha.62", "", {}, "sha512-MUBawDp6Uw85m3T0ZtPUSTe9v4SPa0K/Ey3ADZQ/k1NkWsin0oGWhrB/i9hMzndRobijHmBw6xgnFCwjU1B9MQ=="],
 
-    "@composio/core": ["@composio/core@0.6.5", "", { "dependencies": { "@composio/client": "0.1.0-alpha.61", "@composio/json-schema-to-zod": "0.1.20", "@types/json-schema": "^7.0.15", "chalk": "^4.1.2", "openai": "^6.16.0", "pusher-js": "^8.4.0", "semver": "^7.7.2", "zod-to-json-schema": "^3.25.1" }, "peerDependencies": { "zod": "^3.25 || ^4" } }, "sha512-BHaw60KFkza5PDJDGG2ATaYlwaH5D4VhQinRYo5wLmqjiI/mdnzzXRYatsn24WTaakdqNrf3jY5sQ2WIyex6Ow=="],
+    "@composio/core": ["@composio/core@0.6.7", "", { "dependencies": { "@composio/client": "0.1.0-alpha.62", "@composio/json-schema-to-zod": "0.1.20", "@types/json-schema": "^7.0.15", "chalk": "^4.1.2", "openai": "^6.16.0", "pusher-js": "^8.4.0", "semver": "^7.7.2", "zod-to-json-schema": "^3.25.1" }, "peerDependencies": { "zod": "^3.25 || ^4" } }, "sha512-nWveoUAoCSVTVwOEBaBiRAHu2fVy1nMH7kTICgSaFTaYJYYvpiD8tjCClYRBnp1W4QN3HoRDH4dBWCBdCe9D6A=="],
 
     "@composio/json-schema-to-zod": ["@composio/json-schema-to-zod@0.1.20", "", { "peerDependencies": { "zod": ">=3.25.76 <5" } }, "sha512-d4V34itLrUWG/VBh7ciznKcxF/T22MBLHmuEzHoX0zsBOHsUmjYz5qtDh20S2p3FE+HHvLZxpXiv8yfdd4yI+Q=="],
 
-    "@composio/vercel": ["@composio/vercel@0.6.5", "", { "peerDependencies": { "@composio/core": "0.6.5", "ai": "^5.0.0 || ^6.0.0" } }, "sha512-kD+QUdPY03gvJ/dgYrXWfimkoLb/ufzat2bzy6ctN12rE8Ppt/KMCfKwBmM1811OqS2QXXjiDdaktr4XvbUvDg=="],
+    "@composio/vercel": ["@composio/vercel@0.6.7", "", { "peerDependencies": { "@composio/core": "0.6.7", "ai": "^5.0.0 || ^6.0.0" } }, "sha512-uH5XSTBaUESeUuRLwI9OIzkwSBdMgTC+epjkfYKOlp70OvdBkmORe2dZkNhPS0FOGR+I75BkqVx1v9CkjCE/pg=="],
 
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
 

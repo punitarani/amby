@@ -18,8 +18,8 @@
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@amby/skills": "workspace:*",
-		"@composio/core": "0.6.5",
-		"@composio/vercel": "0.6.5",
+		"@composio/core": "0.6.7",
+		"@composio/vercel": "0.6.7",
 		"croner": "^9.0.0"
 	},
 	"peerDependencies": {
