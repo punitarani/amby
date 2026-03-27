@@ -10,17 +10,17 @@
 	--color-panel-soft: var(--panel-soft);
 	--font-sans: var(--font-inter);
 	--font-display: var(--font-instrument);
-	--font-serif: var(--font-crimson);
 }
 
 :root {
-	--background: #f7f3eb;
-	--background-elevated: #fffcf7;
-	--foreground: #252a24;
-	--foreground-muted: rgba(37, 42, 36, 0.62);
-	--primary: #8da08e;
-	--panel: rgba(255, 252, 247, 0.86);
-	--panel-soft: #ece7de;
+	color-scheme: dark;
+	--background: #050506;
+	--background-elevated: #09090b;
+	--foreground: #f4efe7;
+	--foreground-muted: rgba(244, 239, 231, 0.72);
+	--primary: #f4efe7;
+	--panel: rgba(255, 255, 255, 0.04);
+	--panel-soft: rgba(255, 255, 255, 0.08);
 }
 
 * {
@@ -33,17 +33,18 @@ html {
 
 body {
 	background:
-		radial-gradient(circle at top left, rgba(141, 160, 142, 0.14), transparent 24%),
-		radial-gradient(circle at 84% 11%, rgba(255, 255, 255, 0.74), transparent 16%),
-		linear-gradient(180deg, #fffdf9 0%, var(--background) 42%, #f3ede3 100%);
+		radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.09), transparent 24%),
+		radial-gradient(circle at 82% 10%, rgba(255, 255, 255, 0.06), transparent 20%),
+		radial-gradient(circle at 50% 100%, rgba(255, 255, 255, 0.05), transparent 28%),
+		linear-gradient(180deg, #040405 0%, #070709 48%, #040405 100%);
 	color: var(--foreground);
-	font-family: var(--font-crimson), serif;
+	font-family: var(--font-inter), sans-serif;
 	min-width: 320px;
 	text-rendering: optimizeLegibility;
 }
 
 ::selection {
-	background: rgba(141, 160, 142, 0.26);
+	background: rgba(244, 239, 231, 0.2);
 }
 
 a,
@@ -51,16 +52,48 @@ button {
 	cursor: pointer;
 }
 
-.border-subtle {
-	border: 1px solid rgba(37, 42, 36, 0.08);
-}
-
 .glass-panel {
-	background: rgba(252, 248, 242, 0.9);
+	background: rgba(10, 10, 12, 0.68);
 	backdrop-filter: blur(18px);
 	box-shadow:
-		inset 0 0 0 1px rgba(255, 255, 255, 0.6),
-		0 18px 52px -40px rgba(37, 42, 36, 0.34);
+		inset 0 1px 0 rgba(255, 255, 255, 0.12),
+		0 24px 70px -42px rgba(0, 0, 0, 0.9);
+}
+
+.liquid-glass {
+	background: rgba(255, 255, 255, 0.02);
+	background-blend-mode: luminosity;
+	backdrop-filter: blur(18px);
+	-webkit-backdrop-filter: blur(18px);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.12),
+		0 20px 60px -42px rgba(0, 0, 0, 0.92);
+	overflow: hidden;
+	position: relative;
+}
+
+.liquid-glass::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	padding: 1px;
+	background: linear-gradient(
+		180deg,
+		rgba(255, 255, 255, 0.28) 0%,
+		rgba(255, 255, 255, 0.08) 20%,
+		rgba(255, 255, 255, 0) 42%,
+		rgba(255, 255, 255, 0) 62%,
+		rgba(255, 255, 255, 0.08) 82%,
+		rgba(255, 255, 255, 0.22) 100%
+	);
+	-webkit-mask:
+		linear-gradient(#fff 0 0) content-box,
+		linear-gradient(#fff 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	pointer-events: none;
 }
 
 .section-shell {
@@ -71,26 +104,70 @@ button {
 	position: absolute;
 	inset: 0;
 	background-image:
-		linear-gradient(rgba(37, 42, 36, 0.01) 1px, transparent 1px),
-		linear-gradient(90deg, rgba(37, 42, 36, 0.01) 1px, transparent 1px);
+		linear-gradient(rgba(255, 255, 255, 0.01) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(255, 255, 255, 0.01) 1px, transparent 1px);
 	background-position: center;
-	background-size: 144px 144px;
+	background-size: 180px 180px;
 	content: "";
-	mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
+	mask-image: linear-gradient(to bottom, transparent, black 14%, black 86%, transparent);
+	opacity: 0.34;
 	pointer-events: none;
 }
 
 .section-band {
-	background: linear-gradient(180deg, rgba(236, 231, 222, 0.94), rgba(255, 252, 247, 0.92));
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.04));
 }
 
 .marketing-card {
-	border: 1px solid rgba(37, 42, 36, 0.085);
-	background: linear-gradient(180deg, rgba(255, 253, 249, 0.96), rgba(251, 247, 239, 0.95));
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025));
 	border-radius: 2rem;
 	box-shadow:
-		inset 0 0 0 1px rgba(255, 255, 255, 0.58),
-		0 18px 48px -36px rgba(50, 63, 52, 0.28);
+		inset 0 1px 0 rgba(255, 255, 255, 0.12),
+		0 24px 64px -42px rgba(0, 0, 0, 0.9);
+}
+
+.home-shell {
+	background: linear-gradient(180deg, rgba(9, 9, 11, 0.95), rgba(4, 4, 5, 0.98));
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 2rem;
+	box-shadow: 0 44px 120px -72px rgba(0, 0, 0, 0.98);
+	overflow: hidden;
+	position: relative;
+}
+
+.home-shell::before {
+	position: absolute;
+	inset: 0;
+	background-image:
+		linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+	background-size: 164px 164px;
+	content: "";
+	mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
+	opacity: 0.3;
+	pointer-events: none;
+}
+
+.home-shell > * {
+	position: relative;
+	z-index: 1;
+}
+
+.home-panel {
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.03));
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 1.55rem;
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.12),
+		0 20px 50px -40px rgba(0, 0, 0, 0.95);
+}
+
+.home-panel-soft {
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 1.3rem;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .headline-wrap {
@@ -98,10 +175,10 @@ button {
 }
 
 .floating-label {
-	color: rgba(111, 107, 99, 0.82);
+	color: rgba(244, 239, 231, 0.58);
 	font-family: var(--font-inter), sans-serif;
 	font-size: 0.69rem;
-	letter-spacing: 0.23em;
+	letter-spacing: 0.22em;
 	line-height: 1.35;
 	text-transform: uppercase;
 }
@@ -112,8 +189,8 @@ button {
 }
 
 .visual-placeholder {
-	background: linear-gradient(135deg, #f6f3ed 0%, #e8e2d7 100%);
+	background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
 	box-shadow:
-		inset 0 0 0 1px rgba(255, 255, 255, 0.6),
-		0 32px 86px -58px rgba(82, 92, 83, 0.5);
+		inset 0 1px 0 rgba(255, 255, 255, 0.12),
+		0 40px 96px -62px rgba(0, 0, 0, 0.94);
 }

@@ -5,7 +5,7 @@ Marketing website and landing pages for Amby.
 ## Responsibilities
 
 - Serve the public marketing site and landing pages
-- Host the vision statement and Telegram access pages
+- Host the Telegram access page
 - Handle OAuth integration callbacks
 - Provide shared marketing components and layout
 
@@ -20,7 +20,6 @@ Marketing website and landing pages for Amby.
 | Path | Purpose |
 |------|---------|
 | `app/page.tsx` | Home / marketing page |
-| `app/vision/page.tsx` | Vision statement |
 | `app/telegram-access/page.tsx` | Telegram access page |
 | `app/integrations/callback/page.tsx` | OAuth callback handler |
 | `components/marketing/` | Shared marketing components |
