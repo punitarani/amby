@@ -16,6 +16,7 @@ export {
 	sql,
 } from "drizzle-orm"
 export * from "./errors"
+export * from "./repositories"
 export type {
 	ExecutionMode,
 	Platform,

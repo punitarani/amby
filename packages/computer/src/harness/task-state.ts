@@ -1,4 +1,4 @@
-import type { TaskStatus } from "@amby/db"
+import type { TaskStatus } from "@amby/core"
 
 /** Terminal task statuses — no further status transitions except no-ops. */
 export const TERMINAL_STATUSES: TaskStatus[] = [

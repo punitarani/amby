@@ -13,6 +13,21 @@ export type TaskStatus =
 	| "timed_out"
 	| "lost"
 
+/** Terminal task statuses -- no further status transitions except identity no-ops. */
+export const TERMINAL_STATUSES: TaskStatus[] = [
+	"succeeded",
+	"partial",
+	"escalated",
+	"failed",
+	"cancelled",
+	"timed_out",
+	"lost",
+]
+
+export function isTerminalStatus(status: TaskStatus): boolean {
+	return TERMINAL_STATUSES.includes(status)
+}
+
 export type TaskRuntime = "in_process" | "browser" | "sandbox"
 export type TaskProvider = "internal" | "stagehand" | "codex"
 

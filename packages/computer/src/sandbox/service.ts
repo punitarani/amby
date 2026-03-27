@@ -1,4 +1,4 @@
-import { DbService } from "@amby/db"
+import { ComputeStore } from "@amby/core"
 import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Daytona } from "@daytonaio/sdk"
@@ -41,7 +41,7 @@ export const SandboxServiceLive = Layer.effect(
 	SandboxService,
 	Effect.gen(function* () {
 		const env = yield* EnvService
-		const { db } = yield* DbService
+		const computeStore = yield* ComputeStore
 
 		if (!env.DAYTONA_API_KEY) {
 			return {
@@ -66,7 +66,7 @@ export const SandboxServiceLive = Layer.effect(
 				try: async () => {
 					const workflow = env.SANDBOX_WORKFLOW
 					if (!workflow) return
-					await kickOffSandboxProvisionIfNeeded(db, userId, () =>
+					await kickOffSandboxProvisionIfNeeded(computeStore, userId, () =>
 						workflow.create({ id: sandboxWorkflowId(userId), params: { userId } }),
 					)
 				},
@@ -87,7 +87,7 @@ export const SandboxServiceLive = Layer.effect(
 			enabled: true,
 
 			ensure: (userId) =>
-				ensureMainSandbox({ daytona, db, userId, isDev, cache }).pipe(
+				ensureMainSandbox({ daytona, computeStore, userId, isDev, cache }).pipe(
 					Effect.tapError((error) =>
 						error.transient ? kickOffSandboxProvision(userId) : Effect.void,
 					),

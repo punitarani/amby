@@ -2,7 +2,12 @@ import { ModelServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { makeDbServiceFromHyperdrive } from "@amby/db"
+import {
+	ComputeStoreLive,
+	makeDbServiceFromHyperdrive,
+	TaskStoreLive,
+	TraceStoreLive,
+} from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
 import { MemoryServiceLive } from "@amby/memory"
 import { AutomationServiceLive } from "@amby/plugins"
@@ -19,8 +24,13 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		)
 	}
 
+	const DbLive = makeDbServiceFromHyperdrive(connectionString)
+	const StoreLive = Layer.mergeAll(TaskStoreLive, TraceStoreLive, ComputeStoreLive).pipe(
+		Layer.provideMerge(DbLive),
+	)
+
 	const InfraLive = Layer.mergeAll(SandboxServiceLive).pipe(
-		Layer.provideMerge(makeDbServiceFromHyperdrive(connectionString)),
+		Layer.provideMerge(StoreLive),
 		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
 	)
 

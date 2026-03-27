@@ -1,6 +1,6 @@
 import type { BrowserService } from "@amby/browser"
 import type { TaskSupervisor } from "@amby/computer"
-import type { PluginRegistry } from "@amby/core"
+import type { PluginRegistry, TaskStoreService } from "@amby/core"
 import type { Database, DbError } from "@amby/db"
 import { type LanguageModel, stepCountIs, ToolLoopAgent, type ToolSet, tool } from "ai"
 import type { Context } from "effect"
@@ -178,6 +178,8 @@ export interface ConversationEngineConfig {
 	readonly query: <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, DbError>
 	/** Direct DB instance for raw inserts. */
 	readonly db: Database
+	/** Task store port for task persistence. */
+	readonly taskStore: TaskStoreService
 	/** Plugin registry for gathering context contributions. */
 	readonly pluginRegistry?: PluginRegistry
 	/** Prepare conversation context (memory, threads, prompts). */
@@ -343,6 +345,7 @@ export function handleTurn(
 					const summary = await executeRequestPlan({
 						request: composed,
 						query,
+						taskStore: config.taskStore,
 						config: runConfig,
 						getModel: config.getModel,
 						toolGroups: toolGroups,
@@ -392,6 +395,7 @@ export function handleTurn(
 					const result = await Runtime.runPromise(rt)(
 						queryExecution({
 							query,
+							taskStore: config.taskStore,
 							supervisor: config.supervisor,
 							userId,
 							conversationId,

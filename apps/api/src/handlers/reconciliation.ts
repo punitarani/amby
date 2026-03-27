@@ -1,6 +1,5 @@
 import { runScheduledReconciliation, SandboxService } from "@amby/computer"
-import { CoreError } from "@amby/core"
-import { DbService } from "@amby/db"
+import { ComputeStore, CoreError, TaskStore, TraceStore } from "@amby/core"
 import type { WorkerBindings } from "@amby/env/workers"
 import { computeNextCronRun } from "@amby/plugins"
 import { Effect } from "effect"
@@ -12,13 +11,17 @@ export async function handleScheduledReconciliation(env: WorkerBindings): Promis
 	try {
 		await rt.runPromise(
 			Effect.gen(function* () {
-				const { db } = yield* DbService
+				const taskStore = yield* TaskStore
+				const traceStore = yield* TraceStore
+				const computeStore = yield* ComputeStore
 				const sandbox = yield* SandboxService
 				const telegram = yield* TelegramSender
 				yield* Effect.tryPromise({
 					try: () =>
 						runScheduledReconciliation({
-							db,
+							taskStore,
+							traceStore,
+							computeStore,
 							ensureSandbox: (userId) => rt.runPromise(sandbox.ensure(userId)),
 							isDev: env.NODE_ENV !== "production",
 							sendTelegram: async (chatId, text) => {

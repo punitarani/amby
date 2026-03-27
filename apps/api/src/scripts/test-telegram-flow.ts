@@ -12,7 +12,16 @@ import { AgentService, ModelServiceLive, makeAgentServiceLive } from "@amby/agen
 import { AuthServiceLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { and, DbService, DbServiceLive, eq, schema } from "@amby/db"
+import {
+	and,
+	ComputeStoreLive,
+	DbService,
+	DbServiceLive,
+	eq,
+	schema,
+	TaskStoreLive,
+	TraceStoreLive,
+} from "@amby/db"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
 import { AutomationServiceLive } from "@amby/plugins"
@@ -33,8 +42,12 @@ const SIMULATED_FROM = {
 
 // --- Runtime Setup (mirrors apps/api/src/index.ts) ---
 
-const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
+const StoreLive = Layer.mergeAll(TaskStoreLive, TraceStoreLive, ComputeStoreLive).pipe(
 	Layer.provideMerge(DbServiceLive),
+)
+
+const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
+	Layer.provideMerge(StoreLive),
 	Layer.provideMerge(EnvServiceLive),
 )
 

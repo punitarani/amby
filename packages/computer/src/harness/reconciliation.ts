@@ -1,24 +1,26 @@
-import type { Database, DbError, TaskStatus } from "@amby/db"
-import { and, eq, inArray, isNotNull, isNull, lt, lte, ne, or, schema } from "@amby/db"
+import type {
+	AutomationRepository,
+	ComputeStoreService,
+	TaskRecord,
+	TaskStatus,
+	TaskStoreService,
+	TraceStoreService,
+} from "@amby/core"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Effect } from "effect"
 import { STALE_HEARTBEAT_MS, TASK_BASE } from "../config"
 import { CodexProvider } from "./codex-provider"
 import { parseReplyTarget } from "./reply-target"
 import { collectTaskExecutionData } from "./task-execution-data"
-import { isTerminal, TERMINAL_STATUSES } from "./task-state"
-import {
-	completeTaskRecord,
-	isSandboxTask,
-	readSandboxRuntimeData,
-	type TaskQueryFn,
-} from "./task-store"
+import { isTerminal } from "./task-state"
+import { isSandboxTask, readSandboxRuntimeData } from "./task-store"
 import { appendTaskTraceTerminalEvent } from "./task-trace"
 
-type TaskRow = typeof schema.tasks.$inferSelect
-
 export interface ReconciliationContext {
-	db: Database
+	taskStore: TaskStoreService
+	traceStore: TraceStoreService
+	computeStore: ComputeStoreService
+	automationRepo?: AutomationRepository
 	ensureSandbox: (userId: string) => Promise<Sandbox>
 	isDev: boolean
 	/** If set, sends templated completion messages for Telegram tasks. */
@@ -27,13 +29,11 @@ export interface ReconciliationContext {
 	computeNextCronRun?: (schedule: string, tz: string) => Date | undefined
 }
 
-const ACTIVE = ["preparing", "running"] as const
-
 /** Intentionally module-level: CodexProvider is stateless (no mutable fields). */
 const provider = new CodexProvider()
 
 /** Skip probe-driven terminal updates when harness callbacks are still flowing recently. */
-function shouldSkipProbeFinalize(task: TaskRow): boolean {
+function shouldSkipProbeFinalize(task: TaskRecord): boolean {
 	if (task.lastEventSeq <= 0) return false
 	if (!task.lastEventAt) return false
 	const threshold = 2 * STALE_HEARTBEAT_MS
@@ -57,7 +57,7 @@ function parseStatusJson(raw: string | null): {
 	}
 }
 
-function buildNotificationMessage(task: TaskRow): string | null {
+function buildNotificationMessage(task: TaskRecord): string | null {
 	const summary = task.outputSummary?.trim() || "Task finished."
 	const err = task.error?.trim()
 	switch (task.status) {
@@ -75,17 +75,12 @@ function buildNotificationMessage(task: TaskRow): string | null {
 }
 
 /** Force probe a single task (Daytona session + status.json) — used by probe_task tool. */
-export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow): Promise<void> {
-	const { db, ensureSandbox } = ctx
+export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRecord): Promise<void> {
+	const { taskStore, traceStore, ensureSandbox } = ctx
 	if (!isSandboxTask(task)) {
 		return
 	}
 	const sandbox = await ensureSandbox(task.userId)
-	const query: TaskQueryFn = (fn) =>
-		Effect.tryPromise({
-			try: () => fn(db),
-			catch: (error) => error as DbError,
-		})
 	const runtimeData = readSandboxRuntimeData(task)
 
 	if (isTerminal(task.status as TaskStatus)) {
@@ -94,7 +89,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 
 	if (!runtimeData?.sessionId || !runtimeData.commandId) {
 		const completed = await Effect.runPromise(
-			completeTaskRecord(query, {
+			taskStore.completeTask({
 				taskId: task.id,
 				status: "lost",
 				summary: "Task lost because session metadata is missing.",
@@ -102,17 +97,22 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 			}),
 		)
 		if (completed) {
-			await appendTaskTraceTerminalEvent({
-				db,
+			await appendTaskTraceTerminalEvent(traceStore, {
 				traceId: task.traceId,
 				taskId: task.id,
 				status: "lost",
 				reason: "missing_session",
 			}).catch(() => undefined)
-			await insertMaintenanceEvent(db, task.id, {
-				kind: "task.lost",
-				payload: { reason: "missing_session" },
-			})
+			await Effect.runPromise(
+				taskStore
+					.appendEvent({
+						taskId: task.id,
+						source: "maintenance",
+						kind: "maintenance.probe",
+						payload: { kind: "task.lost", reason: "missing_session" },
+					})
+					.pipe(Effect.catchAll(() => Effect.void)),
+			)
 		}
 		return
 	}
@@ -124,20 +124,24 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 		)
 		if (cmd.exitCode != null) {
 			if (shouldSkipProbeFinalize(task)) {
-				const skipNow = new Date()
-				await db
-					.update(schema.tasks)
-					.set({ lastProbeAt: skipNow, updatedAt: skipNow })
-					.where(eq(schema.tasks.id, task.id))
-				await insertMaintenanceEvent(db, task.id, {
-					kind: "maintenance.probe",
-					payload: {
-						exitCode: cmd.exitCode,
-						source: "session_command",
-						skipped: "active_callback_stream",
-						lastEventSeq: task.lastEventSeq,
-					},
-				})
+				await Effect.runPromise(
+					taskStore.touchProbe(task.id).pipe(Effect.catchAll(() => Effect.void)),
+				)
+				await Effect.runPromise(
+					taskStore
+						.appendEvent({
+							taskId: task.id,
+							source: "maintenance",
+							kind: "maintenance.probe",
+							payload: {
+								exitCode: cmd.exitCode,
+								source: "session_command",
+								skipped: "active_callback_stream",
+								lastEventSeq: task.lastEventSeq,
+							},
+						})
+						.pipe(Effect.catchAll(() => Effect.void)),
+				)
 				return
 			}
 
@@ -150,7 +154,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 			const nextStatus: TaskStatus = cmd.exitCode === 0 ? "succeeded" : "failed"
 			if (!isTerminal(task.status as TaskStatus)) {
 				const completed = await Effect.runPromise(
-					completeTaskRecord(query, {
+					taskStore.completeTask({
 						taskId: task.id,
 						status: nextStatus,
 						exitCode: cmd.exitCode,
@@ -166,21 +170,26 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 					}),
 				)
 				if (completed) {
-					await appendTaskTraceTerminalEvent({
-						db,
+					await appendTaskTraceTerminalEvent(traceStore, {
 						traceId: task.traceId,
 						taskId: task.id,
 						status: nextStatus,
 						message: result.summary,
 						exitCode: cmd.exitCode,
 					}).catch(() => undefined)
-					await insertMaintenanceEvent(db, task.id, {
-						kind: "maintenance.probe",
-						payload: {
-							exitCode: cmd.exitCode,
-							source: "session_command",
-						},
-					})
+					await Effect.runPromise(
+						taskStore
+							.appendEvent({
+								taskId: task.id,
+								source: "maintenance",
+								kind: "maintenance.probe",
+								payload: {
+									exitCode: cmd.exitCode,
+									source: "session_command",
+								},
+							})
+							.pipe(Effect.catchAll(() => Effect.void)),
+					)
 				}
 			}
 			return
@@ -204,7 +213,7 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 			const nextStatus: TaskStatus = success ? "succeeded" : "failed"
 			if (!isTerminal(task.status as TaskStatus)) {
 				const completed = await Effect.runPromise(
-					completeTaskRecord(query, {
+					taskStore.completeTask({
 						taskId: task.id,
 						status: nextStatus,
 						exitCode: statusJson.exitCode ?? (success ? 0 : 1),
@@ -220,58 +229,67 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
 					}),
 				)
 				if (completed) {
-					await appendTaskTraceTerminalEvent({
-						db,
+					await appendTaskTraceTerminalEvent(traceStore, {
 						traceId: task.traceId,
 						taskId: task.id,
 						status: nextStatus,
 						message: result.summary,
 						exitCode: statusJson.exitCode ?? (success ? 0 : 1),
 					}).catch(() => undefined)
-					await insertMaintenanceEvent(db, task.id, {
-						kind: "maintenance.probe",
-						payload: {
-							source: "status_json",
-							statusJson,
-						},
-					})
+					await Effect.runPromise(
+						taskStore
+							.appendEvent({
+								taskId: task.id,
+								source: "maintenance",
+								kind: "maintenance.probe",
+								payload: {
+									source: "status_json",
+									statusJson,
+								},
+							})
+							.pipe(Effect.catchAll(() => Effect.void)),
+					)
 				}
 			}
 		} else if (
 			!trustStatusJson &&
 			(statusJson?.status === "succeeded" || statusJson?.status === "failed")
 		) {
-			const naNow = new Date()
-			await db
-				.update(schema.tasks)
-				.set({ lastProbeAt: naNow, updatedAt: naNow })
-				.where(eq(schema.tasks.id, task.id))
-			await insertMaintenanceEvent(db, task.id, {
-				kind: "maintenance.probe",
-				payload: {
-					source: "still_running",
-					statusJsonDebug: statusJson,
-					note: "status_json_not_authoritative_lastEventSeq_gt_0",
-				},
-			})
+			await Effect.runPromise(
+				taskStore.touchProbe(task.id).pipe(Effect.catchAll(() => Effect.void)),
+			)
+			await Effect.runPromise(
+				taskStore
+					.appendEvent({
+						taskId: task.id,
+						source: "maintenance",
+						kind: "maintenance.probe",
+						payload: {
+							source: "still_running",
+							statusJsonDebug: statusJson,
+							note: "status_json_not_authoritative_lastEventSeq_gt_0",
+						},
+					})
+					.pipe(Effect.catchAll(() => Effect.void)),
+			)
 		} else {
-			const elseNow = new Date()
-			await db
-				.update(schema.tasks)
-				.set({ lastProbeAt: elseNow, updatedAt: elseNow })
-				.where(eq(schema.tasks.id, task.id))
-			await insertMaintenanceEvent(db, task.id, {
-				kind: "maintenance.probe",
-				payload: { source: "still_running" },
-			})
+			await Effect.runPromise(
+				taskStore.touchProbe(task.id).pipe(Effect.catchAll(() => Effect.void)),
+			)
+			await Effect.runPromise(
+				taskStore
+					.appendEvent({
+						taskId: task.id,
+						source: "maintenance",
+						kind: "maintenance.probe",
+						payload: { source: "still_running" },
+					})
+					.pipe(Effect.catchAll(() => Effect.void)),
+			)
 		}
 	} catch (e) {
 		console.error(`[probeSingleTask] failed for task ${task.id}:`, e)
-		const errNow = new Date()
-		await db
-			.update(schema.tasks)
-			.set({ lastProbeAt: errNow, updatedAt: errNow })
-			.where(eq(schema.tasks.id, task.id))
+		await Effect.runPromise(taskStore.touchProbe(task.id).pipe(Effect.catchAll(() => Effect.void)))
 	}
 }
 
@@ -279,15 +297,13 @@ export async function probeSingleTask(ctx: ReconciliationContext, task: TaskRow)
  * Cron job: sandbox keep-alive, stale task reconciliation, Telegram notifications.
  */
 export async function runScheduledReconciliation(ctx: ReconciliationContext): Promise<void> {
-	const { db, ensureSandbox, sendTelegram } = ctx
+	const { taskStore, ensureSandbox, sendTelegram } = ctx
 
 	// --- 1) Keep-alive: refresh activity for each user with active tasks ---
-	const activeRows = await db
-		.selectDistinct({ userId: schema.tasks.userId })
-		.from(schema.tasks)
-		.where(and(eq(schema.tasks.runtime, "sandbox"), inArray(schema.tasks.status, [...ACTIVE])))
+	const userIds = await Effect.runPromise(
+		taskStore.findActiveTaskUserIds().pipe(Effect.catchAll(() => Effect.succeed([] as string[]))),
+	)
 
-	const userIds = activeRows.map((r) => r.userId)
 	const sandboxCache = new Map<string, Sandbox>()
 	for (const uid of userIds) {
 		try {
@@ -302,16 +318,11 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 	const staleBefore = new Date(Date.now() - STALE_HEARTBEAT_MS)
 
 	// --- 2) Stale tasks: probe Daytona + status.json ---
-	const staleTasks = await db
-		.select()
-		.from(schema.tasks)
-		.where(
-			and(
-				eq(schema.tasks.runtime, "sandbox"),
-				inArray(schema.tasks.status, [...ACTIVE]),
-				or(isNull(schema.tasks.heartbeatAt), lt(schema.tasks.heartbeatAt, staleBefore)),
-			),
-		)
+	const staleTasks = await Effect.runPromise(
+		taskStore
+			.findStaleSandboxTasks(staleBefore)
+			.pipe(Effect.catchAll(() => Effect.succeed([] as TaskRecord[]))),
+	)
 
 	const ctxWithCache: ReconciliationContext = {
 		...ctx,
@@ -336,19 +347,11 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 	// --- 3) Terminal completion notifications (channel-dispatched) ---
 	if (!sendTelegram) return
 
-	const pending = await db
-		.select()
-		.from(schema.tasks)
-		.where(
-			and(
-				inArray(schema.tasks.status, [...TERMINAL_STATUSES]),
-				isNotNull(schema.tasks.replyTarget),
-				or(
-					isNull(schema.tasks.notifiedStatus),
-					ne(schema.tasks.notifiedStatus, schema.tasks.status),
-				),
-			),
-		)
+	const pending = await Effect.runPromise(
+		taskStore
+			.findPendingNotifications()
+			.pipe(Effect.catchAll(() => Effect.succeed([] as TaskRecord[]))),
+	)
 
 	for (const task of pending) {
 		const target = parseReplyTarget(task.replyTarget)
@@ -367,15 +370,9 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 
 		try {
 			await sendTelegram(chatId, text)
-			const notifyNow = new Date()
-			await db
-				.update(schema.tasks)
-				.set({
-					notifiedStatus: task.status,
-					lastNotificationAt: notifyNow,
-					updatedAt: notifyNow,
-				})
-				.where(eq(schema.tasks.id, task.id))
+			await Effect.runPromise(
+				taskStore.markNotified(task.id, task.status).pipe(Effect.catchAll(() => Effect.void)),
+			)
 		} catch (e) {
 			console.error(`[Reconciliation] Telegram notify failed for task ${task.id}:`, e)
 		}
@@ -386,20 +383,25 @@ export async function runScheduledReconciliation(ctx: ReconciliationContext): Pr
 }
 
 async function dispatchDueAutomations(ctx: ReconciliationContext): Promise<void> {
-	const { db, sendTelegram, computeNextCronRun } = ctx
-	if (!sendTelegram) return
+	const { sendTelegram, computeNextCronRun, automationRepo } = ctx
+	if (!sendTelegram || !automationRepo) return
 
 	const now = new Date()
-	const dueAutomations = await db
-		.select()
-		.from(schema.automations)
-		.where(
-			and(
-				eq(schema.automations.status, "active"),
-				isNotNull(schema.automations.nextRunAt),
-				lte(schema.automations.nextRunAt, now),
+	const dueAutomations = await Effect.runPromise(
+		automationRepo.findDue(now).pipe(
+			Effect.catchAll(() =>
+				Effect.succeed(
+					[] as Array<{
+						id: string
+						kind: string
+						payloadJson?: Record<string, unknown> | null
+						deliveryTargetJson?: Record<string, unknown> | null
+						scheduleJson?: Record<string, unknown> | null
+					}>,
+				),
 			),
-		)
+		),
+	)
 
 	for (const automation of dueAutomations) {
 		try {
@@ -414,10 +416,11 @@ async function dispatchDueAutomations(ctx: ReconciliationContext): Promise<void>
 			await sendTelegram(target.chatId, `Reminder: ${description}`)
 
 			if (automation.kind === "scheduled") {
-				await db
-					.update(schema.automations)
-					.set({ status: "completed", nextRunAt: null, lastRunAt: now, updatedAt: now })
-					.where(eq(schema.automations.id, automation.id))
+				await Effect.runPromise(
+					automationRepo
+						.updateStatus(automation.id, "completed", { lastRunAt: now, nextRunAt: undefined })
+						.pipe(Effect.catchAll(() => Effect.void)),
+				)
 			} else if (automation.kind === "cron") {
 				const schedule = (automation.scheduleJson as { schedule?: string })?.schedule
 				const tz = (automation.scheduleJson as { timezone?: string })?.timezone ?? "UTC"
@@ -425,45 +428,26 @@ async function dispatchDueAutomations(ctx: ReconciliationContext): Promise<void>
 					schedule && computeNextCronRun ? computeNextCronRun(schedule, tz) : undefined
 
 				if (nextRunAt) {
-					await db
-						.update(schema.automations)
-						.set({ lastRunAt: now, nextRunAt, updatedAt: now })
-						.where(eq(schema.automations.id, automation.id))
+					await Effect.runPromise(
+						automationRepo
+							.updateStatus(automation.id, "active", { lastRunAt: now, nextRunAt })
+							.pipe(Effect.catchAll(() => Effect.void)),
+					)
 				} else {
-					await db
-						.update(schema.automations)
-						.set({ status: "failed", lastRunAt: now, updatedAt: now })
-						.where(eq(schema.automations.id, automation.id))
+					await Effect.runPromise(
+						automationRepo
+							.updateStatus(automation.id, "failed", { lastRunAt: now })
+							.pipe(Effect.catchAll(() => Effect.void)),
+					)
 				}
 			}
 		} catch (e) {
 			console.error(`[Reconciliation] automation dispatch failed for ${automation.id}:`, e)
-			await db
-				.update(schema.automations)
-				.set({ status: "failed", updatedAt: new Date() })
-				.where(eq(schema.automations.id, automation.id))
-				.catch(() => {})
+			await Effect.runPromise(
+				automationRepo
+					.updateStatus(automation.id, "failed")
+					.pipe(Effect.catchAll(() => Effect.void)),
+			).catch(() => {})
 		}
 	}
-}
-
-async function insertMaintenanceEvent(
-	db: Database,
-	taskId: string,
-	params: {
-		kind?: "maintenance.probe" | "task.lost"
-		payload: Record<string, unknown>
-	},
-) {
-	const eventId = crypto.randomUUID()
-	const occurredAt = new Date()
-	await db.insert(schema.taskEvents).values({
-		taskId,
-		eventId,
-		source: "maintenance",
-		kind: params.kind ?? "maintenance.probe",
-		seq: null,
-		payload: params.payload,
-		occurredAt,
-	})
 }

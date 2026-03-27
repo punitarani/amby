@@ -15,7 +15,6 @@
 	},
 	"dependencies": {
 		"@amby/core": "workspace:*",
-		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@daytonaio/sdk": "^0.153.0"
 	},

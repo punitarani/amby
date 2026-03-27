@@ -1,5 +1,6 @@
 import type { BrowserService } from "@amby/browser"
-import { appendTaskProgressEvent, type TaskSupervisor } from "@amby/computer"
+import type { TaskSupervisor } from "@amby/computer"
+import type { TaskStoreService } from "@amby/core"
 import type { LanguageModel } from "ai"
 import { Effect } from "effect"
 import { buildTaskTraceMetadata } from "../trace-metadata"
@@ -115,6 +116,7 @@ function buildResponseEnvelope(result: ExecutionTaskResult): ExecutionResponseEn
 async function runTaskWithTrace(params: {
 	task: ExecutionTask
 	query: QueryFn
+	taskStore: TaskStoreService
 	config: AgentRunConfig
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
@@ -153,7 +155,7 @@ async function runTaskWithTrace(params: {
 	)
 
 	if (params.task.runnerKind !== "background_handoff") {
-		await persistTaskCreated(params.query, params.task, {
+		await persistTaskCreated(params.taskStore, params.task, {
 			userId: params.config.request.userId,
 			conversationId: params.config.request.conversationId,
 			threadId: params.config.request.threadId,
@@ -172,7 +174,7 @@ async function runTaskWithTrace(params: {
 							progressSeq += 1
 							try {
 								await Effect.runPromise(
-									appendTaskProgressEvent(params.query, {
+									params.taskStore.appendProgressEvent({
 										taskId: params.task.id,
 										seq: progressSeq,
 										kind: "task.progress",
@@ -248,7 +250,7 @@ async function runTaskWithTrace(params: {
 				}),
 			),
 		)
-		await persistTaskCompleted(params.query, params.task.id, runResult.result)
+		await persistTaskCompleted(params.taskStore, params.task.id, runResult.result)
 		return runResult.result
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error)
@@ -280,7 +282,7 @@ async function runTaskWithTrace(params: {
 			),
 		)
 		if (params.task.runnerKind !== "background_handoff") {
-			await persistTaskCompleted(params.query, params.task.id, failedResult)
+			await persistTaskCompleted(params.taskStore, params.task.id, failedResult)
 		}
 		return failedResult
 	}
@@ -288,6 +290,7 @@ async function runTaskWithTrace(params: {
 
 async function runValidatorIfNeeded(params: {
 	query: QueryFn
+	taskStore: TaskStoreService
 	config: AgentRunConfig
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
@@ -335,6 +338,7 @@ async function runValidatorIfNeeded(params: {
 	return runTaskWithTrace({
 		task: validatorTask,
 		query: params.query,
+		taskStore: params.taskStore,
 		config: params.config,
 		getModel: params.getModel,
 		toolGroups: params.toolGroups,
@@ -347,6 +351,7 @@ async function runValidatorIfNeeded(params: {
 export async function executeRequestPlan(params: {
 	request: string
 	query: QueryFn
+	taskStore: TaskStoreService
 	config: AgentRunConfig
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
@@ -423,6 +428,7 @@ export async function executeRequestPlan(params: {
 							runTaskWithTrace({
 								task,
 								query: params.query,
+								taskStore: params.taskStore,
 								config: params.config,
 								getModel: params.getModel,
 								toolGroups: params.toolGroups,
@@ -436,6 +442,7 @@ export async function executeRequestPlan(params: {
 						await runTaskWithTrace({
 							task: firstRunnable,
 							query: params.query,
+							taskStore: params.taskStore,
 							config: params.config,
 							getModel: params.getModel,
 							toolGroups: params.toolGroups,
@@ -455,6 +462,7 @@ export async function executeRequestPlan(params: {
 	const taskResults = [...completed.values()]
 	const validatorResult = await runValidatorIfNeeded({
 		query: params.query,
+		taskStore: params.taskStore,
 		config: params.config,
 		getModel: params.getModel,
 		toolGroups: params.toolGroups,

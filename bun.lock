@@ -149,7 +149,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@amby/core": "workspace:*",
-        "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@daytonaio/sdk": "^0.153.0",
       },
@@ -170,6 +169,7 @@
       "name": "@amby/db",
       "version": "0.1.0",
       "dependencies": {
+        "@amby/core": "workspace:*",
         "@amby/env": "workspace:*",
         "drizzle-orm": "^0.45.1",
         "postgres": "^3.4.7",

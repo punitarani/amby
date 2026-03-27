@@ -1,5 +1,9 @@
-import type { Database } from "@amby/db"
-import { and, eq, lte, ne, schema } from "@amby/db"
+import type {
+	ComputeInstanceStatus,
+	ComputeStoreService,
+	ComputeVolume,
+	VolumeStatus,
+} from "@amby/core"
 import type { Daytona, Sandbox } from "@daytonaio/sdk"
 import { DaytonaError, DaytonaNotFoundError } from "@daytonaio/sdk"
 import { Effect } from "effect"
@@ -23,7 +27,6 @@ import {
 	waitForSandboxStarted,
 } from "./resolve-sandbox"
 
-type VolumeRow = typeof schema.computeVolumes.$inferSelect
 type DaytonaVolume = Awaited<ReturnType<Daytona["volume"]["get"]>>
 
 const ENV_SETUP_MESSAGE =
@@ -43,22 +46,22 @@ const MOUNTED_HOME_DIRS = [
 	VOLUME_TASK_BASE,
 ]
 
-export function mapVolumeStateToDbStatus(state: string): VolumeRow["status"] {
+export function mapVolumeStateToDbStatus(state: string): VolumeStatus {
 	if (state === "ready") return "ready"
 	if (state === "creating" || state === "pending_create") return "creating"
 	if (state === "deleted" || state === "deleting" || state === "pending_delete") return "deleted"
 	return "error"
 }
 
-function isVolumeReady(status: VolumeRow["status"]): boolean {
+function isVolumeReady(status: VolumeStatus): boolean {
 	return status === "ready"
 }
 
-function isVolumeProvisioning(status: VolumeRow["status"]): boolean {
+function isVolumeProvisioning(status: VolumeStatus): boolean {
 	return status === "creating"
 }
 
-function isVolumeUnavailable(status: VolumeRow["status"]): boolean {
+function isVolumeUnavailable(status: VolumeStatus): boolean {
 	return status === "error" || status === "deleted"
 }
 
@@ -99,46 +102,30 @@ export async function resolveHealthyVolume(daytona: Daytona, name: string): Prom
 }
 
 export async function upsertVolumeRow(
-	db: Database,
+	computeStore: ComputeStoreService,
 	userId: string,
 	externalVolumeId: string,
-	status: VolumeRow["status"],
-): Promise<VolumeRow> {
-	const rows = await db
-		.insert(schema.computeVolumes)
-		.values({
-			userId,
-			externalVolumeId,
-			status,
-		})
-		.onConflictDoUpdate({
-			target: schema.computeVolumes.userId,
-			set: {
-				externalVolumeId,
-				status,
-				updatedAt: new Date(),
-			},
-		})
-		.returning()
-
-	const row = rows[0]
-	if (!row) {
-		throw new Error(`Failed to upsert volume row for user ${userId}.`)
-	}
-	return row
+	status: VolumeStatus,
+): Promise<ComputeVolume> {
+	return await Effect.runPromise(computeStore.upsertVolume(userId, externalVolumeId, status))
 }
 
 export async function ensureVolume(
 	daytona: Daytona,
-	db: Database,
+	computeStore: ComputeStoreService,
 	userId: string,
 	isDev: boolean,
-): Promise<VolumeRow> {
+): Promise<ComputeVolume> {
 	const name = volumeName(userId, isDev)
 
 	try {
 		const volume = await getOrCreateVolume(daytona, name)
-		return await upsertVolumeRow(db, userId, volume.id, mapVolumeStateToDbStatus(volume.state))
+		return await upsertVolumeRow(
+			computeStore,
+			userId,
+			volume.id,
+			mapVolumeStateToDbStatus(volume.state),
+		)
 	} catch (cause) {
 		throw new VolumeError({
 			message: `Failed to ensure volume for user ${userId}: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -149,13 +136,18 @@ export async function ensureVolume(
 
 export async function ensureProvisionableVolume(
 	daytona: Daytona,
-	db: Database,
+	computeStore: ComputeStoreService,
 	userId: string,
 	isDev: boolean,
-): Promise<VolumeRow> {
+): Promise<ComputeVolume> {
 	try {
 		const volume = await resolveHealthyVolume(daytona, volumeName(userId, isDev))
-		return await upsertVolumeRow(db, userId, volume.id, mapVolumeStateToDbStatus(volume.state))
+		return await upsertVolumeRow(
+			computeStore,
+			userId,
+			volume.id,
+			mapVolumeStateToDbStatus(volume.state),
+		)
 	} catch (cause) {
 		throw new VolumeError({
 			message: `Failed to provision volume for user ${userId}: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -166,11 +158,11 @@ export async function ensureProvisionableVolume(
 
 export async function waitForVolumeReady(
 	daytona: Daytona,
-	db: Database,
+	computeStore: ComputeStoreService,
 	userId: string,
 	isDev: boolean,
 	options?: { timeoutMs?: number; pollIntervalMs?: number },
-): Promise<VolumeRow> {
+): Promise<ComputeVolume> {
 	const timeoutMs = options?.timeoutMs ?? DEFAULT_VOLUME_READY_TIMEOUT_MS
 	const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_VOLUME_POLL_INTERVAL_MS
 	const deadline = Date.now() + timeoutMs
@@ -182,13 +174,13 @@ export async function waitForVolumeReady(
 		const status = mapVolumeStateToDbStatus(volume.state)
 
 		if (status === "ready") {
-			return await upsertVolumeRow(db, userId, volume.id, "ready")
+			return await upsertVolumeRow(computeStore, userId, volume.id, "ready")
 		}
 
 		// Only write to DB when the Daytona state changes
 		if (volume.state !== seen.state) {
 			seen.state = volume.state
-			await upsertVolumeRow(db, userId, volume.id, status)
+			await upsertVolumeRow(computeStore, userId, volume.id, status)
 		}
 
 		await wait(pollIntervalMs)
@@ -212,46 +204,26 @@ export async function ensureMountedHomeLayout(sandbox: Sandbox): Promise<void> {
 }
 
 export async function upsertMainSandboxRow(
-	db: Database,
+	computeStore: ComputeStoreService,
 	userId: string,
 	externalInstanceId: string | null,
-	status: SandboxDbStatus,
+	status: ComputeInstanceStatus,
 	volumeId: string,
 	snapshot?: string | null,
 ) {
-	const now = new Date()
-
-	await db
-		.insert(schema.computeInstances)
-		.values({
+	await Effect.runPromise(
+		computeStore.upsertMainInstance({
 			userId,
 			externalInstanceId,
-			volumeId,
-			role: "main",
 			status,
+			volumeId,
 			snapshot,
-			lastActivityAt: now,
-			updatedAt: now,
-		})
-		.onConflictDoUpdate({
-			target: [schema.computeInstances.userId, schema.computeInstances.role],
-			targetWhere: and(
-				eq(schema.computeInstances.role, "main"),
-				ne(schema.computeInstances.status, "deleted"),
-			),
-			set: {
-				externalInstanceId,
-				volumeId,
-				status,
-				snapshot,
-				lastActivityAt: now,
-				updatedAt: now,
-			},
-		})
+		}),
+	)
 }
 
 async function persistMainSandboxFromInstance(
-	db: Database,
+	computeStore: ComputeStoreService,
 	userId: string,
 	sandbox: Sandbox,
 	volumeId: string,
@@ -260,7 +232,7 @@ async function persistMainSandboxFromInstance(
 ) {
 	await sandbox.refreshData()
 	await upsertMainSandboxRow(
-		db,
+		computeStore,
 		userId,
 		sandbox.id,
 		status ?? inferDbStatusFromSandbox(sandbox),
@@ -271,7 +243,7 @@ async function persistMainSandboxFromInstance(
 
 export interface EnsureMainSandboxParams {
 	daytona: Daytona
-	db: Database
+	computeStore: ComputeStoreService
 	userId: string
 	isDev: boolean
 	cache: Map<string, Sandbox>
@@ -281,11 +253,11 @@ export const ensureMainSandbox = (
 	params: EnsureMainSandboxParams,
 ): Effect.Effect<Sandbox, SandboxError> =>
 	Effect.gen(function* () {
-		const { daytona, db, userId, isDev, cache } = params
+		const { daytona, computeStore, userId, isDev, cache } = params
 		const name = sandboxName(userId, isDev)
 
 		const volumeRow = yield* Effect.tryPromise({
-			try: () => ensureVolume(daytona, db, userId, isDev),
+			try: () => ensureVolume(daytona, computeStore, userId, isDev),
 			catch: (cause) =>
 				new SandboxError({
 					message: `Failed to resolve volume record: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -300,7 +272,7 @@ export const ensureMainSandbox = (
 			await ensureMountedHomeLayout(readySandbox)
 			cache.set(userId, readySandbox)
 			await persistMainSandboxFromInstance(
-				db,
+				computeStore,
 				userId,
 				readySandbox,
 				volumeRow.id,
@@ -361,7 +333,7 @@ export const ensureMainSandbox = (
 		yield* Effect.tryPromise({
 			try: () =>
 				upsertMainSandboxRow(
-					db,
+					computeStore,
 					userId,
 					null,
 					isVolumeReady(volumeRow.status) ? "creating" : "volume_creating",
@@ -394,64 +366,33 @@ export const PROVISION_WORKFLOW_THROTTLE_MS = 15_000
  * handles the race via idempotent upserts.
  */
 export async function kickOffSandboxProvisionIfNeeded(
-	db: Database,
+	computeStore: ComputeStoreService,
 	userId: string,
 	createWorkflow: () => Promise<unknown>,
 ): Promise<void> {
 	const now = new Date()
 	const throttleCutoff = new Date(now.getTime() - PROVISION_WORKFLOW_THROTTLE_MS)
 
-	// Atomically claim the provisioning slot by bumping updatedAt.
-	// Succeeds only if the sandbox needs provisioning AND no other request
-	// claimed the slot within the throttle window.
-	const claimed = await db
-		.update(schema.computeInstances)
-		.set({ updatedAt: now })
-		.where(
-			and(
-				eq(schema.computeInstances.userId, userId),
-				eq(schema.computeInstances.role, "main"),
-				ne(schema.computeInstances.status, "deleted"),
-				ne(schema.computeInstances.status, "running"),
-				ne(schema.computeInstances.status, "stopped"),
-				ne(schema.computeInstances.status, "archived"),
-				lte(schema.computeInstances.updatedAt, throttleCutoff),
-			),
-		)
-		.returning({ id: schema.computeInstances.id })
+	const claimed = await Effect.runPromise(computeStore.claimProvisionSlot(userId, throttleCutoff))
 
-	if (claimed.length > 0) {
+	if (claimed) {
 		await createWorkflow()
 		return
 	}
 
 	// No row was updated — either the sandbox is healthy, throttle hasn't
 	// expired, or no row exists yet. Only proceed for first-time users.
-	const exists = await db
-		.select({ id: schema.computeInstances.id })
-		.from(schema.computeInstances)
-		.where(
-			and(
-				eq(schema.computeInstances.userId, userId),
-				eq(schema.computeInstances.role, "main"),
-				ne(schema.computeInstances.status, "deleted"),
-			),
-		)
-		.limit(1)
+	const exists = await Effect.runPromise(computeStore.mainInstanceExists(userId))
 
-	if (exists.length > 0) return
+	if (exists) return
 
 	// First-time user with no sandbox row — start provisioning.
 	await createWorkflow()
 }
 
-export async function getMainVolumeRow(db: Database, userId: string): Promise<VolumeRow | null> {
-	return (
-		(await db
-			.select()
-			.from(schema.computeVolumes)
-			.where(eq(schema.computeVolumes.userId, userId))
-			.limit(1)
-			.then((rows) => rows[0])) ?? null
-	)
+export async function getMainVolumeRow(
+	computeStore: ComputeStoreService,
+	userId: string,
+): Promise<ComputeVolume | null> {
+	return await Effect.runPromise(computeStore.getVolume(userId))
 }

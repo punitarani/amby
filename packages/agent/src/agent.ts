@@ -1,6 +1,6 @@
 import { BrowserService } from "@amby/browser"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
-import { type Platform, type PluginRegistry, PluginRegistryService } from "@amby/core"
+import { type Platform, type PluginRegistry, PluginRegistryService, TaskStore } from "@amby/core"
 import { DbService, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { ToolSet } from "ai"
@@ -92,6 +92,7 @@ export const makeAgentServiceLive = (userId: string) =>
 			const sandbox = yield* SandboxService
 			const browserService = yield* BrowserService
 			const taskSupervisor = yield* TaskSupervisor
+			const taskStore = yield* TaskStore
 			const pluginRegistry = yield* PluginRegistryService
 			const env = yield* EnvService
 			initializeTelemetry({
@@ -154,6 +155,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				buildToolGroups: (threadId: string) => buildToolGroups(conversationId, threadId),
 				query,
 				db,
+				taskStore,
 				pluginRegistry,
 				prepareContext: prepareConversationContext,
 				resolveThread,

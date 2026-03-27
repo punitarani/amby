@@ -16,6 +16,7 @@
 		"db:studio": "drizzle-kit studio"
 	},
 	"dependencies": {
+		"@amby/core": "workspace:*",
 		"@amby/env": "workspace:*",
 		"drizzle-orm": "^0.45.1",
 		"postgres": "^3.4.7"

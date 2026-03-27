@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import type { TaskStatus } from "@amby/db"
+import type { TaskStatus } from "@amby/core"
 import { isLegalTransition, isTerminal, TERMINAL_STATUSES } from "./task-state"
 
 const ALL_STATUSES: TaskStatus[] = [
