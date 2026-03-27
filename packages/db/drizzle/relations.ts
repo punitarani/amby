@@ -4,8 +4,6 @@ import {
 	automations,
 	computeInstances,
 	computeVolumes,
-	connectorAuthRequests,
-	connectorPreferences,
 	conversations,
 	conversationThreads,
 	integrationAccounts,
@@ -35,8 +33,6 @@ export const computeInstancesRelations = relations(computeInstances, ({ one }) =
 export const usersRelations = relations(users, ({ many }) => ({
 	computeInstances: many(computeInstances),
 	computeVolumes: many(computeVolumes),
-	connectorAuthRequests: many(connectorAuthRequests),
-	connectorPreferences: many(connectorPreferences),
 	conversations: many(conversations),
 	automations: many(automations),
 	tasks: many(tasks),
@@ -50,20 +46,6 @@ export const computeVolumesRelations = relations(computeVolumes, ({ one, many })
 	computeInstances: many(computeInstances),
 	user: one(users, {
 		fields: [computeVolumes.userId],
-		references: [users.id],
-	}),
-}))
-
-export const connectorAuthRequestsRelations = relations(connectorAuthRequests, ({ one }) => ({
-	user: one(users, {
-		fields: [connectorAuthRequests.userId],
-		references: [users.id],
-	}),
-}))
-
-export const connectorPreferencesRelations = relations(connectorPreferences, ({ one }) => ({
-	user: one(users, {
-		fields: [connectorPreferences.userId],
 		references: [users.id],
 	}),
 }))

@@ -46,9 +46,8 @@ erDiagram
     %% Memories
     memories ||--o{ memories : "parentId versioning"
 
-    %% Connectors
-    users ||--o{ connector_auth_requests : has
-    users ||--o{ connector_preferences : has
+    %% Integrations
+    users ||--o{ integration_accounts : has
 ```
 
 ## Entity groups
@@ -129,12 +128,11 @@ Runtime: `in_process`, `browser`, `sandbox`. Provider: `internal`, `stagehand`, 
 
 Volume is persistent identity. Sandbox is replaceable execution runtime.
 
-### Connectors
+### Integrations
 
 | Table | Purpose | Key constraints |
 |---|---|---|
-| `connector_auth_requests` | Pending OAuth flows for toolkit integrations. | Unique on `(userId, toolkit)`. TTL via `expiresAt`. |
-| `connector_preferences` | User's preferred connected account per toolkit. | Unique on `(userId, toolkit)`. |
+| `integration_accounts` | Tracks external integration accounts, pending OAuth flows, and preferred-account flags. | Unique on `(userId, provider, externalAccountId)`. Pending auth data stored in `metadataJson`. `isPreferred` flag replaces separate preferences table. |
 
 ## Append-only event log pattern
 

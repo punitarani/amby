@@ -14,6 +14,13 @@ export type IntegrationProvider = "gmail" | "googlecalendar" | "notion" | "slack
 
 export type IntegrationAccountStatus = "active" | "pending" | "expired" | "revoked"
 
+/** Metadata stored on pending auth-request rows (status='pending', no externalAccountId). */
+export type PendingAuthMetadata = {
+	redirectUrl: string
+	callbackUrl: string
+	expiresAt: string
+}
+
 export const integrationAccounts = pgTable(
 	"integration_accounts",
 	{
