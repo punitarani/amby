@@ -7,6 +7,7 @@ import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/worke
 import { MemoryServiceLive } from "@amby/memory"
 import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
+import * as Sentry from "@sentry/cloudflare"
 import { Layer, ManagedRuntime } from "effect"
 import { PluginRegistryLive } from "../shared/plugin-registry"
 import { TelegramSenderLite } from "../telegram"
@@ -31,7 +32,12 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		AuthServiceLive,
 		TelegramSenderLite,
 		ConnectorsServiceLive,
-		makeBrowserServiceFromBindings(bindings),
+		makeBrowserServiceFromBindings(bindings, {
+			logger: (entry) => {
+				const level = (entry.level ?? 1) <= 0 ? "warn" : "info"
+				Sentry.logger[level](`[BrowserService] ${entry.message}`, entry)
+			},
+		}),
 	).pipe(Layer.provideMerge(InfraLive))
 
 	return PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))

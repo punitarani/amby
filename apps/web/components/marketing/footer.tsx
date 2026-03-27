@@ -4,7 +4,7 @@ import { MarketingTrackedLink } from "./tracked-link"
 
 export const MarketingFooter = () => {
 	return (
-		<footer className="border-t border-white/10 py-14 md:py-16">
+		<footer className="border-t border-border-subtle py-14 md:py-16">
 			<div className="mx-auto max-w-[1220px] px-6 md:px-6 lg:px-5">
 				<div className="flex flex-col gap-8 md:flex-row md:items-end md:justify-between">
 					<div className="max-w-[24rem]">
