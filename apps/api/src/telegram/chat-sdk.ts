@@ -1,11 +1,11 @@
 import type { WorkerBindings } from "@amby/env/workers"
 import { createMemoryState } from "@chat-adapter/state-memory"
-import { createTelegramAdapter } from "@chat-adapter/telegram"
 import * as Sentry from "@sentry/cloudflare"
 import { Chat } from "chat"
 import { Effect } from "effect"
 import { makeRuntimeForConsumer } from "../queue/runtime"
 import { setTelegramScope } from "../sentry"
+import { createTelegramAdapter } from "./adapter"
 import type { TelegramFrom } from "./utils"
 import { handleCommand, parseTelegramCommand } from "./utils"
 

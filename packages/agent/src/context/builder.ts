@@ -6,6 +6,7 @@ import {
 	loadThreadArtifacts,
 	loadThreadTail,
 } from "../context"
+import type { ConversationResponseChannel } from "../conversation/response-channel"
 import type { ResolveThreadResult } from "../router"
 import { buildConversationPrompt, type ConversationPromptRuntime } from "../specialists/prompts"
 
@@ -34,8 +35,10 @@ export function prepareConversationContext(params: {
 	threadCtx: ResolveThreadResult
 	memoryContext?: string
 	runtime?: ConversationPromptRuntime
+	responseChannel?: ConversationResponseChannel
 }): Effect.Effect<PreparedConversationContext, import("@amby/db").DbError> {
-	const { query, userId, conversationId, threadCtx, memoryContext, runtime } = params
+	const { query, userId, conversationId, threadCtx, memoryContext, runtime, responseChannel } =
+		params
 
 	return Effect.gen(function* () {
 		const userRows = yield* query((db) =>
@@ -106,7 +109,7 @@ export function prepareConversationContext(params: {
 			.join("\n\n")
 
 		const systemPrompt = [
-			buildConversationPrompt(formattedNow, userTimezone, runtime),
+			buildConversationPrompt(formattedNow, userTimezone, runtime, responseChannel),
 			memoryContext ? `# User Memory Context\n${memoryContext}` : "",
 			extraContext,
 		]

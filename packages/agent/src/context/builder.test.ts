@@ -205,4 +205,22 @@ describe("prepareConversationContext", () => {
 
 		expect(result.systemPrompt).toContain("Amby")
 	})
+
+	it("includes Telegram-specific formatting rules when the response channel is Telegram", async () => {
+		const query = makeStubQuery()
+		const result = await Effect.runPromise(
+			prepareConversationContext({
+				query,
+				userId: "user-1",
+				conversationId: "conv-1",
+				threadCtx: makeThreadCtx(),
+				responseChannel: "telegram",
+			}),
+		)
+
+		expect(result.systemPrompt).toContain("The user is reading this in Telegram.")
+		expect(result.systemPrompt).toContain("valid Telegram HTML")
+		expect(result.systemPrompt).toContain("bullet characters like •")
+		expect(result.systemPrompt).toContain("Do not use Markdown emphasis markers")
+	})
 })

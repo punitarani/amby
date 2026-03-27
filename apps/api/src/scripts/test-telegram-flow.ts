@@ -224,7 +224,9 @@ async function main() {
 		const result = await runtime.runPromise(
 			Effect.gen(function* () {
 				const agent = yield* AgentService
-				return yield* agent.handleMessage(conversationId, "Hello! How are you?")
+				return yield* agent.handleMessage(conversationId, "Hello! How are you?", {
+					telegram: { batched: false, messageCount: 1 },
+				})
 			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
 		)
 
@@ -248,6 +250,9 @@ async function main() {
 				return yield* agent.handleMessage(
 					conversationId,
 					"Remember this: my favorite programming language is TypeScript",
+					{
+						telegram: { batched: false, messageCount: 1 },
+					},
 				)
 			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
 		)
@@ -268,6 +273,9 @@ async function main() {
 				return yield* agent.handleMessage(
 					conversationId,
 					"Investigate what day of the week March 25, 2026 falls on",
+					{
+						telegram: { batched: false, messageCount: 1 },
+					},
 				)
 			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
 		)
@@ -285,7 +293,13 @@ async function main() {
 		const result = await runtime.runPromise(
 			Effect.gen(function* () {
 				const agent = yield* AgentService
-				return yield* agent.handleMessage(conversationId, "Set my timezone to America/Los_Angeles")
+				return yield* agent.handleMessage(
+					conversationId,
+					"Set my timezone to America/Los_Angeles",
+					{
+						telegram: { batched: false, messageCount: 1 },
+					},
+				)
 			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
 		)
 

@@ -1,13 +1,14 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import { AgentService, makeAgentServiceLive } from "@amby/agent"
 import type { WorkerBindings } from "@amby/env/workers"
-import { createTelegramAdapter } from "@chat-adapter/telegram"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
 import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "../queue/runtime"
 import { setTelegramScope } from "../sentry"
+import { createTelegramAdapter } from "../telegram/adapter"
+import { splitTelegramHtmlMessage, telegramHtml } from "../telegram/html-format"
 import type { BufferedMessage, TelegramFrom } from "../telegram/utils"
-import { findOrCreateUser, splitTelegramMessage } from "../telegram/utils"
+import { findOrCreateUser } from "../telegram/utils"
 
 export interface AgentExecutionParams {
 	chatId: number
@@ -83,6 +84,12 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			const input = parentContext
 				? `${parentContext}\n\nUser: ${messageTexts.join("\n\n")}`
 				: messageTexts.join("\n\n")
+			const telegramMetadata = {
+				telegram: {
+					batched: messageTexts.length > 1,
+					messageCount: messageTexts.length,
+				},
+			}
 
 			const response = await step.do(
 				"agent-loop",
@@ -93,41 +100,11 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 				async () => {
 					const typingInterval = setInterval(sendTyping, 4000)
 
-					// Streaming state — post first chunk, then edit every 500ms
-					let streamedText = ""
-					let streamMessageId: string | null = null
-					let isEditing = false
-
-					const flushStream = async () => {
-						if (isEditing || !streamedText) return
-						isEditing = true
-						try {
-							if (!streamMessageId) {
-								const posted = await adapter.postMessage(chatIdStr, streamedText)
-								streamMessageId = posted.id
-							} else {
-								await adapter.editMessage(chatIdStr, streamMessageId, streamedText)
-							}
-						} catch {
-							/* ignore edit errors */
-						} finally {
-							isEditing = false
-						}
-					}
-
-					const streamInterval = !isSubAgent ? setInterval(flushStream, 500) : null
-
-					const onTextDelta = !isSubAgent
-						? (delta: string) => {
-								streamedText += delta
-							}
-						: undefined
-
 					try {
 						const runtime = makeAgentRuntimeForConsumer(this.env)
 						try {
 							const sendReply = (text: string) =>
-								adapter.postMessage(chatIdStr, text).then(() => {})
+								adapter.postMessage(chatIdStr, telegramHtml(text)).then(() => {})
 							const effect = Effect.gen(function* () {
 								const agent = yield* AgentService
 								const convId =
@@ -138,40 +115,19 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 									return yield* agent.handleBatchedMessages(
 										convId,
 										messageTexts,
-										{
-											telegram: { batched: true, messageCount: messageTexts.length },
-										},
+										telegramMetadata,
 										sendReply,
-										onTextDelta,
 									)
 								}
-								return yield* agent.handleMessage(convId, input, undefined, sendReply, onTextDelta)
+								return yield* agent.handleMessage(convId, input, telegramMetadata, sendReply)
 							}).pipe(Effect.provide(makeAgentServiceLive(finalUserId)))
 
 							const result = await runtime.runPromise(effect)
 							const finalText = result.userResponse.text
 
-							// Finalize streamed message
-							if (streamInterval) clearInterval(streamInterval)
-							if (streamMessageId) {
-								if (finalText.trim()) {
-									const [firstChunk, ...moreChunks] = splitTelegramMessage(finalText)
-									if (firstChunk !== undefined) {
-										await adapter
-											.editMessage(chatIdStr, streamMessageId, firstChunk)
-											.catch(() => {})
-										for (const chunk of moreChunks) {
-											await adapter.postMessage(chatIdStr, chunk)
-										}
-									}
-								} else {
-									// Response empty (tool sent replies) — remove streaming message
-									await adapter.deleteMessage(chatIdStr, streamMessageId).catch(() => {})
-								}
-							} else if (!isSubAgent && finalText.trim()) {
-								// No streaming happened — post full response
-								for (const chunk of splitTelegramMessage(finalText)) {
-									await adapter.postMessage(chatIdStr, chunk)
+							if (!isSubAgent && finalText.trim()) {
+								for (const chunk of splitTelegramHtmlMessage(finalText)) {
+									await adapter.postMessage(chatIdStr, telegramHtml(chunk))
 								}
 							}
 
@@ -180,7 +136,6 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 							await runtime.dispose()
 						}
 					} finally {
-						if (streamInterval) clearInterval(streamInterval)
 						clearInterval(typingInterval)
 					}
 				},

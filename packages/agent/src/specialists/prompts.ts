@@ -1,4 +1,5 @@
 import type { SpecialistKind } from "@amby/db"
+import type { ConversationResponseChannel } from "../conversation/response-channel"
 
 export interface ConversationPromptRuntime {
 	sandboxEnabled: boolean
@@ -11,6 +12,7 @@ export function buildConversationPrompt(
 	formattedNow: string,
 	userTimezone: string,
 	runtime?: ConversationPromptRuntime,
+	responseChannel: ConversationResponseChannel = "default",
 ): string {
 	const lines = [
 		"You are Amby, a personal AI assistant with real capabilities.",
@@ -53,6 +55,22 @@ export function buildConversationPrompt(
 		lines.push(
 			"IMPORTANT: Never say you cannot do something if it falls within these capabilities. Always use execute_plan to attempt it.",
 		)
+	}
+
+	if (responseChannel === "telegram") {
+		lines.push("")
+		lines.push("The user is reading this in Telegram.")
+		lines.push("Format Telegram responses as valid Telegram HTML, not Markdown.")
+		lines.push(
+			'Use only Telegram-supported tags when formatting matters: <b>, <i>, <u>, <s>, <code>, <pre>, and <a href="...">.',
+		)
+		lines.push(
+			"For lists, use real bullet characters like • or numbered lines like 1. 2. 3.; do not use Markdown list syntax such as '* ' or '- ' for formatting.",
+		)
+		lines.push(
+			"Do not use Markdown emphasis markers like **bold**, _italic_, or backtick fences in Telegram responses.",
+		)
+		lines.push("Escape literal <, >, and & characters unless they are part of valid Telegram HTML.")
 	}
 
 	lines.push(`Current date/time: ${formattedNow} (${userTimezone})`)

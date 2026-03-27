@@ -46,10 +46,11 @@ sequenceDiagram
     participant CA as @chat-adapter/telegram
     participant TG as Telegram Bot API
 
-    Agent->>Bot: response / streaming callback
-    Bot->>CA: thread.post(text)
+    Agent->>Bot: response / progress callback
+    Bot->>CA: postMessage(text, parse_mode=HTML)
     CA->>TG: sendMessage
-    Note over CA,TG: Streaming uses editMessageText for progressive updates
+    Note over CA,TG: Agent-authored replies are sent as Telegram HTML
+    Note over CA,TG: Streaming is disabled for agent replies so partial HTML never reaches editMessageText
 ```
 
 ## Identity mapping
@@ -77,6 +78,14 @@ The `findOrCreateUser` function in `apps/api/src/telegram/utils.ts` handles upse
 The bot initializes in `apps/api/src/index.ts` via `@chat-adapter/telegram` in `"auto"` mode: polling in dev, webhook when deployed.
 
 Bot commands (`/start`, `/stop`, `/help`) are registered via `setMyCommands` at startup.
+
+## Telegram formatting
+
+- Agent-authored Telegram replies use Telegram Bot API `parse_mode=HTML`.
+- The conversation prompt tells the agent to emit Telegram HTML tags such as `<b>`, `<i>`, `<code>`, `<pre>`, and `<a href="...">` instead of Markdown emphasis markers.
+- Lists should use visible bullet characters like `•` or numbered lines, not Markdown list syntax.
+- Long Telegram HTML replies are split by visible text length while preserving valid tag boundaries.
+- Agent response streaming is intentionally disabled for Telegram because partial HTML edits are not reliable.
 
 ## Mock channel (`apps/mock`)
 

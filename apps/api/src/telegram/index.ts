@@ -1,6 +1,7 @@
 import { EnvService } from "@amby/env"
-import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Context, Effect, Layer } from "effect"
+import { createTelegramAdapter } from "./adapter"
+import { escapeTelegramHtml, telegramHtml } from "./html-format"
 
 // --- TelegramSender Effect Service ---
 
@@ -44,7 +45,7 @@ export const TelegramSenderLive = Layer.effect(
 
 		return {
 			sendMessage: async (chatId: number, text: string) => {
-				await adapter.postMessage(String(chatId), text)
+				await adapter.postMessage(String(chatId), telegramHtml(escapeTelegramHtml(text)))
 			},
 			startTyping: async (chatId: number) => {
 				await adapter.startTyping(String(chatId))
@@ -68,7 +69,7 @@ export const TelegramSenderLite = Layer.effect(
 		})
 		return {
 			sendMessage: async (chatId: number, text: string) => {
-				await adapter.postMessage(String(chatId), text)
+				await adapter.postMessage(String(chatId), telegramHtml(escapeTelegramHtml(text)))
 			},
 			startTyping: async (chatId: number) => {
 				await adapter.startTyping(String(chatId))

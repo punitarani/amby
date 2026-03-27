@@ -16,6 +16,7 @@ import { createTelemetrySettings } from "../telemetry"
 import { normalizeTraceEnvironment } from "../trace-metadata"
 import type { AgentRunConfig, AgentRunResult, StreamPart } from "../types/agent"
 import type { QueryExecutionResult } from "../types/execution"
+import { resolveConversationResponseChannel } from "./response-channel"
 
 const CONVERSATION_MAX_STEPS = 8
 
@@ -254,6 +255,7 @@ export function handleTurn(
 			threadCtx,
 			memoryContext: pluginContext || undefined,
 			runtime: config.runtime,
+			responseChannel: resolveConversationResponseChannel(metadata),
 		})
 
 		const runConfig = buildRunConfig({

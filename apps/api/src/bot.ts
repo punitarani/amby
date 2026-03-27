@@ -1,8 +1,9 @@
 import { AgentService, makeAgentServiceLive } from "@amby/agent"
 import { createMemoryState } from "@chat-adapter/state-memory"
-import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
+import { createTelegramAdapter } from "./telegram/adapter"
+import { telegramHtml } from "./telegram/html-format"
 import {
 	findOrCreateUser,
 	handleCommand,
@@ -50,7 +51,7 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 
 		const effect = Effect.gen(function* () {
 			const userId = yield* findOrCreateUser(from, chatId)
-			const sendReply = (t: string) => thread.post(t).then(() => {})
+			const sendReply = (t: string) => thread.post(telegramHtml(t)).then(() => {})
 
 			const response = yield* Effect.gen(function* () {
 				const agent = yield* AgentService
@@ -59,7 +60,7 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
 
 			if (response.userResponse.text.trim()) {
-				yield* Effect.tryPromise(() => thread.post(response.userResponse.text))
+				yield* Effect.tryPromise(() => thread.post(telegramHtml(response.userResponse.text)))
 			}
 		}).pipe(
 			Effect.catchAllCause((cause) =>
