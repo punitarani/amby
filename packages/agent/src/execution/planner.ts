@@ -620,7 +620,9 @@ export async function buildExecutionPlan(params: {
 
 	try {
 		const { object } = await generateObject({
-			model: params.getModel(params.config.modelPolicy.highReasoningModelId),
+			model: params.getModel(
+				params.config.modelPolicy.routerModelId ?? params.config.modelPolicy.highReasoningModelId,
+			),
 			schema: routerOutputSchema,
 			prompt,
 		})

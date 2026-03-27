@@ -16,6 +16,7 @@ export type AgentRunConfig = {
 		defaultModelId: string
 		lowLatencyModelId?: string
 		highReasoningModelId?: string
+		routerModelId?: string
 		validatorModelId?: string
 	}
 	runtime: {
