@@ -9,7 +9,7 @@
  */
 
 import { ConversationRuntime, ModelServiceLive, makeConversationRuntimeLive } from "@amby/agent"
-import { AuthServiceLive } from "@amby/auth"
+import { AuthLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import {
@@ -56,7 +56,7 @@ const ServicesLive = Layer.mergeAll(
 	AutomationServiceLive,
 	TaskSupervisorLive,
 	ModelServiceLive,
-	AuthServiceLive,
+	AuthLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
 ).pipe(Layer.provideMerge(InfraLive))
@@ -148,6 +148,7 @@ async function main() {
 							userId: newUserId,
 							accountId: String(SIMULATED_FROM.id),
 							providerId: "telegram",
+							telegramChatId: String(SIMULATED_CHAT_ID),
 							metadata,
 						})
 					}),

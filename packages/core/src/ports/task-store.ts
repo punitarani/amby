@@ -209,10 +209,8 @@ export interface TaskStoreService {
 		conversationId: string,
 	) => Effect.Effect<string | null, DbError>
 
-	/** Lookup Telegram account metadata for a user. */
-	readonly getTelegramAccountMetadata: (
-		userId: string,
-	) => Effect.Effect<Record<string, unknown> | null, DbError>
+	/** Lookup Telegram chat id for a user. */
+	readonly getTelegramChatId: (userId: string) => Effect.Effect<number | null, DbError>
 }
 
 export class TaskStore extends Context.Tag("TaskStore")<TaskStore, TaskStoreService>() {}

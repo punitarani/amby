@@ -1,3 +1,4 @@
+import { AuthService, getAuthTrustedOrigins } from "@amby/auth"
 import { type ChatSdkDeps, getOrCreateChat, type TelegramQueueMessage } from "@amby/channels"
 import type { WorkerBindings } from "@amby/env/workers"
 import {
@@ -11,6 +12,7 @@ import {
 import * as Sentry from "@sentry/cloudflare"
 import { Effect, Either } from "effect"
 import { Hono } from "hono"
+import { cors } from "hono/cors"
 import { HTTPException } from "hono/http-exception"
 import { handleExpiredConnectedAccount } from "./composio/expired-account"
 import { ConversationSession as ConversationSessionBase } from "./durable-objects/conversation-session"
@@ -46,6 +48,21 @@ export const VolumeProvisionWorkflow = Sentry.instrumentWorkflowWithSentry(
 type Env = { Bindings: WorkerBindings; Variables: { posthogDistinctId?: string } }
 
 const app = new Hono<Env>()
+
+const resolveAuthCorsOrigin = (origin: string | undefined, env: WorkerBindings) => {
+	const allowedOrigins = new Set(
+		getAuthTrustedOrigins({
+			NODE_ENV: env.NODE_ENV ?? "production",
+			APP_URL: env.APP_URL ?? "https://hiamby.com",
+			API_URL: env.API_URL ?? "https://api.hiamby.com",
+			BETTER_AUTH_URL: env.BETTER_AUTH_URL ?? env.API_URL ?? "https://api.hiamby.com",
+		}),
+	)
+	if (!origin) {
+		return env.APP_URL ?? "https://hiamby.com"
+	}
+	return allowedOrigins.has(origin) ? origin : ""
+}
 
 app.use("*", async (c, next) => {
 	const activeSpan = Sentry.getActiveSpan()
@@ -98,6 +115,30 @@ app.onError(async (err, c) => {
 	}
 
 	return c.json({ error: "Internal Server Error" }, 500)
+})
+
+app.use("/api/auth/*", async (c, next) =>
+	cors({
+		origin: (origin) => resolveAuthCorsOrigin(origin, c.env),
+		allowMethods: ["GET", "POST", "OPTIONS"],
+		allowHeaders: ["Content-Type", "Authorization"],
+		exposeHeaders: ["Set-Cookie"],
+		credentials: true,
+	})(c, next),
+)
+
+app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+	const runtime = makeRuntimeForConsumer(c.env)
+	try {
+		const auth = await runtime.runPromise(
+			Effect.gen(function* () {
+				return yield* AuthService
+			}),
+		)
+		return auth.handler(c.req.raw)
+	} finally {
+		await runtime.dispose()
+	}
 })
 
 app.get("/", (c) => c.json(getHomeResponse()))

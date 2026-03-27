@@ -1,8 +1,9 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import { ConversationRuntime, makeConversationRuntimeLive } from "@amby/agent"
+import { TELEGRAM_RELINK_REQUIRED_MESSAGE } from "@amby/auth"
 import {
 	type BufferedMessage,
-	findOrCreateUser,
+	resolveTelegramUser,
 	splitTelegramMessage,
 	type TelegramFrom,
 } from "@amby/channels"
@@ -65,7 +66,12 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 				userId = await step.do("resolve-user", async () => {
 					const runtime = makeRuntimeForConsumer(this.env)
 					try {
-						return await runtime.runPromise(findOrCreateUser(from, chatId))
+						const resolved = await runtime.runPromise(resolveTelegramUser(from, chatId))
+						if (resolved.status === "blocked") {
+							await adapter.postMessage(chatIdStr, TELEGRAM_RELINK_REQUIRED_MESSAGE).catch(() => {})
+							return null
+						}
+						return resolved.userId
 					} finally {
 						await runtime.dispose()
 					}

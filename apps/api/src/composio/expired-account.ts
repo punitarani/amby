@@ -52,7 +52,7 @@ export const handleExpiredConnectedAccount = (connectedAccountId: string) =>
 						database
 							.select({
 								userId: schema.accounts.userId,
-								metadata: schema.accounts.metadata,
+								telegramChatId: schema.accounts.telegramChatId,
 							})
 							.from(schema.accounts)
 							.where(
@@ -65,7 +65,7 @@ export const handleExpiredConnectedAccount = (connectedAccountId: string) =>
 
 		const chatIdByUserId = new Map<string, number>()
 		for (const account of telegramAccounts) {
-			const chatId = getTelegramChatId(account.metadata)
+			const chatId = getTelegramChatId(account.telegramChatId)
 			if (chatId !== undefined && !chatIdByUserId.has(account.userId)) {
 				chatIdByUserId.set(account.userId, chatId)
 			}

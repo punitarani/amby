@@ -1,6 +1,11 @@
+import {
+	TELEGRAM_RELINK_REQUIRED_MESSAGE,
+	TelegramIdentityService,
+	type TelegramProvisionInput,
+} from "@amby/auth"
 import { kickOffSandboxProvisionIfNeeded, sandboxWorkflowId } from "@amby/computer/sandbox-config"
 import { ComputeStore, CoreError } from "@amby/core"
-import { and, DbService, eq, schema } from "@amby/db"
+import { DbService, schema } from "@amby/db"
 import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
 import {
@@ -59,153 +64,45 @@ export type ParsedTelegramCommand = {
 	rawText: string
 }
 
-/**
- * Best-effort timezone inference from Telegram's language_code.
- * Returns an IANA timezone or undefined if no confident mapping exists.
- * This is a rough heuristic — the system prompt will ask users on UTC to confirm.
- */
-const inferTimezoneFromLanguageCode = (code?: string): string | undefined => {
-	if (!code) return undefined
-	const map: Record<string, string> = {
-		"en-US": "America/New_York",
-		"en-GB": "Europe/London",
-		"en-AU": "Australia/Sydney",
-		de: "Europe/Berlin",
-		fr: "Europe/Paris",
-		es: "Europe/Madrid",
-		it: "Europe/Rome",
-		pt: "America/Sao_Paulo",
-		"pt-BR": "America/Sao_Paulo",
-		ru: "Europe/Moscow",
-		ja: "Asia/Tokyo",
-		ko: "Asia/Seoul",
-		zh: "Asia/Shanghai",
-		"zh-TW": "Asia/Taipei",
-		ar: "Asia/Riyadh",
-		hi: "Asia/Kolkata",
-		tr: "Europe/Istanbul",
-		pl: "Europe/Warsaw",
-		nl: "Europe/Amsterdam",
-		uk: "Europe/Kyiv",
-		th: "Asia/Bangkok",
-		vi: "Asia/Ho_Chi_Minh",
-		id: "Asia/Jakarta",
-		sv: "Europe/Stockholm",
-		da: "Europe/Copenhagen",
-		fi: "Europe/Helsinki",
-		nb: "Europe/Oslo",
-		he: "Asia/Jerusalem",
-	}
-	const base = code.split("-")[0]
-	return map[code] ?? (base ? map[base] : undefined)
-}
-
 // --- Utilities ---
 
-export const buildProfileMetadata = (
-	from: TelegramFrom,
-	chatId: number,
-): Record<string, unknown> => ({
-	chatId,
-	username: from.username ?? null,
-	firstName: from.first_name,
-	lastName: from.last_name ?? null,
-	languageCode: from.language_code ?? null,
-	isPremium: from.is_premium ?? false,
+const toTelegramProvisionInput = (from: TelegramFrom, chatId: number): TelegramProvisionInput => ({
+	source: "bot",
+	chatId: String(chatId),
+	profile: {
+		id: String(from.id),
+		firstName: from.first_name,
+		lastName: from.last_name ?? null,
+		username: from.username ?? null,
+		languageCode: from.language_code ?? null,
+		isPremium: from.is_premium ?? false,
+	},
 })
 
+export const resolveTelegramUser = (from: TelegramFrom, chatId: number) =>
+	Effect.gen(function* () {
+		const telegramIdentity = yield* TelegramIdentityService
+		return yield* Effect.tryPromise(() =>
+			telegramIdentity.provisionFromBot(toTelegramProvisionInput(from, chatId)),
+		)
+	})
+
 /**
- * Find or create a user linked to a Telegram account.
- * Uses a transaction to avoid race conditions on concurrent messages.
- * Stores/updates profile metadata on the account row.
+ * Backward-compatible wrapper that now fails when the user intentionally unlinked Telegram.
+ * Callers that need to handle the blocked state gracefully should use `resolveTelegramUser()`.
  */
 export const findOrCreateUser = (from: TelegramFrom, chatId: number) =>
-	Effect.gen(function* () {
-		const { db } = yield* DbService
-		const metadata = buildProfileMetadata(from, chatId)
-
-		return yield* Effect.tryPromise(async () => {
-			// Fast path: check if the account already exists (no transaction needed)
-			const existing = await db
-				.select({ userId: schema.accounts.userId, id: schema.accounts.id })
-				.from(schema.accounts)
-				.where(
-					and(
-						eq(schema.accounts.providerId, "telegram"),
-						eq(schema.accounts.accountId, String(from.id)),
-					),
-				)
-				.limit(1)
-
-			if (existing[0]) {
-				await db
-					.update(schema.accounts)
-					.set({ metadata, updatedAt: new Date() })
-					.where(eq(schema.accounts.id, existing[0].id))
-				return existing[0].userId
-			}
-
-			// Slow path: create user + account in a transaction
-			try {
-				return await db.transaction(async (tx) => {
-					// Re-check inside transaction to handle concurrent creation
-					const recheck = await tx
-						.select({ userId: schema.accounts.userId })
-						.from(schema.accounts)
-						.where(
-							and(
-								eq(schema.accounts.providerId, "telegram"),
-								eq(schema.accounts.accountId, String(from.id)),
-							),
-						)
-						.limit(1)
-
-					if (recheck[0]) {
-						return recheck[0].userId
-					}
-
-					const userId = crypto.randomUUID()
-					const name = [from.first_name, from.last_name].filter(Boolean).join(" ")
-					const inferredTz = inferTimezoneFromLanguageCode(from.language_code)
-
-					await tx.insert(schema.users).values({
-						id: userId,
-						name,
-						...(inferredTz ? { timezone: inferredTz } : {}),
-					})
-					await tx.insert(schema.accounts).values({
-						id: crypto.randomUUID(),
-						userId,
-						accountId: String(from.id),
-						providerId: "telegram",
-						metadata,
-					})
-
-					return userId
-				})
-			} catch (err) {
-				// Race condition: another request created the account between our check and insert.
-				// Retry the lookup — the account should now exist.
-				const retryLookup = await db
-					.select({ userId: schema.accounts.userId })
-					.from(schema.accounts)
-					.where(
-						and(
-							eq(schema.accounts.providerId, "telegram"),
-							eq(schema.accounts.accountId, String(from.id)),
-						),
+	resolveTelegramUser(from, chatId).pipe(
+		Effect.flatMap((result) =>
+			result.status === "blocked"
+				? Effect.fail(
+						new CoreError({
+							message: TELEGRAM_RELINK_REQUIRED_MESSAGE,
+						}),
 					)
-					.limit(1)
-
-				if (retryLookup[0]) {
-					return retryLookup[0].userId
-				}
-
-				// If still not found, the error is genuine — rethrow
-				throw err
-			}
-		})
-	})
+				: Effect.succeed(result.userId),
+		),
+	)
 
 const ensureTelegramConversation = (userId: string, chatId: number) =>
 	Effect.gen(function* () {
@@ -365,7 +262,12 @@ export const handleCommand = (
 	Effect.gen(function* () {
 		const sender = yield* TelegramSender
 		const env = yield* EnvService
-		const userId = yield* findOrCreateUser(from, chatId)
+		const resolvedUser = yield* resolveTelegramUser(from, chatId)
+		if (resolvedUser.status === "blocked") {
+			yield* Effect.tryPromise(() => sender.sendMessage(chatId, TELEGRAM_RELINK_REQUIRED_MESSAGE))
+			return
+		}
+		const userId = resolvedUser.userId
 		const posthog = getPostHogClient(env.POSTHOG_KEY, env.POSTHOG_HOST)
 
 		switch (command.command) {

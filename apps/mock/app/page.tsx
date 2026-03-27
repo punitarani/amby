@@ -4,6 +4,7 @@ import { PanelRightClose, PanelRightOpen } from "lucide-react"
 import { useState } from "react"
 import { ChatContainer } from "../components/chat-container"
 import { DebugPanel } from "../components/debug-panel"
+import { TelegramAuthPanel } from "../components/telegram-auth-panel"
 import { UserConfigPanel, useUserConfig } from "../components/user-config"
 
 export default function Home() {
@@ -32,6 +33,7 @@ export default function Home() {
 					onReset={resetConfig}
 					onClear={handleClear}
 				/>
+				<TelegramAuthPanel user={config} />
 				<ChatContainer user={config} />
 			</div>
 

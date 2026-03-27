@@ -30,6 +30,25 @@ const EnvConfig = Config.all({
 		Config.withDefault(Redacted.make("")),
 	),
 	TELEGRAM_API_BASE_URL: Config.string("TELEGRAM_API_BASE_URL").pipe(Config.option),
+	TELEGRAM_LOGIN_WIDGET_ENABLED: Config.boolean("TELEGRAM_LOGIN_WIDGET_ENABLED").pipe(
+		Config.withDefault(true),
+	),
+	TELEGRAM_MINI_APP_ENABLED: Config.boolean("TELEGRAM_MINI_APP_ENABLED").pipe(
+		Config.withDefault(false),
+	),
+	TELEGRAM_OIDC_CLIENT_ID: Config.string("TELEGRAM_OIDC_CLIENT_ID").pipe(Config.withDefault("")),
+	TELEGRAM_OIDC_CLIENT_SECRET: Config.redacted("TELEGRAM_OIDC_CLIENT_SECRET").pipe(
+		Config.withDefault(Redacted.make("")),
+	),
+	TELEGRAM_OIDC_REQUEST_PHONE: Config.boolean("TELEGRAM_OIDC_REQUEST_PHONE").pipe(
+		Config.withDefault(false),
+	),
+	TELEGRAM_OIDC_REQUEST_BOT_ACCESS: Config.boolean("TELEGRAM_OIDC_REQUEST_BOT_ACCESS").pipe(
+		Config.withDefault(false),
+	),
+	TELEGRAM_MAX_AUTH_AGE_SECONDS: Config.integer("TELEGRAM_MAX_AUTH_AGE_SECONDS").pipe(
+		Config.withDefault(86400),
+	),
 	COMPOSIO_API_KEY: Config.redacted("COMPOSIO_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 	COMPOSIO_WEBHOOK_SECRET: Config.redacted("COMPOSIO_WEBHOOK_SECRET").pipe(
 		Config.withDefault(Redacted.make("")),
@@ -52,7 +71,7 @@ const EnvConfig = Config.all({
 	DATABASE_URL: Config.string("DATABASE_URL"),
 	BETTER_AUTH_SECRET: Config.redacted("BETTER_AUTH_SECRET"),
 	BETTER_AUTH_URL: Config.string("BETTER_AUTH_URL").pipe(
-		Config.withDefault("http://localhost:3000"),
+		Config.withDefault("http://localhost:3001"),
 	),
 	ENABLE_CUA: Config.boolean("ENABLE_CUA").pipe(Config.withDefault(false)),
 	BRAINTRUST_API_KEY: Config.string("BRAINTRUST_API_KEY").pipe(Config.withDefault("")),
@@ -81,6 +100,13 @@ export const EnvServiceLive = Layer.effect(
 			TELEGRAM_BOT_USERNAME: raw.TELEGRAM_BOT_USERNAME,
 			TELEGRAM_WEBHOOK_SECRET: Redacted.value(raw.TELEGRAM_WEBHOOK_SECRET),
 			TELEGRAM_API_BASE_URL: Option.getOrUndefined(raw.TELEGRAM_API_BASE_URL),
+			TELEGRAM_LOGIN_WIDGET_ENABLED: raw.TELEGRAM_LOGIN_WIDGET_ENABLED,
+			TELEGRAM_MINI_APP_ENABLED: raw.TELEGRAM_MINI_APP_ENABLED,
+			TELEGRAM_OIDC_CLIENT_ID: raw.TELEGRAM_OIDC_CLIENT_ID,
+			TELEGRAM_OIDC_CLIENT_SECRET: Redacted.value(raw.TELEGRAM_OIDC_CLIENT_SECRET),
+			TELEGRAM_OIDC_REQUEST_PHONE: raw.TELEGRAM_OIDC_REQUEST_PHONE,
+			TELEGRAM_OIDC_REQUEST_BOT_ACCESS: raw.TELEGRAM_OIDC_REQUEST_BOT_ACCESS,
+			TELEGRAM_MAX_AUTH_AGE_SECONDS: raw.TELEGRAM_MAX_AUTH_AGE_SECONDS,
 			COMPOSIO_API_KEY: Redacted.value(raw.COMPOSIO_API_KEY),
 			COMPOSIO_WEBHOOK_SECRET: Redacted.value(raw.COMPOSIO_WEBHOOK_SECRET),
 			COMPOSIO_AUTH_CONFIG_GMAIL: raw.COMPOSIO_AUTH_CONFIG_GMAIL,
