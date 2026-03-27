@@ -17,6 +17,19 @@ export const buildTelegramBotUrl = (username = TELEGRAM_BOT_USERNAME) =>
 
 export const TELEGRAM_BOT_URL = buildTelegramBotUrl()
 
+/** True when the link opens Telegram (t.me / same origin as the bot URL). */
+export const isTelegramWebUrl = (href: string): boolean => {
+	const trimmed = href.trim()
+	if (!trimmed) return false
+	if (trimmed === TELEGRAM_BOT_URL) return true
+	try {
+		const u = new URL(trimmed)
+		return u.hostname === "t.me"
+	} catch {
+		return /^https?:\/\/t\.me\//i.test(trimmed)
+	}
+}
+
 export const buildTelegramStartUrl = (payload?: string, username = TELEGRAM_BOT_USERNAME) =>
 	payload
 		? `${buildTelegramBotUrl(username)}?start=${encodeURIComponent(payload)}`

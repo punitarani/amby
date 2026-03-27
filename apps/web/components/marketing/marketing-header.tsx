@@ -39,7 +39,7 @@ export const MarketingHeader = ({
 	return (
 		<header className="fixed inset-x-0 top-0 z-50 pt-4">
 			<div className="mx-auto max-w-[1220px] px-4 md:px-6 lg:px-5">
-				<div className="glass-panel flex h-[3.8rem] items-center justify-between rounded-full border border-white/10 px-4 sm:h-[4rem] sm:px-5">
+				<div className="glass-panel flex h-[3.8rem] items-center justify-between rounded-full border border-border-subtle px-4 sm:h-[4rem] sm:px-5">
 					<MarketingTrackedLink
 						className="inline-flex items-center gap-2 text-foreground"
 						href={homeHref}

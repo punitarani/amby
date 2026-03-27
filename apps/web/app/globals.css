@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant light (&:where(html.light, html.light *));
+
 @theme inline {
 	--color-background: var(--background);
 	--color-background-elevated: var(--background-elevated);
@@ -8,6 +10,7 @@
 	--color-primary: var(--primary);
 	--color-panel: var(--panel);
 	--color-panel-soft: var(--panel-soft);
+	--color-border-subtle: var(--border-subtle);
 	--font-sans: var(--font-inter);
 	--font-display: var(--font-instrument);
 }
@@ -21,6 +24,69 @@
 	--primary: #f4efe7;
 	--panel: rgba(255, 255, 255, 0.04);
 	--panel-soft: rgba(255, 255, 255, 0.08);
+	--border-subtle: rgba(255, 255, 255, 0.1);
+	--marketing-shell-vignette-top: radial-gradient(
+		circle at top,
+		rgba(255, 255, 255, 0.12),
+		transparent 60%
+	);
+	--marketing-shell-bloom-left: rgba(255, 255, 255, 0.04);
+	--marketing-shell-bloom-right: rgba(255, 255, 255, 0.05);
+	--marketing-hero-border-subtle: rgba(255, 255, 255, 0.1);
+	--marketing-hero-surface: linear-gradient(180deg, #050608 0%, #050506 34%, #040405 100%);
+	--marketing-hero-radial: radial-gradient(
+		58% 42% at 50% 30%,
+		rgba(255, 255, 255, 0.16),
+		rgba(255, 255, 255, 0.02) 42%,
+		rgba(255, 255, 255, 0) 72%
+	);
+	--marketing-hero-ring: rgba(255, 255, 255, 0.07);
+	--marketing-hero-ring-soft: rgba(255, 255, 255, 0.06);
+	--marketing-hero-bloom: rgba(255, 255, 255, 0.08);
+	--home-shell-bg: linear-gradient(180deg, rgba(9, 9, 11, 0.95), rgba(4, 4, 5, 0.98));
+	--home-shell-border: rgba(255, 255, 255, 0.08);
+	--home-shell-shadow: 0 44px 120px -72px rgba(0, 0, 0, 0.98);
+	--home-shell-grid-line: rgba(255, 255, 255, 0.012);
+	--marketing-surface-tint: rgba(255, 255, 255, 0.04);
+	--marketing-surface-tint-mid: rgba(255, 255, 255, 0.05);
+	--marketing-surface-tint-weak: rgba(255, 255, 255, 0.03);
+}
+
+html.light {
+	color-scheme: light;
+	--background: #f7f3eb;
+	--background-elevated: #fffcf7;
+	--foreground: #1a1814;
+	--foreground-muted: rgba(26, 22, 18, 0.58);
+	--primary: #1a1814;
+	--panel: rgba(0, 0, 0, 0.04);
+	--panel-soft: rgba(0, 0, 0, 0.06);
+	--border-subtle: rgba(0, 0, 0, 0.1);
+	--marketing-shell-vignette-top: radial-gradient(
+		circle at top,
+		rgba(0, 0, 0, 0.07),
+		transparent 55%
+	);
+	--marketing-shell-bloom-left: rgba(0, 0, 0, 0.045);
+	--marketing-shell-bloom-right: rgba(0, 0, 0, 0.055);
+	--marketing-hero-border-subtle: rgba(0, 0, 0, 0.09);
+	--marketing-hero-surface: linear-gradient(180deg, #fffdf9 0%, #f7f3eb 40%, #efece4 100%);
+	--marketing-hero-radial: radial-gradient(
+		58% 42% at 50% 30%,
+		rgba(0, 0, 0, 0.07),
+		rgba(0, 0, 0, 0.02) 42%,
+		rgba(0, 0, 0, 0) 72%
+	);
+	--marketing-hero-ring: rgba(0, 0, 0, 0.07);
+	--marketing-hero-ring-soft: rgba(0, 0, 0, 0.055);
+	--marketing-hero-bloom: rgba(0, 0, 0, 0.05);
+	--home-shell-bg: linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(247, 243, 235, 0.99));
+	--home-shell-border: rgba(0, 0, 0, 0.08);
+	--home-shell-shadow: 0 44px 120px -72px rgba(0, 0, 0, 0.14);
+	--home-shell-grid-line: rgba(0, 0, 0, 0.04);
+	--marketing-surface-tint: rgba(0, 0, 0, 0.04);
+	--marketing-surface-tint-mid: rgba(0, 0, 0, 0.05);
+	--marketing-surface-tint-weak: rgba(0, 0, 0, 0.03);
 }
 
 * {
@@ -43,8 +109,19 @@ body {
 	text-rendering: optimizeLegibility;
 }
 
+html.light body {
+	background:
+		radial-gradient(circle at 20% 0%, rgba(0, 0, 0, 0.04), transparent 24%),
+		radial-gradient(circle at 82% 10%, rgba(255, 255, 255, 0.65), transparent 22%),
+		linear-gradient(180deg, #fffdf9 0%, var(--background) 45%, #ebe6dc 100%);
+}
+
 ::selection {
 	background: rgba(244, 239, 231, 0.2);
+}
+
+html.light ::selection {
+	background: rgba(0, 0, 0, 0.12);
 }
 
 a,
@@ -58,6 +135,13 @@ button {
 	box-shadow:
 		inset 0 1px 0 rgba(255, 255, 255, 0.12),
 		0 24px 70px -42px rgba(0, 0, 0, 0.9);
+}
+
+html.light .glass-panel {
+	background: rgba(255, 252, 247, 0.86);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.65),
+		0 20px 56px -40px rgba(0, 0, 0, 0.14);
 }
 
 .liquid-glass {
@@ -114,8 +198,113 @@ button {
 	pointer-events: none;
 }
 
+html.light .section-shell::before {
+	background-image:
+		linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+	opacity: 0.28;
+}
+
+.marketing-shell__vignette-top {
+	background: var(--marketing-shell-vignette-top);
+}
+
+.marketing-shell__bloom-left {
+	background: var(--marketing-shell-bloom-left);
+}
+
+.marketing-shell__bloom-right {
+	background: var(--marketing-shell-bloom-right);
+}
+
+.marketing-home-hero {
+	border-radius: 0 0 1.9rem 1.9rem;
+	border-bottom: 1px solid var(--marketing-hero-border-subtle);
+	overflow: hidden;
+	position: relative;
+}
+
+.marketing-home-hero__base {
+	background-image: var(--marketing-hero-surface);
+	inset: 0;
+	position: absolute;
+}
+
+.marketing-home-hero__radial {
+	background-image: var(--marketing-hero-radial);
+	inset: 0;
+	pointer-events: none;
+	position: absolute;
+}
+
+.marketing-home-hero__ring--lg {
+	border: 1px solid var(--marketing-hero-ring);
+	border-radius: 9999px;
+	filter: blur(2px);
+	height: 22rem;
+	left: 9%;
+	opacity: 0.6;
+	pointer-events: none;
+	position: absolute;
+	right: 9%;
+	top: 17%;
+}
+
+.marketing-home-hero__ring--md {
+	border: 1px solid var(--marketing-hero-ring-soft);
+	border-radius: 9999px;
+	filter: blur(1px);
+	height: 18rem;
+	left: 16%;
+	opacity: 0.46;
+	pointer-events: none;
+	position: absolute;
+	right: 16%;
+	top: 22%;
+}
+
+.marketing-home-hero__bloom--left {
+	background: var(--marketing-hero-bloom);
+	border-radius: 9999px;
+	filter: blur(90px);
+	height: 15rem;
+	left: -2.5rem;
+	pointer-events: none;
+	position: absolute;
+	top: 13%;
+	width: 18rem;
+}
+
+.marketing-home-hero__bloom--right {
+	background: var(--marketing-hero-bloom);
+	border-radius: 9999px;
+	filter: blur(90px);
+	height: 14rem;
+	pointer-events: none;
+	position: absolute;
+	right: -2.5rem;
+	top: 14%;
+	width: 18rem;
+}
+
+.marketing-home-hero__bloom--bottom {
+	background: var(--marketing-hero-bloom);
+	border-radius: 9999px;
+	bottom: 16%;
+	filter: blur(70px);
+	height: 5rem;
+	left: 28%;
+	pointer-events: none;
+	position: absolute;
+	right: 28%;
+}
+
 .section-band {
 	background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.04));
+}
+
+html.light .section-band {
+	background: linear-gradient(180deg, rgba(0, 0, 0, 0.02), rgba(0, 0, 0, 0.035));
 }
 
 .marketing-card {
@@ -127,11 +316,19 @@ button {
 		0 24px 64px -42px rgba(0, 0, 0, 0.9);
 }
 
+html.light .marketing-card {
+	border: 1px solid rgba(0, 0, 0, 0.09);
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(247, 243, 235, 0.5));
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.55),
+		0 22px 56px -40px rgba(0, 0, 0, 0.14);
+}
+
 .home-shell {
-	background: linear-gradient(180deg, rgba(9, 9, 11, 0.95), rgba(4, 4, 5, 0.98));
-	border: 1px solid rgba(255, 255, 255, 0.08);
+	background: var(--home-shell-bg);
+	border: 1px solid var(--home-shell-border);
 	border-radius: 2rem;
-	box-shadow: 0 44px 120px -72px rgba(0, 0, 0, 0.98);
+	box-shadow: var(--home-shell-shadow);
 	overflow: hidden;
 	position: relative;
 }
@@ -140,8 +337,8 @@ button {
 	position: absolute;
 	inset: 0;
 	background-image:
-		linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px),
-		linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+		linear-gradient(var(--home-shell-grid-line) 1px, transparent 1px),
+		linear-gradient(90deg, var(--home-shell-grid-line) 1px, transparent 1px);
 	background-size: 164px 164px;
 	content: "";
 	mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
@@ -163,6 +360,14 @@ button {
 		0 20px 50px -40px rgba(0, 0, 0, 0.95);
 }
 
+html.light .home-panel {
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 252, 247, 0.35));
+	border-color: rgba(0, 0, 0, 0.08);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.4),
+		0 20px 50px -40px rgba(0, 0, 0, 0.12);
+}
+
 .home-panel-soft {
 	background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
 	border: 1px solid rgba(255, 255, 255, 0.08);
@@ -170,12 +375,18 @@ button {
 	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
+html.light .home-panel-soft {
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(255, 252, 247, 0.28));
+	border-color: rgba(0, 0, 0, 0.07);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
 .headline-wrap {
 	text-wrap: balance;
 }
 
 .floating-label {
-	color: rgba(244, 239, 231, 0.58);
+	color: var(--foreground-muted);
 	font-family: var(--font-inter), sans-serif;
 	font-size: 0.69rem;
 	letter-spacing: 0.22em;
@@ -193,4 +404,62 @@ button {
 	box-shadow:
 		inset 0 1px 0 rgba(255, 255, 255, 0.12),
 		0 40px 96px -62px rgba(0, 0, 0, 0.94);
+}
+
+html.light .visual-placeholder {
+	background: linear-gradient(135deg, #f6f3ed 0%, #e8e2d7 100%);
+	box-shadow:
+		inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+		0 36px 88px -58px rgba(0, 0, 0, 0.18);
+}
+
+.marketing-action-link--primary {
+	border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Telegram brand-aligned primary CTAs (avoids warm/green-tinted --primary) */
+.marketing-action-link--telegram-cta {
+	background-color: #229ed9;
+	border-color: rgba(255, 255, 255, 0.28);
+}
+
+html.light .marketing-action-link--telegram-cta {
+	border-color: rgba(0, 0, 0, 0.12);
+	box-shadow: 0 18px 48px -28px rgba(34, 158, 217, 0.38);
+}
+
+html.light .marketing-action-link--telegram-cta:hover {
+	background-color: #1d8bc4;
+	color: #fff;
+}
+
+html.light .marketing-action-link--primary {
+	border-color: rgba(0, 0, 0, 0.14);
+	box-shadow: 0 18px 48px -28px rgba(0, 0, 0, 0.12);
+}
+
+html.light .marketing-action-link--primary:hover {
+	background: var(--background-elevated);
+	color: var(--foreground);
+}
+
+.marketing-action-link--secondary {
+	border-color: rgba(255, 255, 255, 0.12);
+}
+
+html.light .marketing-action-link--secondary {
+	border-color: rgba(0, 0, 0, 0.1);
+	background: rgba(0, 0, 0, 0.03);
+}
+
+html.light .marketing-action-link--secondary:hover {
+	background: rgba(0, 0, 0, 0.07);
+}
+
+.marketing-float-shadow {
+	box-shadow: 0 16px 40px -28px rgba(255, 255, 255, 0.38);
+}
+
+html.light .marketing-float-shadow {
+	box-shadow: 0 16px 40px -28px rgba(0, 0, 0, 0.12);
 }

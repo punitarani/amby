@@ -48,7 +48,7 @@
 	},
 	"files": {
 		"includes": [
-			"{packages,apps}/**/*.{ts,tsx,js,jsx,json,jsonc,css,mjs}",
+			"{packages,apps,scripts}/**/*.{ts,tsx,js,jsx,json,jsonc,css,mjs}",
 			"!{packages,apps}/**/.next",
 			"!{packages,apps}/**/.wrangler",
 			"!{packages,apps}/**/dist",

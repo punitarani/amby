@@ -22,7 +22,7 @@ export const DreamyImageCard = ({
 	return (
 		<div
 			className={cn(
-				"visual-placeholder relative overflow-hidden rounded-[2.2rem] border border-white/10 bg-background-elevated",
+				"visual-placeholder relative overflow-hidden rounded-[2.2rem] border border-border-subtle bg-background-elevated",
 				className,
 			)}
 		>

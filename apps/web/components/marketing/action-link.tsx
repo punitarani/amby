@@ -10,6 +10,7 @@ import {
 	type MarketingLinkPlacement,
 	trackMarketingLinkClicked,
 } from "@/lib/posthog"
+import { isTelegramWebUrl } from "@/lib/telegram"
 
 type ActionLinkProps = Omit<ComponentPropsWithoutRef<"a">, "children" | "href"> & {
 	analyticsKind?: MarketingLinkKind
@@ -40,12 +41,16 @@ export const MarketingActionLink = ({
 }: ActionLinkProps) => {
 	const pathname = usePathname()
 	const isExternal = target === "_blank" || /^(?:[a-z]+:)?\/\//i.test(href)
+	const telegramPrimary = variant === "primary" && isTelegramWebUrl(href)
 	const resolvedClassName = cn(
-		"inline-flex items-center justify-center rounded-full border font-sans font-semibold text-pretty uppercase transition duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+		"inline-flex items-center justify-center rounded-full border font-sans font-semibold text-pretty uppercase transition duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+		telegramPrimary ? "focus-visible:ring-[#229ED9]/55" : "focus-visible:ring-primary/60",
 		sizeClassNames[size],
 		variant === "primary"
-			? "border-white/20 bg-primary text-background shadow-[0_18px_48px_-28px_rgba(255,255,255,0.35)] hover:bg-white"
-			: "border-white/12 bg-white/[0.03] text-foreground backdrop-blur-xl hover:bg-white/[0.08]",
+			? telegramPrimary
+				? "marketing-action-link--telegram-cta text-white shadow-[0_18px_48px_-28px_rgba(34,158,217,0.48)] hover:bg-[#1d8bc4] hover:text-white"
+				: "marketing-action-link--primary border-white/20 bg-primary text-background shadow-[0_18px_48px_-28px_rgba(255,255,255,0.35)] hover:bg-white"
+			: "marketing-action-link--secondary border-white/12 bg-white/[0.03] text-foreground backdrop-blur-xl hover:bg-white/[0.08]",
 		className,
 	)
 
