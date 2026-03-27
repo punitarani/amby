@@ -2,7 +2,6 @@
 
 import { motion, useReducedMotion } from "framer-motion"
 import {
-	ArrowRight,
 	CalendarDays,
 	Check,
 	Eye,
@@ -98,31 +97,6 @@ const principleChips = [
 	"Background execution",
 	"Permission-based actioning",
 	"Cross-surface continuity",
-] as const
-
-const successSignals = [
-	"Meetings are prepped before they start.",
-	"Follow-ups do not depend on memory alone.",
-	"Returning to work does not require re-explaining it.",
-] as const
-
-const ambientQueue = [
-	{
-		copy: "Turn class notes into a study plan, set a quiz reminder, and queue tomorrow's assignment checklist.",
-		time: "Student",
-	},
-	{
-		copy: "Track medications and appointments for a loved one, then draft a family update you can approve in one tap.",
-		time: "Caregiver",
-	},
-	{
-		copy: "Keep school forms, pickups, and household reminders in one running thread that resumes exactly where you left off.",
-		time: "Parent",
-	},
-	{
-		copy: "Capture client asks from voice notes, draft follow-ups and invoices, and approve what sends before end of day.",
-		time: "Independent creator",
-	},
 ] as const
 
 const channelList = ["Messaging", "Desktop", "Web", "Voice", "API"] as const
@@ -382,49 +356,6 @@ export const MarketingHomePage = () => {
 							</div>
 						</section>
 
-						<section className="grid gap-5 lg:grid-cols-[0.44fr_0.56fr]">
-							<motion.div {...reveal()}>
-								<HomePanel className="flex h-full min-h-[18rem] flex-col justify-between px-6 py-7 sm:px-7 sm:py-8">
-									<div>
-										<SectionLabel>Ambient Work</SectionLabel>
-										<h2 className="headline-wrap mt-3 max-w-[8ch] font-display text-[clamp(2.45rem,4.2vw,3.7rem)] leading-[0.92] tracking-[-0.05em] text-foreground">
-											The work keeps moving even when you don't.
-										</h2>
-										<p className="mt-4 max-w-[18rem] text-[0.94rem] leading-6 text-foreground/58">
-											Calm personal operations for real life, from school to family care to
-											independent work. Follow-up, prep, and continuity keep moving while you handle
-											the rest of your day.
-										</p>
-									</div>
-									<div className="flex items-center justify-between border-t border-white/10 pt-4">
-										<p className="font-sans text-[0.65rem] font-medium tracking-[0.18em] text-foreground/46 uppercase">
-											Ambient queue
-										</p>
-										<ArrowRight className="size-4 text-foreground/46" />
-									</div>
-								</HomePanel>
-							</motion.div>
-
-							<div className="grid gap-4 sm:grid-cols-2">
-								{ambientQueue.map((item, index) => (
-									<motion.div
-										{...reveal(index * 0.04)}
-										key={item.time}
-										whileHover={reduceMotion ? undefined : { y: -3 }}
-									>
-										<HomePanel className="h-full px-5 py-6">
-											<p className="font-sans text-[0.69rem] font-semibold tracking-[0.18em] text-foreground/48 uppercase">
-												{item.time}
-											</p>
-											<p className="mt-3 max-w-[16rem] text-[0.9rem] leading-6 text-foreground/58">
-												{item.copy}
-											</p>
-										</HomePanel>
-									</motion.div>
-								))}
-							</div>
-						</section>
-
 						<section
 							className="grid gap-6 lg:grid-cols-[0.44fr_0.56fr] lg:items-start"
 							id="channels"
@@ -438,8 +369,8 @@ export const MarketingHomePage = () => {
 								</h2>
 							</motion.div>
 
-							<motion.div {...reveal(0.05)} className="pt-1 lg:px-2">
-								<div className="space-y-0.5 font-sans text-[clamp(2rem,3.8vw,3rem)] leading-[0.88] font-semibold tracking-[-0.035em] text-foreground/82">
+							<motion.div {...reveal(0.05)} className="pt-1 font-sans lg:px-2">
+								<div className="space-y-0.5 text-[clamp(2rem,3.8vw,3rem)] leading-[0.88] font-semibold tracking-[-0.025em] text-foreground/82">
 									{channelList.map((channel, index) => (
 										<div
 											className={cn(index === 0 ? "text-foreground" : "text-foreground/74")}
@@ -449,43 +380,12 @@ export const MarketingHomePage = () => {
 										</div>
 									))}
 								</div>
-								<p className="mt-5 font-sans text-[0.75rem] font-semibold tracking-[0.12em] text-foreground/58 uppercase">
+								<p className="mt-5 text-[0.75rem] font-semibold tracking-[0.12em] text-foreground/58 uppercase">
 									Telegram is the current launch surface
 								</p>
-								<p className="mt-2 max-w-[31rem] text-[1rem] leading-7 text-foreground/56">
+								<p className="mt-2 max-w-[31rem] text-[1rem] leading-7 font-medium text-foreground/56">
 									Amby is natively available where you already communicate.
 								</p>
-							</motion.div>
-						</section>
-
-						<section className="grid gap-5 lg:grid-cols-[0.46fr_0.54fr]">
-							<motion.div {...reveal()}>
-								<HomePanel className="h-full px-6 py-7 sm:px-7 sm:py-8">
-									<SectionLabel>What Success Looks Like</SectionLabel>
-									<div className="mt-5 space-y-4">
-										{successSignals.map((signal) => (
-											<p
-												className="border-t border-white/10 pt-4 text-[0.96rem] leading-7 text-foreground/58"
-												key={signal}
-											>
-												{signal}
-											</p>
-										))}
-									</div>
-								</HomePanel>
-							</motion.div>
-							<motion.div {...reveal(0.05)}>
-								<HomePanel className="h-full px-6 py-7 sm:px-7 sm:py-8">
-									<SectionLabel>Near-term Job</SectionLabel>
-									<h2 className="headline-wrap mt-3 max-w-[10ch] font-display text-[clamp(2.3rem,4.4vw,3.55rem)] leading-[0.92] tracking-[-0.05em] text-foreground">
-										Capture, remember, and act without losing the thread.
-									</h2>
-									<p className="mt-4 text-[0.95rem] leading-7 text-foreground/58">
-										That is the consumer promise at launch. If Amby can reduce dropped balls in the
-										places people already work, it earns the right to become broader personal
-										infrastructure.
-									</p>
-								</HomePanel>
 							</motion.div>
 						</section>
 
@@ -494,8 +394,7 @@ export const MarketingHomePage = () => {
 								<HomePanel className="relative overflow-hidden px-6 py-10 text-center sm:px-10 sm:py-11">
 									<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.18),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.01)_55%,transparent)]" />
 									<div className="relative">
-										<SectionLabel className="justify-center">Start</SectionLabel>
-										<h2 className="headline-wrap mt-4 font-display text-[clamp(2.7rem,4.8vw,3.9rem)] leading-[0.92] tracking-[-0.05em] text-foreground">
+										<h2 className="headline-wrap font-display text-[clamp(2.7rem,4.8vw,3.9rem)] leading-[0.92] tracking-[-0.05em] text-foreground">
 											Your personal compute plane
 										</h2>
 										<div className="mt-6 flex flex-wrap justify-center gap-2.5">
@@ -529,7 +428,7 @@ export const MarketingHomePage = () => {
 						</section>
 
 						<footer className="border-t border-white/10 px-2 pt-5 pb-2">
-							<div className="flex flex-col gap-4 text-[0.68rem] text-foreground/44 uppercase sm:flex-row sm:items-center sm:justify-between">
+							<div className="flex flex-col gap-4 text-[0.68rem] text-foreground/44 sm:flex-row sm:items-center sm:justify-between">
 								<div className="inline-flex items-center gap-2 text-foreground">
 									<Image
 										alt="Amby logo"
@@ -542,13 +441,13 @@ export const MarketingHomePage = () => {
 										Amby
 									</span>
 								</div>
-								<div className="text-[0.63rem] tracking-[0.2em] text-foreground/38">
+								<div className="text-[0.63rem] tracking-[0.2em] text-foreground/38 uppercase">
 									{`© ${new Date().getFullYear()} AMBY`}
 								</div>
 								<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 									{marketingFooterLinks.map((item) => (
 										<MarketingTrackedLink
-											className="inline-flex items-center gap-1.5 text-[0.63rem] tracking-[0.18em] text-foreground/54 transition hover:text-foreground"
+											className="inline-flex items-center gap-1.5 text-[0.63rem] tracking-[0.18em] text-foreground/54 uppercase transition hover:text-foreground"
 											external={item.external}
 											href={item.href}
 											key={item.label}
