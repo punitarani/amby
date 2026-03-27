@@ -9,11 +9,11 @@ import { z } from "zod"
 import type { prepareConversationContext } from "../context/builder"
 import { AgentError } from "../errors"
 import { executeRequestPlan } from "../execution/coordinator"
-import { createRootTrace, type TraceWriter } from "../execution/ledger"
+import { createRootRun, type RunWriter } from "../execution/ledger"
 import { queryExecution } from "../execution/query-execution"
 import type { ToolGroups } from "../execution/registry"
+import { normalizeRunEnvironment } from "../run-metadata"
 import { createTelemetrySettings } from "../telemetry"
-import { normalizeTraceEnvironment } from "../trace-metadata"
 import type { AgentRunConfig, AgentRunResult, StreamPart } from "../types/agent"
 import type { QueryExecutionResult } from "../types/execution"
 
@@ -127,7 +127,7 @@ async function flushConversationToolEvents(
 			toolResults: Array<{ toolCallId: string; toolName: string; output: unknown }>
 		}>
 	},
-	trace: TraceWriter,
+	trace: RunWriter,
 	rt: Runtime.Runtime<never>,
 ) {
 	const events = (result.steps ?? []).flatMap((step) => [
@@ -215,7 +215,7 @@ export function handleTurn(
 ): Effect.Effect<AgentRunResult, AgentError> {
 	const { conversationId, mode, requestMessages, metadata, onReply, onTextDelta, onPart } = request
 	const { userId, query } = config
-	let rootTraceRef: TraceWriter | undefined
+	let rootTraceRef: RunWriter | undefined
 
 	return Effect.gen(function* () {
 		const inboundText = requestMessages.map((m) => m.content).join("\n\n")
@@ -273,7 +273,7 @@ export function handleTurn(
 			},
 		})
 
-		const rootTrace = yield* createRootTrace(query, runConfig, {
+		const rootTrace = yield* createRootRun(query, runConfig, {
 			router: threadCtx.decision,
 			requestMetadata: metadata ?? null,
 		})
@@ -539,13 +539,13 @@ export function handleTurn(
 		const execution = state.execution
 			? {
 					mode: state.execution.mode,
-					rootTraceId: rootTrace.traceId,
+					rootTraceId: rootTrace.runId,
 					tasks: state.execution.taskResults,
 					backgroundTasks: state.execution.backgroundTasks,
 				}
 			: {
 					mode: "direct" as const,
-					rootTraceId: rootTrace.traceId,
+					rootTraceId: rootTrace.runId,
 					tasks: [],
 					backgroundTasks: state.queryResult?.executions.map((e) => ({
 						taskId: e.taskId,
@@ -613,7 +613,7 @@ function buildRunConfig(params: {
 			threadId: params.threadId,
 			userId: params.userId,
 			mode: params.mode,
-			environment: normalizeTraceEnvironment(params.environment),
+			environment: normalizeRunEnvironment(params.environment),
 			metadata: params.requestMetadata,
 		},
 		modelPolicy: {

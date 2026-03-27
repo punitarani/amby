@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test"
 import {
-	buildAgentTraceMetadata,
-	buildRootTraceMetadata,
-	buildTaskTraceMetadata,
-	normalizeTraceEnvironment,
-} from "./trace-metadata"
+	buildAgentRunMetadata,
+	buildRootRunMetadata,
+	buildTaskRunMetadata,
+	normalizeRunEnvironment,
+} from "./run-metadata"
 import type { AgentRunConfig } from "./types/agent"
 
 const request: AgentRunConfig["request"] = {
@@ -62,18 +62,18 @@ const config: AgentRunConfig = {
 	},
 }
 
-describe("trace metadata (backward compatibility shim)", () => {
-	it("normalizes environments via the deprecated alias", () => {
-		expect(normalizeTraceEnvironment("production")).toBe("production")
-		expect(normalizeTraceEnvironment("development")).toBe("development")
-		expect(normalizeTraceEnvironment("staging")).toBe("development")
-		expect(normalizeTraceEnvironment(undefined)).toBe("development")
-		expect(normalizeTraceEnvironment(null)).toBe("development")
+describe("run metadata", () => {
+	it("normalizes environments to the supported set", () => {
+		expect(normalizeRunEnvironment("production")).toBe("production")
+		expect(normalizeRunEnvironment("development")).toBe("development")
+		expect(normalizeRunEnvironment("staging")).toBe("development")
+		expect(normalizeRunEnvironment(undefined)).toBe("development")
+		expect(normalizeRunEnvironment(null)).toBe("development")
 	})
 
-	it("builds agent metadata via the deprecated alias", () => {
+	it("builds agent metadata from request context", () => {
 		expect(
-			buildAgentTraceMetadata({
+			buildAgentRunMetadata({
 				request,
 				modelId: "gpt-5",
 				agentRole: "specialist",
@@ -96,17 +96,17 @@ describe("trace metadata (backward compatibility shim)", () => {
 		})
 	})
 
-	it("builds persisted root trace metadata via the deprecated alias", () => {
-		expect(buildRootTraceMetadata(config)).toMatchObject({
+	it("builds persisted root run metadata from request context", () => {
+		expect(buildRootRunMetadata(config)).toMatchObject({
 			requestId: "request-1",
 			conversationId: "conversation-1",
 			environment: "production",
 		})
 	})
 
-	it("builds persisted task trace metadata via the deprecated alias", () => {
+	it("builds persisted task run metadata from request context", () => {
 		expect(
-			buildTaskTraceMetadata({
+			buildTaskRunMetadata({
 				request,
 				executionRequest: {
 					taskId: "task-1",

@@ -19,6 +19,7 @@ export * from "./errors"
 export type {
 	ExecutionMode,
 	Platform,
+	RunEventKind,
 	RunnerKind,
 	SpecialistKind,
 	TaskEventKind,
@@ -27,7 +28,6 @@ export type {
 	TaskRuntime,
 	TaskStatus,
 	ThreadSource,
-	TraceEventKind,
 } from "./schema"
 export * as schema from "./schema"
 export * from "./service"

@@ -313,20 +313,17 @@ async function main() {
 						.from(schema.conversationThreads)
 						.where(eq(schema.conversationThreads.conversationId, conversationId)),
 				)
-				const traces = yield* query((db) =>
+				const runs = yield* query((db) =>
 					db
-						.select({ id: schema.traces.id })
-						.from(schema.traces)
-						.where(eq(schema.traces.conversationId, conversationId)),
+						.select({ id: schema.runs.id })
+						.from(schema.runs)
+						.where(eq(schema.runs.conversationId, conversationId)),
 				)
-				return { messages: msgs.length, threads: threads.length, traces: traces.length }
+				return { messages: msgs.length, threads: threads.length, runs: runs.length }
 			}),
 		)
 
-		log(
-			"ℹ️",
-			`Messages: ${dbState.messages}, Threads: ${dbState.threads}, Traces: ${dbState.traces}`,
-		)
+		log("ℹ️", `Messages: ${dbState.messages}, Threads: ${dbState.threads}, Runs: ${dbState.runs}`)
 		record("DB state populated", dbState.messages > 0 || dbState.threads > 0)
 	} catch (err) {
 		record("DB state populated", false, String(err))
@@ -352,9 +349,9 @@ async function main() {
 				const { query } = yield* DbService
 
 				if (conversationId) {
-					// traceEvents cascade-deletes via FK on traces.id
+					// runEvents cascade-deletes via FK on runs.id
 					yield* query((db) =>
-						db.delete(schema.traces).where(eq(schema.traces.conversationId, conversationId)),
+						db.delete(schema.runs).where(eq(schema.runs.conversationId, conversationId)),
 					)
 					yield* query((db) =>
 						db.delete(schema.messages).where(eq(schema.messages.conversationId, conversationId)),
