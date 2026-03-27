@@ -1,18 +1,30 @@
 import type { WorkerBindings } from "@amby/env/workers"
 import { createMemoryState } from "@chat-adapter/state-memory"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
-import * as Sentry from "@sentry/cloudflare"
 import { Chat } from "chat"
-import { Effect } from "effect"
-import { makeRuntimeForConsumer } from "../queue/runtime"
-import { setTelegramScope } from "../sentry"
+import { Effect, type ManagedRuntime } from "effect"
 import type { TelegramFrom } from "./utils"
 import { handleCommand, parseTelegramCommand } from "./utils"
 
-let _chat: Chat | null = null
+export interface ChatSdkDeps {
+	// biome-ignore lint/suspicious/noExplicitAny: Runtime type parameters vary by caller; correctness verified at the call site
+	makeRuntimeForConsumer(env: WorkerBindings): ManagedRuntime.ManagedRuntime<any, any>
+	setTelegramScope(input: {
+		component: string
+		chatId?: number | null
+		from?: TelegramFrom | null
+		attributes?: Record<string, string | number | boolean | undefined>
+	}): void
+	captureException(err: unknown): void
+	captureCommandError(command: string, chatId: number, err: unknown): void
+}
 
-export function getOrCreateChat(env: WorkerBindings) {
+let _chat: Chat | null = null
+let _deps: ChatSdkDeps | null = null
+
+export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps) {
 	if (_chat) return { chat: _chat }
+	_deps = deps
 
 	const adapter = createTelegramAdapter({
 		botToken: env.TELEGRAM_BOT_TOKEN ?? "",
@@ -50,6 +62,8 @@ async function routeIncomingMessage(
 	env: WorkerBindings,
 	message: Parameters<Parameters<Chat["onNewMention"]>[0]>[1],
 ) {
+	if (!_deps) throw new Error("[ChatSDK] getOrCreateChat must be called before routing messages")
+	const deps = _deps
 	const raw = message.raw as {
 		from?: TelegramFrom
 		chat: { id: number }
@@ -64,7 +78,7 @@ async function routeIncomingMessage(
 
 	if (!from || !chatId) return
 
-	setTelegramScope({
+	deps.setTelegramScope({
 		component: "chat-sdk.route",
 		chatId,
 		from,
@@ -77,7 +91,7 @@ async function routeIncomingMessage(
 
 	// Commands: handle inline
 	if (parsedCommand) {
-		const runtime = makeRuntimeForConsumer(env)
+		const runtime = deps.makeRuntimeForConsumer(env)
 		try {
 			await runtime.runPromise(
 				handleCommand(parsedCommand, from, chatId, {
@@ -86,11 +100,8 @@ async function routeIncomingMessage(
 					Effect.catchAllCause((cause) =>
 						Effect.sync(() => {
 							const err = cause.toJSON?.() ?? cause
-							Sentry.captureException(err)
-							console.error(
-								`[ChatSDK] Command ${parsedCommand.rawText} failed for chat ${chatId}:`,
-								err,
-							)
+							deps.captureException(err)
+							deps.captureCommandError(parsedCommand.rawText, chatId, err)
 						}),
 					),
 				),
@@ -121,7 +132,7 @@ async function routeIncomingMessage(
 			from,
 		})
 	} catch (err) {
-		Sentry.captureException(err)
+		deps.captureException(err)
 		console.error(`[ChatSDK] Failed to route message to DO for chat ${chatId}:`, err)
 	}
 }

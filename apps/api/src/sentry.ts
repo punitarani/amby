@@ -1,7 +1,7 @@
+import type { TelegramFrom } from "@amby/channels"
 import type { WorkerBindings } from "@amby/env/workers"
 import type { CloudflareOptions, Scope } from "@sentry/cloudflare"
 import * as Sentry from "@sentry/cloudflare"
-import type { TelegramFrom } from "./telegram/utils"
 
 type ScopeAttribute = string | number | boolean | undefined
 

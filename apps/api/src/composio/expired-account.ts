@@ -1,8 +1,8 @@
+import { TelegramSender } from "@amby/channels"
 import { getTelegramChatId } from "@amby/computer"
 import { and, DbService, eq, inArray, schema } from "@amby/db"
 import { ConnectorsService, getIntegrationExpiredMessage } from "@amby/plugins/integrations"
 import { Effect } from "effect"
-import { TelegramSender } from "../telegram"
 
 export const handleExpiredConnectedAccount = (connectedAccountId: string) =>
 	Effect.gen(function* () {

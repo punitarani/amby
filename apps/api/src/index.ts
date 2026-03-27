@@ -1,6 +1,7 @@
 import { ModelServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
+import { createAmbyBot, TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
@@ -12,13 +13,10 @@ import {
 	ConnectorsService,
 	ConnectorsServiceLive,
 } from "@amby/plugins/integrations"
-import type { Chat } from "chat"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
-import { createAmbyBot } from "./bot"
 import { getHomeResponse } from "./home"
 import { PluginRegistryLive } from "./shared/plugin-registry"
-import { TelegramSenderLite } from "./telegram"
 
 // Shared layers — constructed once at startup
 // Layer order: infra (env, db) → services (memory, connectors, etc.) → PluginRegistry (depends on services)
@@ -65,7 +63,7 @@ app.get("/composio/redirect", (c) => {
 
 const port = Number(process.env.PORT) || 3001
 
-let chatBot: Chat | null = null
+let chatBot: ReturnType<typeof createAmbyBot> | null = null
 
 console.log("Starting Amby API...")
 

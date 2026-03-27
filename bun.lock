@@ -24,6 +24,7 @@
         "@amby/agent": "workspace:*",
         "@amby/auth": "workspace:*",
         "@amby/browser": "workspace:*",
+        "@amby/channels": "workspace:*",
         "@amby/computer": "workspace:*",
         "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
@@ -31,11 +32,9 @@
         "@amby/memory": "workspace:*",
         "@amby/plugins": "workspace:*",
         "@amby/skills": "workspace:*",
-        "@chat-adapter/state-memory": "^4.20.2",
         "@chat-adapter/telegram": "^4.20.2",
         "@cloudflare/playwright": "^1.1.2",
         "@sentry/cloudflare": "^10.44.0",
-        "chat": "^4.20.2",
         "effect": "^3.21.0",
         "hono": "^4.7.0",
         "posthog-node": "^4.0.1",
@@ -142,6 +141,25 @@
       "peerDependencies": {
         "effect": "^3.21.0",
         "zod": "^3.24.0",
+      },
+    },
+    "packages/channels": {
+      "name": "@amby/channels",
+      "version": "0.1.0",
+      "dependencies": {
+        "@amby/agent": "workspace:*",
+        "@amby/computer": "workspace:*",
+        "@amby/core": "workspace:*",
+        "@amby/db": "workspace:*",
+        "@amby/env": "workspace:*",
+        "@amby/plugins": "workspace:*",
+        "@chat-adapter/state-memory": "^4.20.2",
+        "@chat-adapter/telegram": "^4.20.2",
+        "chat": "^4.20.2",
+        "posthog-node": "^4.0.1",
+      },
+      "peerDependencies": {
+        "effect": "^3.21.0",
       },
     },
     "packages/computer": {
@@ -279,6 +297,8 @@
     "@amby/auth": ["@amby/auth@workspace:packages/auth"],
 
     "@amby/browser": ["@amby/browser@workspace:packages/browser"],
+
+    "@amby/channels": ["@amby/channels@workspace:packages/channels"],
 
     "@amby/computer": ["@amby/computer@workspace:packages/computer"],
 

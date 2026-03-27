@@ -11,7 +11,7 @@ import {
 } from "@amby/plugins/integrations"
 import { Effect } from "effect"
 import { getPostHogClient } from "../posthog"
-import { TelegramSender } from "./index"
+import { TelegramSender } from "./sender"
 
 // --- Types ---
 

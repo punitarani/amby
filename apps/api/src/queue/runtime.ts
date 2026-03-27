@@ -1,6 +1,7 @@
 import { ModelServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
+import { TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { makeDbServiceFromHyperdrive } from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
@@ -9,7 +10,6 @@ import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
 import { Layer, ManagedRuntime } from "effect"
 import { PluginRegistryLive } from "../shared/plugin-registry"
-import { TelegramSenderLite } from "../telegram"
 
 const makeBaseLive = (bindings: WorkerBindings) => {
 	const connectionString = bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? ""

@@ -1,13 +1,17 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import { AgentService, makeAgentServiceLive } from "@amby/agent"
+import {
+	type BufferedMessage,
+	findOrCreateUser,
+	splitTelegramMessage,
+	type TelegramFrom,
+} from "@amby/channels"
 import type { WorkerBindings } from "@amby/env/workers"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
 import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "../queue/runtime"
 import { setTelegramScope } from "../sentry"
-import type { BufferedMessage, TelegramFrom } from "../telegram/utils"
-import { findOrCreateUser, splitTelegramMessage } from "../telegram/utils"
 
 export interface AgentExecutionParams {
 	chatId: number

@@ -3,12 +3,7 @@ import { createMemoryState } from "@chat-adapter/state-memory"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
-import {
-	findOrCreateUser,
-	handleCommand,
-	parseTelegramCommand,
-	type TelegramFrom,
-} from "./telegram/utils"
+import { findOrCreateUser, handleCommand, parseTelegramCommand, type TelegramFrom } from "./utils"
 
 // biome-ignore lint/suspicious/noExplicitAny: Runtime type is complex; correctness verified at the call site
 export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, botToken: string) {
