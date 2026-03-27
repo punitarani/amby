@@ -57,6 +57,14 @@ type BrowserWorkerBindings = Pick<
 	"BROWSER" | "AI" | "CLOUDFLARE_AI_GATEWAY_ID" | "NODE_ENV"
 >
 
+/** Callback for redirecting browser log output (e.g. to Sentry instead of console). */
+export type BrowserLogFn = (entry: {
+	level?: number
+	message: string
+	category?: string
+	[key: string]: unknown
+}) => void
+
 export interface BrowserWorkerSettings {
 	enabled: boolean
 	llmClient: LLMClient
@@ -230,6 +238,7 @@ async function runBrowserTask(
 	settings: BrowserWorkerSettings,
 	input: BrowserTaskInput,
 	options?: BrowserTaskRunOptions,
+	logger?: BrowserLogFn,
 ): Promise<BrowserTaskResult> {
 	if (!settings.browserBinding) {
 		throw new BrowserError({ message: "Browser Rendering binding is not configured." })
@@ -238,7 +247,13 @@ async function runBrowserTask(
 	const startedAt = Date.now()
 	let agentStepIndex = 0
 
-	if (settings.verbose) {
+	if (logger) {
+		logger({
+			level: 1,
+			message: `[BrowserService] LLM: ${settings.model} via ${settings.providerLabel}`,
+			category: "init",
+		})
+	} else if (settings.verbose) {
 		console.info(`[BrowserService] LLM: ${settings.model} via ${settings.providerLabel}`)
 	}
 
@@ -253,7 +268,9 @@ async function runBrowserTask(
 			return
 		}
 
-		if ((entry.level ?? 1) <= 0) {
+		if (logger) {
+			logger(entry)
+		} else if ((entry.level ?? 1) <= 0) {
 			console.warn(entry)
 		} else if (settings.verbose) {
 			console.info(entry)
@@ -539,7 +556,10 @@ async function runBrowserTask(
 	}
 }
 
-export const makeBrowserServiceFromBindings = (bindings: BrowserWorkerBindings) => {
+export const makeBrowserServiceFromBindings = (
+	bindings: BrowserWorkerBindings,
+	options?: { logger?: BrowserLogFn },
+) => {
 	const settings = browserWorkerSettingsFromBindings(bindings)
 
 	if (!settings) {
@@ -555,9 +575,10 @@ export const makeBrowserServiceFromBindings = (bindings: BrowserWorkerBindings) 
 		})
 	}
 
+	const logger = options?.logger
 	return Layer.succeed(BrowserService, {
 		enabled: settings.enabled,
-		runTask: (input, options) => {
+		runTask: (input, taskOptions) => {
 			const mapCause = (cause: unknown) =>
 				cause instanceof BrowserError
 					? cause
@@ -567,7 +588,7 @@ export const makeBrowserServiceFromBindings = (bindings: BrowserWorkerBindings) 
 						})
 
 			const singleAttempt = Effect.tryPromise({
-				try: () => runBrowserTask(settings, input, options),
+				try: () => runBrowserTask(settings, input, taskOptions, logger),
 				catch: mapCause,
 			})
 

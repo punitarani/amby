@@ -128,14 +128,14 @@ export const MarketingHomePage = () => {
 		<MarketingPageShell showFooter={false}>
 			<div className={shellClassName}>
 				<div className="home-shell">
-					<section className="relative overflow-hidden rounded-b-[1.9rem] border-b border-white/10">
-						<div className="absolute inset-0 bg-[linear-gradient(180deg,#050608_0%,#050506_34%,#040405_100%)]" />
-						<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(58%_42%_at_50%_30%,rgba(255,255,255,0.16),rgba(255,255,255,0.02)_42%,rgba(255,255,255,0)_72%)]" />
-						<div className="pointer-events-none absolute inset-x-[9%] top-[17%] h-[22rem] rounded-full border border-white/[0.07] opacity-60 blur-[2px]" />
-						<div className="pointer-events-none absolute inset-x-[16%] top-[22%] h-[18rem] rounded-full border border-white/[0.06] opacity-46 blur-[1px]" />
-						<div className="pointer-events-none absolute -left-10 top-[13%] h-60 w-72 rounded-full bg-white/[0.08] blur-[90px]" />
-						<div className="pointer-events-none absolute -right-10 top-[14%] h-56 w-72 rounded-full bg-white/[0.08] blur-[90px]" />
-						<div className="pointer-events-none absolute inset-x-[28%] bottom-[16%] h-20 rounded-full bg-white/[0.08] blur-[70px]" />
+					<section className="marketing-home-hero">
+						<div aria-hidden className="marketing-home-hero__base" />
+						<div aria-hidden className="marketing-home-hero__radial" />
+						<div aria-hidden className="marketing-home-hero__ring--lg" />
+						<div aria-hidden className="marketing-home-hero__ring--md" />
+						<div aria-hidden className="marketing-home-hero__bloom--left" />
+						<div aria-hidden className="marketing-home-hero__bloom--right" />
+						<div aria-hidden className="marketing-home-hero__bloom--bottom" />
 						<div className="relative z-10 px-5 pb-16 pt-22 text-center sm:px-8 sm:pb-18 sm:pt-24 md:px-10 md:pb-20 md:pt-26 lg:px-12 lg:pb-24 lg:pt-30">
 							<motion.div className="mx-auto max-w-[36rem]" initial={false}>
 								<SectionLabel className="justify-center text-foreground/58">
@@ -196,7 +196,7 @@ export const MarketingHomePage = () => {
 											whileHover={reduceMotion ? undefined : { y: -3 }}
 										>
 											<HomePanel className="h-full px-5 py-6">
-												<div className="flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+												<div className="flex size-9 items-center justify-center rounded-xl border border-border-subtle bg-[color:var(--marketing-surface-tint)]">
 													<Icon className="size-4.5 text-foreground" />
 												</div>
 												<h3 className="mt-4 font-display text-[1.96rem] leading-[0.96] tracking-[-0.04em] text-foreground">
@@ -216,17 +216,17 @@ export const MarketingHomePage = () => {
 							<motion.div {...reveal()}>
 								<HomePanel className="relative min-h-[19rem] overflow-hidden px-5 py-6 sm:px-6 sm:py-7">
 									<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_24%_38%,rgba(255,255,255,0.16),transparent_24%),radial-gradient(circle_at_30%_54%,rgba(255,255,255,0.1),transparent_30%)]" />
-									<div className="pointer-events-none absolute left-5 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-foreground/72 shadow-[0_16px_40px_-28px_rgba(255,255,255,0.38)]">
+									<div className="pointer-events-none absolute left-5 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border-subtle bg-[color:var(--marketing-surface-tint)] text-foreground/72 marketing-float-shadow">
 										<MessageSquareMore className="size-4" />
 									</div>
-									<div className="pointer-events-none absolute right-6 top-6 flex size-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-foreground/68">
+									<div className="pointer-events-none absolute right-6 top-6 flex size-9 items-center justify-center rounded-full border border-border-subtle bg-[color:var(--marketing-surface-tint)] text-foreground/68">
 										<CalendarDays className="size-4" />
 									</div>
 									<div className="relative flex h-full flex-col justify-center">
 										<div className="mx-auto w-full max-w-[18rem]">
 											<div className="home-panel-soft flex items-center justify-between rounded-full px-4 py-2.5">
 												<div className="flex items-center gap-2.5">
-													<div className="flex size-6 items-center justify-center rounded-full border border-white/10 bg-white/[0.05]">
+													<div className="flex size-6 items-center justify-center rounded-full border border-border-subtle bg-[color:var(--marketing-surface-tint-mid)]">
 														<CalendarDays className="size-3.5 text-foreground/82" />
 													</div>
 													<p className="font-sans text-[0.64rem] font-semibold tracking-[0.18em] text-foreground/64 uppercase">
@@ -238,7 +238,7 @@ export const MarketingHomePage = () => {
 												<p className="text-[0.82rem] leading-5 text-foreground/64">
 													Draft queued for Telegram review
 												</p>
-												<div className="flex size-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05]">
+												<div className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border-subtle bg-[color:var(--marketing-surface-tint-mid)]">
 													<Send className="size-3 text-foreground/82" />
 												</div>
 											</div>
@@ -266,7 +266,7 @@ export const MarketingHomePage = () => {
 												className="flex items-start gap-2.5 text-[0.94rem] leading-6 text-foreground/60"
 												key={point}
 											>
-												<div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.03]">
+												<div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border border-border-subtle bg-[color:var(--marketing-surface-tint-weak)]">
 													<Check className="size-3 text-foreground" />
 												</div>
 												<p>{point}</p>
@@ -290,7 +290,7 @@ export const MarketingHomePage = () => {
 											whileHover={reduceMotion ? undefined : { y: -3 }}
 										>
 											<HomePanel className="h-full px-5 py-6">
-												<div className="flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+												<div className="flex size-9 items-center justify-center rounded-xl border border-border-subtle bg-[color:var(--marketing-surface-tint)]">
 													<Icon className="size-4.5 text-foreground" />
 												</div>
 												<h3 className="mt-4 font-display text-[1.74rem] leading-[0.96] tracking-[-0.04em] text-foreground">
@@ -320,7 +320,7 @@ export const MarketingHomePage = () => {
 									<div className="mt-6 flex flex-wrap gap-2.5">
 										{principleChips.map((chip) => (
 											<span
-												className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 font-sans text-[0.66rem] tracking-[0.18em] text-foreground/58 uppercase"
+												className="rounded-full border border-border-subtle bg-[color:var(--marketing-surface-tint-weak)] px-3 py-1.5 font-sans text-[0.66rem] tracking-[0.18em] text-foreground/58 uppercase"
 												key={chip}
 											>
 												{chip}
@@ -368,7 +368,7 @@ export const MarketingHomePage = () => {
 								</h2>
 							</div>
 
-							<div className="pt-1 font-sans lg:px-2">
+							<div className="pt-1 font-display lg:px-2">
 								<div className="space-y-0.5 text-[clamp(2rem,3.8vw,3rem)] leading-[0.88] font-semibold tracking-[-0.025em] text-foreground/82">
 									{channelList.map((channel, index) => (
 										<div
@@ -426,24 +426,26 @@ export const MarketingHomePage = () => {
 							</motion.div>
 						</section>
 
-						<footer className="border-t border-white/10 px-2 pt-5 pb-2">
-							<div className="flex flex-col gap-4 text-[0.68rem] text-foreground/44 sm:flex-row sm:items-center sm:justify-between">
-								<div className="inline-flex items-center gap-2 text-foreground">
-									<Image
-										alt="Amby logo"
-										className="size-6 rounded-full"
-										height={24}
-										src="/logo-icon.png"
-										width={24}
-									/>
-									<span className="font-display text-[1.5rem] leading-none tracking-[-0.028em]">
-										Amby
-									</span>
+						<footer className="border-t border-border-subtle px-2 pt-5 pb-2">
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 text-[0.68rem] text-foreground/44">
+								<div className="min-w-0 flex flex-col gap-3">
+									<div className="inline-flex items-center gap-2 text-foreground">
+										<Image
+											alt="Amby logo"
+											className="size-6 shrink-0 rounded-full"
+											height={24}
+											src="/logo-icon.png"
+											width={24}
+										/>
+										<span className="font-display text-[1.5rem] leading-none tracking-[-0.028em]">
+											Amby
+										</span>
+									</div>
+									<div className="text-[0.63rem] tracking-[0.2em] text-foreground/38 uppercase">
+										{`© ${new Date().getFullYear()} AMBY`}
+									</div>
 								</div>
-								<div className="text-[0.63rem] tracking-[0.2em] text-foreground/38 uppercase">
-									{`© ${new Date().getFullYear()} AMBY`}
-								</div>
-								<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+								<div className="flex min-w-0 flex-col items-end gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-x-4">
 									{marketingFooterLinks.map((item) => (
 										<MarketingTrackedLink
 											className="inline-flex items-center gap-1.5 text-[0.63rem] tracking-[0.18em] text-foreground/54 uppercase transition hover:text-foreground"

@@ -1,23 +1,12 @@
-## Worker environment variable keys
-## Derived from WorkerBindings in packages/env/src/workers.ts,
-## excluding Cloudflare primitives (queues, DOs, workflows, Hyperdrive, version metadata).
-## Used by: generate-dev-vars.sh
-## Note: generate-dev-vars.sh only writes keys that currently have non-empty values.
-
-# Environment
-NODE_ENV
-
-# API URLs
-API_URL
-APP_URL
-
-# Database
-DATABASE_URL
+## Worker binding keys uploaded to Cloudflare via `wrangler secret bulk`.
+## Used by: .github/workflows/ci-cd.yml
+## This list is a subset of scripts/worker-env-keys.txt.
+## Excludes keys owned by apps/api/wrangler.toml [vars], deploy-time only credentials,
+## and runtime values injected through other bindings (for example Hyperdrive).
 
 # Auth — BetterAuth
 BETTER_AUTH_SECRET
 BETTER_AUTH_URL
-
 
 # Cloudflare AI Gateway
 CLOUDFLARE_AI_GATEWAY_ID
@@ -31,8 +20,6 @@ CARTESIA_API_KEY
 
 # Daytona Sandbox
 DAYTONA_API_KEY
-DAYTONA_API_URL
-DAYTONA_TARGET
 
 # Telegram Bot
 TELEGRAM_BOT_TOKEN
@@ -59,8 +46,6 @@ BRAINTRUST_PROJECT_ID
 
 # Sentry — error tracking
 SENTRY_DSN
-SENTRY_ENVIRONMENT
-SENTRY_RELEASE
 
 # PostHog analytics
 POSTHOG_KEY
