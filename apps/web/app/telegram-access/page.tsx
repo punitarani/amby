@@ -71,7 +71,7 @@ export default function TelegramAccessPage() {
 							</MarketingActionLink>
 							<MarketingActionLink
 								analyticsPlacement="telegram_hero_secondary"
-								href="/vision"
+								href="/#model"
 								size="large"
 								variant="secondary"
 							>
@@ -145,7 +145,7 @@ export default function TelegramAccessPage() {
 							</h2>
 							<p className="mt-4 max-w-2xl text-[1rem] leading-7 text-foreground/62">
 								Start with the real interaction surface. If the product model makes sense, the
-								vision page and repo will show where it is going and how it is being built.
+								homepage and repo will show where it is going and how it is being built.
 							</p>
 						</div>
 						<div className="flex flex-wrap gap-3 lg:justify-end">

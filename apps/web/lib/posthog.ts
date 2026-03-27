@@ -4,7 +4,6 @@ const marketingPageTypes = {
 	"/": "home",
 	"/github": "github",
 	"/telegram-access": "telegram_access",
-	"/vision": "vision",
 } as const
 
 export type MarketingPageType =
@@ -29,8 +28,6 @@ export type MarketingLinkPlacement =
 	| "telegram_final_secondary"
 	| "telegram_hero_primary"
 	| "telegram_hero_secondary"
-	| "vision_hero_primary"
-	| "vision_hero_secondary"
 
 type TrackMarketingLinkClickedOptions = {
 	href: string

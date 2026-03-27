@@ -45,7 +45,6 @@ const workflowCards = [
 const whyBullets = [
 	"One assistant state instead of fragmented chats.",
 	"Background work that continues while you are offline.",
-	"Telegram today, more surfaces over time, one system underneath.",
 ] as const
 
 const trustCards = [
@@ -148,8 +147,8 @@ export const MarketingHomePage = () => {
 									assistant computer
 								</h1>
 								<p className="mx-auto mt-4 max-w-[33rem] text-[0.95rem] leading-8 text-foreground/72 sm:text-[1rem]">
-									Runs once in the cloud, reaches you everywhere, and keeps capture, remember, and
-									follow-through moving with durable context and clear permissions.
+									Runs once in the cloud. Reaches you everywhere. Captures, remembers, and follows
+									through with clear permissions.
 								</p>
 								<div className="mt-7 flex flex-wrap justify-center gap-2.5">
 									<MarketingActionLink
@@ -360,16 +359,16 @@ export const MarketingHomePage = () => {
 							className="grid gap-6 lg:grid-cols-[0.44fr_0.56fr] lg:items-start"
 							id="channels"
 						>
-							<motion.div {...reveal()}>
+							<div className="pl-1 sm:pl-2 lg:pl-6">
 								<SectionLabel>Channels</SectionLabel>
 								<h2 className="headline-wrap mt-3 max-w-[8ch] font-display text-[clamp(2.7rem,4.9vw,4.15rem)] leading-[0.9] tracking-[-0.052em] text-foreground">
 									One assistant.
 									<br />
 									Many surfaces.
 								</h2>
-							</motion.div>
+							</div>
 
-							<motion.div {...reveal(0.05)} className="pt-1 font-sans lg:px-2">
+							<div className="pt-1 font-sans lg:px-2">
 								<div className="space-y-0.5 text-[clamp(2rem,3.8vw,3rem)] leading-[0.88] font-semibold tracking-[-0.025em] text-foreground/82">
 									{channelList.map((channel, index) => (
 										<div
@@ -380,13 +379,13 @@ export const MarketingHomePage = () => {
 										</div>
 									))}
 								</div>
-								<p className="mt-5 text-[0.75rem] font-semibold tracking-[0.12em] text-foreground/58 uppercase">
+								<p className="mt-5 font-sans text-[0.75rem] font-semibold tracking-[0.12em] text-foreground/58 uppercase">
 									Telegram is the current launch surface
 								</p>
-								<p className="mt-2 max-w-[31rem] text-[1rem] leading-7 font-medium text-foreground/56">
+								<p className="mt-2 max-w-[31rem] font-sans text-[1rem] leading-7 font-normal text-foreground/56">
 									Amby is natively available where you already communicate.
 								</p>
-							</motion.div>
+							</div>
 						</section>
 
 						<section>

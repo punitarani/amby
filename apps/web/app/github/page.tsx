@@ -68,7 +68,7 @@ export default function GitHubPage() {
 							</MarketingActionLink>
 							<MarketingActionLink
 								analyticsPlacement="github_hero_secondary"
-								href="/vision"
+								href="/#model"
 								size="large"
 								variant="secondary"
 							>
