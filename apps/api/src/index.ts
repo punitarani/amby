@@ -19,6 +19,7 @@ import { createAmbyBot } from "./bot"
 import { getHomeResponse } from "./home"
 import { PluginRegistryLive } from "./shared/plugin-registry"
 import { TelegramSenderLite } from "./telegram"
+import { createTelegramBotApiClient } from "./telegram/bot-api"
 
 // Shared layers — constructed once at startup
 // Layer order: infra (env, db) → services (memory, connectors, etc.) → PluginRegistry (depends on services)
@@ -83,21 +84,17 @@ runtime
 				TelegramSenderLite.pipe(Layer.provideMerge(SharedLive)),
 			)
 
+			const telegram = createTelegramBotApiClient({
+				botToken: env.TELEGRAM_BOT_TOKEN,
+				apiBaseUrl: env.TELEGRAM_API_BASE_URL,
+			})
+
 			yield* Effect.tryPromise(() =>
-				fetch(
-					`${env.TELEGRAM_API_BASE_URL || "https://api.telegram.org"}/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
-					{
-						method: "POST",
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({
-							commands: [
-								{ command: "start", description: "Start or resume the assistant" },
-								{ command: "stop", description: "Pause the assistant" },
-								{ command: "help", description: "Show help" },
-							],
-						}),
-					},
-				),
+				telegram.setMyCommands([
+					{ command: "start", description: "Start or resume the assistant" },
+					{ command: "stop", description: "Pause the assistant" },
+					{ command: "help", description: "Show help" },
+				]),
 			)
 
 			const bot = createAmbyBot(botRuntime, env.TELEGRAM_BOT_TOKEN)

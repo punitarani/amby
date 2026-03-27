@@ -6,6 +6,7 @@ import {
 	clearRequestLog,
 	getMessages,
 	getRequestLog,
+	updateMessage,
 } from "./message-store"
 
 describe("message store", () => {
@@ -22,9 +23,10 @@ describe("message store", () => {
 
 	it("stores role correctly", () => {
 		const user = addMessage("user", "question")
-		const bot = addMessage("bot", "answer")
+		const bot = addMessage("bot", "answer", "HTML")
 		expect(user.role).toBe("user")
 		expect(bot.role).toBe("bot")
+		expect(bot.parseMode).toBe("HTML")
 	})
 
 	it("returns all messages in order", () => {
@@ -41,6 +43,15 @@ describe("message store", () => {
 		addMessage("user", "test")
 		clearMessages()
 		expect(getMessages()).toHaveLength(0)
+	})
+
+	it("updates stored messages", () => {
+		const original = addMessage("bot", "before")
+		const updated = updateMessage(original.id, { text: "after", parseMode: "HTML" })
+
+		expect(updated?.text).toBe("after")
+		expect(updated?.parseMode).toBe("HTML")
+		expect(getMessages()[0]?.text).toBe("after")
 	})
 
 	it("tracks request log entries", () => {

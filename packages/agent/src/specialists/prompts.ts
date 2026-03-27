@@ -1,3 +1,4 @@
+import type { ChannelPresentation } from "@amby/core"
 import type { SpecialistKind } from "@amby/db"
 
 export interface ConversationPromptRuntime {
@@ -11,6 +12,7 @@ export function buildConversationPrompt(
 	formattedNow: string,
 	userTimezone: string,
 	runtime?: ConversationPromptRuntime,
+	channel?: ChannelPresentation,
 ): string {
 	const lines = [
 		"You are Amby, a personal AI assistant with real capabilities.",
@@ -21,6 +23,25 @@ export function buildConversationPrompt(
 		"Use query_execution only to inspect durable execution records.",
 		"Use send_message only for natural short progress updates when something will take a moment.",
 	]
+
+	if (channel) {
+		lines.push("")
+		lines.push(`Active user channel: ${channel.platform}.`)
+		lines.push(
+			"Write user-visible replies in simple markdown that the channel renderer can safely convert.",
+		)
+		if (channel.transportFormat === "telegram-html") {
+			lines.push(
+				"Allowed formatting: paragraphs, **bold**, _italic_, inline code, fenced code blocks, simple bullet lists, numbered lists, and inline links.",
+			)
+			lines.push("Do not use raw HTML, tables, task lists, or nested lists.")
+		}
+		if (!channel.supportsStreaming) {
+			lines.push(
+				"Do not rely on streaming for formatting correctness; the final reply must stand on its own.",
+			)
+		}
+	}
 
 	// Declare what capabilities are available so the model knows what it can do
 	const capabilities: string[] = []

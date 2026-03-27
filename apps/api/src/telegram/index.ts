@@ -1,6 +1,7 @@
 import { EnvService } from "@amby/env"
-import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Context, Effect, Layer } from "effect"
+import { createTelegramBotApiClient } from "./bot-api"
+import { TELEGRAM_COMMANDS } from "./utils"
 
 // --- TelegramSender Effect Service ---
 
@@ -19,35 +20,31 @@ export const TelegramSenderLive = Layer.effect(
 		if (!env.TELEGRAM_BOT_TOKEN) {
 			throw new Error("TELEGRAM_BOT_TOKEN is not set")
 		}
-		const adapter = createTelegramAdapter({
+		const client = createTelegramBotApiClient({
 			botToken: env.TELEGRAM_BOT_TOKEN,
 			apiBaseUrl: env.TELEGRAM_API_BASE_URL,
-			mode: "webhook",
 		})
 
 		yield* Effect.tryPromise(() =>
-			fetch(
-				`${env.TELEGRAM_API_BASE_URL || "https://api.telegram.org"}/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
-				{
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						commands: [
-							{ command: "start", description: "Start or resume the assistant" },
-							{ command: "stop", description: "Pause the assistant" },
-							{ command: "help", description: "Show help" },
-						],
-					}),
-				},
+			client.setMyCommands(
+				TELEGRAM_COMMANDS.map((command) => ({
+					command: command.slice(1) as "start" | "stop" | "help",
+					description:
+						command === "/start"
+							? "Start or resume the assistant"
+							: command === "/stop"
+								? "Pause the assistant"
+								: "Show help",
+				})),
 			),
 		)
 
 		return {
 			sendMessage: async (chatId: number, text: string) => {
-				await adapter.postMessage(String(chatId), text)
+				await client.sendMessage(chatId, text)
 			},
 			startTyping: async (chatId: number) => {
-				await adapter.startTyping(String(chatId))
+				await client.startTyping(chatId)
 			},
 		}
 	}),
@@ -61,17 +58,16 @@ export const TelegramSenderLite = Layer.effect(
 		if (!env.TELEGRAM_BOT_TOKEN) {
 			throw new Error("TELEGRAM_BOT_TOKEN is not set")
 		}
-		const adapter = createTelegramAdapter({
+		const client = createTelegramBotApiClient({
 			botToken: env.TELEGRAM_BOT_TOKEN,
 			apiBaseUrl: env.TELEGRAM_API_BASE_URL,
-			mode: "webhook",
 		})
 		return {
 			sendMessage: async (chatId: number, text: string) => {
-				await adapter.postMessage(String(chatId), text)
+				await client.sendMessage(chatId, text)
 			},
 			startTyping: async (chatId: number) => {
-				await adapter.startTyping(String(chatId))
+				await client.startTyping(chatId)
 			},
 		}
 	}),

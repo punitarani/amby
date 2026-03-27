@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { addMessage, addRequestLogEntry } from "../../../../lib/message-store"
+import { addMessage, addRequestLogEntry, updateMessage } from "../../../../lib/message-store"
 import { emitSSE } from "../../../../lib/sse-emitter"
 
 const botFrom = {
@@ -40,7 +40,8 @@ export async function POST(
 	switch (method) {
 		case "sendMessage": {
 			const text = String(body.text || "")
-			const msg = addMessage("bot", text)
+			const parseMode = typeof body.parse_mode === "string" ? body.parse_mode : undefined
+			const msg = addMessage("bot", text, parseMode)
 			emitSSE("message", msg)
 			return NextResponse.json({
 				ok: true,
@@ -56,6 +57,11 @@ export async function POST(
 
 		case "editMessageText": {
 			const text = String(body.text || "")
+			const parseMode = typeof body.parse_mode === "string" ? body.parse_mode : undefined
+			updateMessage(String(body.message_id || ""), {
+				text,
+				parseMode,
+			})
 			// Emit edit event for UI to update latest bot message
 			emitSSE("edit", { text, message_id: body.message_id })
 			return NextResponse.json({
