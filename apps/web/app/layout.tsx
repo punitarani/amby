@@ -21,14 +21,14 @@ export const metadata: Metadata = {
 	metadataBase: new URL(APP_URL),
 	title: "AMBY | Personal Assistant Computer",
 	description:
-		"Amby is your personal assistant computer in the cloud, helping you remember, resume, and act across Telegram, email, and calendar.",
+		"Amby is Your personal ambient assistant in the cloud, helping you remember, resume, and act across Telegram, email, and calendar.",
 	alternates: {
 		canonical: "/",
 	},
 	openGraph: {
 		title: "AMBY | Personal Assistant Computer",
 		description:
-			"Amby is your personal assistant computer in the cloud, helping you remember, resume, and act across Telegram, email, and calendar.",
+			"Amby is Your personal ambient assistant in the cloud, helping you remember, resume, and act across Telegram, email, and calendar.",
 		url: APP_URL,
 		siteName: "AMBY",
 		type: "website",
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
 		card: "summary_large_image",
 		title: "AMBY | Personal Assistant Computer",
 		description:
-			"Amby is your personal assistant computer in the cloud, helping you remember, resume, and act across Telegram, email, and calendar.",
+			"Amby is Your personal ambient assistant in the cloud, helping you remember, resume, and act across Telegram, email, and calendar.",
 	},
 }
 

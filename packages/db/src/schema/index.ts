@@ -1,7 +1,5 @@
 export * from "./automations"
 export * from "./compute"
-export * from "./connector-auth-requests"
-export * from "./connector-preferences"
 export * from "./conversations"
 export * from "./integration-accounts"
 export * from "./memories"

@@ -1,7 +1,7 @@
 import type { BrowserService, BrowserTaskResult } from "@amby/browser"
 import { Effect } from "effect"
 import type { ExecutionTask, ExecutionTaskResult } from "../../types/execution"
-import type { TraceWriter } from "../ledger"
+import type { RunWriter } from "../ledger"
 
 function buildBrowserTaskData(browserResult: BrowserTaskResult): ExecutionTaskResult["data"] {
 	const hasActions = Array.isArray(browserResult.actions) && browserResult.actions.length > 0
@@ -38,7 +38,7 @@ function buildBrowserRuntimeData(
 export async function runBrowserSpecialist(params: {
 	task: ExecutionTask
 	browser: import("effect").Context.Tag.Service<typeof BrowserService>
-	trace: TraceWriter
+	trace: RunWriter
 	onProgress?: (event: {
 		phase?: string
 		category?: string
@@ -80,7 +80,7 @@ export async function runBrowserSpecialist(params: {
 			durationMs: browserResult.metrics?.durationMs ?? Date.now() - startedAt,
 		},
 		runtimeData: buildBrowserRuntimeData(browserResult),
-		traceRef: { traceId: params.trace.traceId },
+		traceRef: { traceId: params.trace.runId },
 	}
 
 	return {

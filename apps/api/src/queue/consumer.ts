@@ -1,8 +1,7 @@
+import { handleCommand, parseTelegramCommand, type TelegramQueueMessage } from "@amby/channels"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { setTelegramScope, setWorkerScope } from "../sentry"
-import type { TelegramQueueMessage } from "../telegram/utils"
-import { handleCommand, parseTelegramCommand } from "../telegram/utils"
 import { makeRuntimeForConsumer } from "./runtime"
 
 export async function handleQueueBatch(

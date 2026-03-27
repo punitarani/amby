@@ -16,8 +16,6 @@ graph BT
     computer["@amby/computer"] --> core
     computer --> db
     computer --> env
-    memory["@amby/memory"] --> core
-    memory --> db
     plugins["@amby/plugins"] --> core
     plugins --> db
     plugins --> env
@@ -34,7 +32,6 @@ graph BT
     api --> core
     api --> db
     api --> env
-    api --> memory
     api --> plugins
     api --> skills
     web["apps/web"] --> plugins
@@ -47,8 +44,8 @@ graph BT
 | **1. Domain kernel** | `core` | Domain models, ports (interfaces), plugin registry, policies |
 | **2. Infrastructure** | `env`, `db` | Environment config, platform abstractions, persistence gateway |
 | **3. Auth** | `auth` | Session management, API keys (BetterAuth) |
-| **4. Capabilities** | `browser`, `computer`, `memory` | Web automation (Stagehand), sandbox compute (Daytona), vector memory (pgvector) |
-| **5. Composition** | `plugins`, `skills` | Built-in plugins (integrations, automations, browser-tools, computer-tools), skill discovery |
+| **4. Capabilities** | `browser`, `computer` | Web automation (Stagehand), sandbox compute (Daytona) |
+| **5. Composition** | `plugins`, `skills` | Built-in plugins (integrations, automations, browser-tools, computer-tools, memory), skill discovery |
 | **6. Orchestration** | `agent` | Conversation engine, context building, execution planning, tool dispatch |
 | **7. Runtime** | `apps/api`, `apps/web`, `apps/mock` | Cloudflare Workers API, Next.js marketing site, mock Telegram for dev |
 
@@ -72,7 +69,7 @@ What must **not** cross boundaries:
 - Business logic must not live in route handlers, webhook processors, or UI components
 - Raw external data (JSON, webhook payloads, env vars) must not pass through the system unparsed
 - No package may import from `apps/` — dependency flows strictly downward
-- No capability package (`browser`, `computer`, `memory`) may depend on `agent`
+- No capability package (`browser`, `computer`) may depend on `agent`
 - `core` and `env` must not depend on `db`
 
 ## Runtime Flow (Telegram)

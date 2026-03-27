@@ -46,9 +46,8 @@ erDiagram
     %% Memories
     memories ||--o{ memories : "parentId versioning"
 
-    %% Connectors
-    users ||--o{ connector_auth_requests : has
-    users ||--o{ connector_preferences : has
+    %% Integrations
+    users ||--o{ integration_accounts : has
 ```
 
 ## Entity groups
@@ -66,11 +65,11 @@ erDiagram
 
 | Table | Purpose | Key constraints |
 |---|---|---|
-| `conversations` | Platform-scoped container. One per user + platform + workspace + external key. | unique on `(userId, platform, workspaceKey, externalConversationKey)` |
+| `conversations` | Platform-scoped container. One per user + platform + external key. | unique on `(userId, platform, externalConversationKey)` |
 | `conversation_threads` | Internal routing layer (topic threads). Source: `native`, `reply_chain`, `derived`, `manual`. | Exactly one `isDefault=true` per conversation (partial unique index). Unique `externalThreadKey` per conversation when non-null. |
 | `messages` | User-visible transcript only. Role: `user` or `assistant`. | **Not** the execution log. Indexed by `(conversationId, createdAt)`. |
 
-Platform types: `cli`, `telegram`, `slack`, `discord`.
+Platform types: `telegram`.
 
 ### Execution traces
 
@@ -129,12 +128,11 @@ Runtime: `in_process`, `browser`, `sandbox`. Provider: `internal`, `stagehand`, 
 
 Volume is persistent identity. Sandbox is replaceable execution runtime.
 
-### Connectors
+### Integrations
 
 | Table | Purpose | Key constraints |
 |---|---|---|
-| `connector_auth_requests` | Pending OAuth flows for toolkit integrations. | Unique on `(userId, toolkit)`. TTL via `expiresAt`. |
-| `connector_preferences` | User's preferred connected account per toolkit. | Unique on `(userId, toolkit)`. |
+| `integration_accounts` | Tracks external integration accounts, pending OAuth flows, and preferred-account flags. | Unique on `(userId, provider, externalAccountId)`. Pending auth data stored in `metadataJson`. `isPreferred` flag replaces separate preferences table. |
 
 ## Append-only event log pattern
 

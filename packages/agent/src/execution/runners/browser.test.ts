@@ -38,7 +38,7 @@ function makeBrowserService(result: BrowserTaskResult) {
 }
 
 const trace = {
-	traceId: "trace-1",
+	runId: "trace-1",
 	append: () => Effect.void,
 	appendMany: () => Effect.void,
 	setMode: () => Effect.void,

@@ -25,7 +25,7 @@ export type PreparedConversationContext = {
  * Prepare conversation context for a turn.
  *
  * Memory context is injected via plugin context contributors in the engine,
- * NOT loaded here. This keeps agent decoupled from @amby/memory.
+ * NOT loaded here. This keeps agent decoupled from @amby/plugins/memory.
  */
 export function prepareConversationContext(params: {
 	query: QueryFn

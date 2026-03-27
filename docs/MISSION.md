@@ -5,7 +5,7 @@ cloud" requirement.
 
 ## Mission
 
-Amby is not "an assistant app." Amby is **your personal assistant computer** that lives online and stays on—like a
+Amby is not "an assistant app." Amby is **Your personal ambient assistant** that lives online and stays on—like a
 private, always-available helper with its own workspace. You interact with it from anywhere (phone, desktop, chat
 surfaces), but the "brain" and the work happen in Amby's cloud environment.
 
@@ -23,10 +23,10 @@ A world where a person's computing is continuous instead of fragmented:
 
 You don't "open an AI app," paste context, and babysit prompts. You have a persistent assistant computer that:
 
-- keeps a living understanding of what you care about,
-- carries context across devices and channels,
-- runs long-running work when you're offline,
-- and surfaces results at the right moment with clear permissions and auditability.
+* keeps a living understanding of what you care about,
+* carries context across devices and channels,
+* runs long-running work when you're offline,
+* and surfaces results at the right moment with clear permissions and auditability.
 
 Practically, this is "ambient" because value arrives without you initiating a chat session: summaries, follow-ups,
 drafts, reminders, escalations, and pre-work for meetings land *before* you remember to ask.
@@ -62,7 +62,7 @@ This is necessary *now* for two reasons:
 
 Consumer AI usage is already mainstream, but trust is not. Over half of surveyed U.S. consumers say they use or
 experiment with genAI, and a Federal Reserve survey estimated genAI adoption at 54.6% among U.S. adults 18–64 by August
-2025. Yet half of U.S. adults say AI's increased use makes them more concerned than excited—which is a huge headwind for
+2025\. Yet half of U.S. adults say AI's increased use makes them more concerned than excited—which is a huge headwind for
 anything that claims "lifelong memory" and "always on."
 
 Meanwhile, the mainstream trend is unmistakable: assistants are becoming **account-connected** and **action-capable** (
@@ -86,9 +86,9 @@ calendar + messaging, and who miss things because context is scattered and time 
 This is not a "techies only" pitch. Techies are an acquisition channel, not the market ceiling. The first paid segment
 should be anyone who:
 
-- has a chaotic inbox and calendar,
-- juggles many conversations and commitments,
-- and experiences real cost from dropped follow-ups or last-minute scrambling.
+* has a chaotic inbox and calendar,
+* juggles many conversations and commitments,
+* and experiences real cost from dropped follow-ups or last-minute scrambling.
 
 Competitor evidence supports this targeting: Poke (a messaging-native assistant) has positioned itself around managing
 chaotic daily flows in the messaging threads people already use, and early commentary explicitly points to remote
@@ -96,10 +96,10 @@ workers, founders, and multi-tool jugglers as strong fits.
 
 What you should *not* claim at launch:
 
-- "AI for everyone"
-- "always listening"
-- "controls your devices"
-- "replaces apps"
+* "AI for everyone"
+* "always listening"
+* "controls your devices"
+* "replaces apps"
 
 Those claims invite maximum fear and maximum competitive pressure. The winning early claim is narrower:
 
@@ -117,11 +117,11 @@ OpenAI explicitly states that **OpenAI APIs are billed separately from ChatGPT s
 So "OAuth into ChatGPT to use their plan as your model backend" is *not* a generally available third‑party pattern today
 in the way you likely mean it. The closest official equivalents are:
 
-- **Apps inside ChatGPT (Apps SDK + MCP):** you can build an app that runs *inside* ChatGPT; OpenAI positions the Apps
+* **Apps inside ChatGPT (Apps SDK + MCP):** you can build an app that runs *inside* ChatGPT; OpenAI positions the Apps
   SDK as built on MCP (an open standard) and says it's open source so apps can run anywhere that adopts the standard.
-- **"Sign in with ChatGPT" exists in Codex contexts:** OpenAI describes subscription-based "sign in with ChatGPT" for
+* **"Sign in with ChatGPT" exists in Codex contexts:** OpenAI describes subscription-based "sign in with ChatGPT" for
   Codex clients and cloud delegation, but that is anchored to OpenAI's Codex product surfaces.
-- OpenAI has said it was exploring "Sign in with ChatGPT" for third-party apps (identity provider). That's promising for
+* OpenAI has said it was exploring "Sign in with ChatGPT" for third-party apps (identity provider). That's promising for
   login, but it does not equal "use your ChatGPT subscription as the metered compute wallet."
 
 Bottom line: if Amby is "ChatGPT-first," the most reliable interpretation is **distribution + interface first (as a
@@ -129,6 +129,6 @@ ChatGPT app)**, not "free model compute for your standalone product."
 
 That doesn't kill the plan, but it does force a clean decision:
 
-- if you start **inside ChatGPT**, you ride a massive platform shift (apps + integrations), but you also accept platform
+* if you start **inside ChatGPT**, you ride a massive platform shift (apps + integrations), but you also accept platform
   dependency;
-- if you start **outside ChatGPT**, you need your own inference economics and must win on trust and habit, not novelty.
+* if you start **outside ChatGPT**, you need your own inference economics and must win on trust and habit, not novelty.

@@ -1,16 +1,12 @@
-import {
-	isSandboxTask,
-	isTerminal,
-	listRecentTaskEvents,
-	type TaskSupervisor,
-} from "@amby/computer"
+import { isSandboxTask, isTerminal, type TaskSupervisor } from "@amby/computer"
+import type { TaskRecord, TaskStoreService } from "@amby/core"
 import type { Database } from "@amby/db"
-import { and, desc, eq, inArray, schema } from "@amby/db"
+import { and, type DbError, desc, eq, inArray, schema } from "@amby/db"
 import { Effect } from "effect"
 import type { QueryExecutionInput, QueryExecutionResult } from "../types/execution"
 import type { JsonValue } from "../types/persistence"
 
-type QueryFn = <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, import("@amby/db").DbError>
+type QueryFn = <T>(fn: (db: Database) => Promise<T>) => Effect.Effect<T, DbError>
 
 function parseArtifacts(value: unknown): QueryExecutionResult["executions"][number]["artifacts"] {
 	if (!Array.isArray(value)) return undefined
@@ -22,17 +18,19 @@ function parseArtifacts(value: unknown): QueryExecutionResult["executions"][numb
 	)
 }
 
-function mapTaskRow(task: typeof schema.tasks.$inferSelect) {
+function mapTaskRow(
+	task: TaskRecord | typeof schema.tasks.$inferSelect,
+): QueryExecutionResult["executions"][number] {
 	return {
 		taskId: task.id,
-		specialist: task.specialist ?? null,
-		status: task.status,
-		summary: task.outputSummary,
+		specialist: (task.specialist ?? null) as import("@amby/core").SpecialistKind | null,
+		status: task.status as import("@amby/core").TaskStatus,
+		summary: (task.outputSummary ?? null) as string | null,
 		output: task.output as JsonValue | undefined,
 		traceId: task.traceId ?? null,
-		runtime: task.runtime,
-		provider: task.provider,
-		runnerKind: task.runnerKind ?? null,
+		runtime: task.runtime as import("@amby/core").TaskRuntime,
+		provider: task.provider as import("@amby/core").TaskProvider,
+		runnerKind: (task.runnerKind ?? null) as import("@amby/core").RunnerKind | null,
 		requiresBrowser: task.requiresBrowser,
 		startedAt: task.startedAt?.toISOString() ?? null,
 		completedAt: task.completedAt?.toISOString() ?? null,
@@ -41,11 +39,23 @@ function mapTaskRow(task: typeof schema.tasks.$inferSelect) {
 	}
 }
 
-function mapTaskEventRow(event: typeof schema.taskEvents.$inferSelect) {
+function mapTaskEventRow(event: {
+	kind: string
+	source: string
+	seq?: number | null
+	occurredAt: Date
+	payload?: Record<string, unknown> | null
+}): {
+	kind: string
+	source: string
+	seq: number | null
+	occurredAt: string
+	payload?: JsonValue
+} {
 	return {
 		kind: event.kind,
 		source: event.source,
-		seq: event.seq,
+		seq: event.seq ?? null,
 		occurredAt: event.occurredAt.toISOString(),
 		payload: event.payload as JsonValue | undefined,
 	}
@@ -53,49 +63,50 @@ function mapTaskEventRow(event: typeof schema.taskEvents.$inferSelect) {
 
 export function queryExecution(params: {
 	query: QueryFn
+	taskStore: TaskStoreService
 	supervisor: import("effect").Context.Tag.Service<typeof TaskSupervisor>
 	userId: string
 	conversationId: string
 	input: QueryExecutionInput
 }): Effect.Effect<
 	QueryExecutionResult,
-	import("@amby/db").DbError | import("@amby/computer").SandboxError
+	import("@amby/core").DbError | DbError | import("@amby/computer").SandboxError
 > {
-	const { query, supervisor, userId, conversationId, input } = params
+	const { query, taskStore, supervisor, userId, conversationId, input } = params
 
 	if (input.kind === "by-id") {
-		return query((db) =>
-			db
-				.select()
-				.from(schema.tasks)
-				.where(and(eq(schema.tasks.id, input.taskId), eq(schema.tasks.userId, userId)))
-				.limit(1),
-		).pipe(
-			Effect.flatMap((rows) => {
-				const task = rows[0] ?? null
-				if (!task) {
-					return Effect.succeed<QueryExecutionResult>({ executions: [] })
-				}
-				const taskEffect =
-					isSandboxTask(task) && !isTerminal(task.status)
-						? supervisor.getTask(task.id, userId, input.waitSeconds)
-						: Effect.succeed(task)
-				return Effect.all({
-					task: taskEffect.pipe(Effect.map((value) => value ?? task)),
-					recentEvents: listRecentTaskEvents(query, task.id, 10).pipe(
-						Effect.map((events) => events.map(mapTaskEventRow)),
-					),
-				}).pipe(
-					Effect.map(({ task: resolvedTask, recentEvents }) => ({
-						executions: [
-							{
-								...mapTaskRow(resolvedTask),
-								recentEvents,
-							},
-						],
-					})),
-				)
-			}),
+		return taskStore.getByIdAndUser(input.taskId, userId).pipe(
+			Effect.flatMap(
+				(
+					task,
+				): Effect.Effect<
+					QueryExecutionResult,
+					import("@amby/core").DbError | import("@amby/computer").SandboxError
+				> => {
+					if (!task) {
+						return Effect.succeed({ executions: [] } as QueryExecutionResult)
+					}
+					const taskEffect =
+						isSandboxTask(task) && !isTerminal(task.status)
+							? supervisor.getTask(task.id, userId, input.waitSeconds)
+							: Effect.succeed(task as TaskRecord | null)
+					return Effect.all({
+						task: taskEffect.pipe(Effect.map((value) => value ?? task)),
+						recentEvents: taskStore
+							.listRecentEvents(task.id, 10)
+							.pipe(Effect.map((events) => events.map(mapTaskEventRow))),
+					}).pipe(
+						Effect.map(({ task: resolvedTask, recentEvents }) => ({
+							executions: [
+								{
+									...mapTaskRow(resolvedTask),
+									recentEvents,
+								},
+							],
+						})),
+					)
+				},
+			),
 		)
 	}
 

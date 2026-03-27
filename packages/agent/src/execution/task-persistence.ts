@@ -1,9 +1,5 @@
-import {
-	completeTaskRecord,
-	createTaskRecord,
-	deriveRuntimeForRunner,
-	type TaskQueryFn,
-} from "@amby/computer"
+import { deriveRuntimeForRunner } from "@amby/computer"
+import type { TaskStoreService } from "@amby/core"
 import { Effect } from "effect"
 import type { ExecutionTask, ExecutionTaskInput, ExecutionTaskResult } from "../types/execution"
 
@@ -43,7 +39,7 @@ function buildRuntimeData(task: ExecutionTask): Record<string, unknown> | null {
 }
 
 export async function persistTaskCreated(
-	query: TaskQueryFn,
+	taskStore: TaskStoreService,
 	task: ExecutionTask,
 	config: {
 		userId: string
@@ -59,7 +55,7 @@ export async function persistTaskCreated(
 
 	try {
 		await Effect.runPromise(
-			createTaskRecord(query, {
+			taskStore.createTask({
 				id: task.id,
 				userId: config.userId,
 				runtime: runtime.runtime,
@@ -107,13 +103,13 @@ export async function persistTaskCreated(
 }
 
 export async function persistTaskCompleted(
-	query: TaskQueryFn,
+	taskStore: TaskStoreService,
 	taskId: string,
 	result: ExecutionTaskResult,
 ): Promise<boolean> {
 	try {
 		await Effect.runPromise(
-			completeTaskRecord(query, {
+			taskStore.completeTask({
 				taskId,
 				status:
 					result.status === "completed"

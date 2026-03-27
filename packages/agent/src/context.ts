@@ -115,28 +115,28 @@ export function loadThreadTail(
 
 		const annotationMap = new Map<string, string>()
 		if (recentMessageIds.length > 0) {
-			// Load trace events for recent assistant messages
-			const traceRows = yield* query((d) =>
+			// Load run events for recent assistant messages
+			const eventRows = yield* query((d) =>
 				d
 					.select({
-						messageId: schema.traces.messageId,
-						kind: schema.traceEvents.kind,
-						payload: schema.traceEvents.payload,
+						messageId: schema.runs.messageId,
+						kind: schema.runEvents.kind,
+						payload: schema.runEvents.payload,
 					})
-					.from(schema.traceEvents)
-					.innerJoin(schema.traces, eq(schema.traceEvents.traceId, schema.traces.id))
+					.from(schema.runEvents)
+					.innerJoin(schema.runs, eq(schema.runEvents.runId, schema.runs.id))
 					.where(
 						and(
-							eq(schema.traces.conversationId, conversationId),
-							eq(schema.traceEvents.kind, "tool_result"),
-							inArray(schema.traces.messageId, recentMessageIds),
+							eq(schema.runs.conversationId, conversationId),
+							eq(schema.runEvents.kind, "tool_result"),
+							inArray(schema.runs.messageId, recentMessageIds),
 						),
 					),
 			)
 
 			// Group tool results by messageId
 			const toolResultsByMessage = new Map<string, unknown[]>()
-			for (const row of traceRows) {
+			for (const row of eventRows) {
 				if (!row.messageId) continue
 				const existing = toolResultsByMessage.get(row.messageId) ?? []
 				existing.push({
@@ -224,21 +224,21 @@ export function loadThreadArtifacts(
 
 		if (msgRows.length === 0) return []
 
-		// Load tool_result trace events for these messages
-		const traceRows = yield* query((d) =>
+		// Load tool_result run events for these messages
+		const eventRows = yield* query((d) =>
 			d
 				.select({
-					messageId: schema.traces.messageId,
-					payload: schema.traceEvents.payload,
+					messageId: schema.runs.messageId,
+					payload: schema.runEvents.payload,
 				})
-				.from(schema.traceEvents)
-				.innerJoin(schema.traces, eq(schema.traceEvents.traceId, schema.traces.id))
+				.from(schema.runEvents)
+				.innerJoin(schema.runs, eq(schema.runEvents.runId, schema.runs.id))
 				.where(
 					and(
-						eq(schema.traces.conversationId, conversationId),
-						eq(schema.traceEvents.kind, "tool_result"),
+						eq(schema.runs.conversationId, conversationId),
+						eq(schema.runEvents.kind, "tool_result"),
 						inArray(
-							schema.traces.messageId,
+							schema.runs.messageId,
 							msgRows.map((r) => r.id),
 						),
 					),
@@ -247,7 +247,7 @@ export function loadThreadArtifacts(
 
 		const annotationsByMessage = new Map<string, string>()
 
-		for (const row of traceRows) {
+		for (const row of eventRows) {
 			if (!row.messageId) continue
 			const payload = row.payload as Record<string, unknown>
 			const output = payload.output

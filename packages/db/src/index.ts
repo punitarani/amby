@@ -16,9 +16,11 @@ export {
 	sql,
 } from "drizzle-orm"
 export * from "./errors"
+export * from "./repositories"
 export type {
 	ExecutionMode,
 	Platform,
+	RunEventKind,
 	RunnerKind,
 	SpecialistKind,
 	TaskEventKind,
@@ -27,7 +29,6 @@ export type {
 	TaskRuntime,
 	TaskStatus,
 	ThreadSource,
-	TraceEventKind,
 } from "./schema"
 export * as schema from "./schema"
 export * from "./service"

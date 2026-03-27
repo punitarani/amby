@@ -9,9 +9,6 @@ type MemoryOps = Context.Tag.Service<typeof MemoryService>
 
 /**
  * Create the memory plugin from a resolved MemoryService instance.
- *
- * This is the authoritative memory plugin — the duplicate in
- * @amby/plugins/memory has been deleted.
  */
 export function createMemoryPlugin(memory: MemoryOps): AmbyPlugin {
 	return {

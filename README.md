@@ -1,6 +1,6 @@
 # Amby
 
-Your personal assistant computer that lives in the cloud and stays on.
+Your personal ambient assistant that lives in the cloud and stays on.
 
 Amby runs once — you reach it everywhere. It keeps a living understanding of what you care about, carries context across devices, runs work while you're offline, and surfaces results before you remember to ask.
 

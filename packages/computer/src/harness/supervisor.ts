@@ -1,5 +1,5 @@
-import type { RunnerKind, SpecialistKind, TaskStatus } from "@amby/db"
-import { and, DbService, eq, inArray, lte, schema } from "@amby/db"
+import type { RunnerKind, SpecialistKind, TaskRecord, TaskStatus } from "@amby/core"
+import { ComputeStore, TaskStore, TraceStore } from "@amby/core"
 import { EnvService } from "@amby/env"
 import type { Sandbox } from "@daytonaio/sdk"
 import { Context, Effect, Layer, Runtime } from "effect"
@@ -34,18 +34,10 @@ import { CodexProvider } from "./codex-provider"
 import { probeSingleTask } from "./reconciliation"
 import { collectTaskExecutionData, previewTaskOutput } from "./task-execution-data"
 import { isTerminal } from "./task-state"
-import {
-	completeTaskRecord,
-	createTaskRecord,
-	isSandboxTask,
-	mergeRuntimeData,
-	readSandboxRuntimeData,
-	updateTaskRecord,
-} from "./task-store"
+import { isSandboxTask, mergeRuntimeData, readSandboxRuntimeData } from "./task-store"
 import { appendTaskTraceTerminalEvent } from "./task-trace"
 import { getTelegramChatId } from "./telegram-chat-id"
 
-type TaskRecord = typeof schema.tasks.$inferSelect
 const CODEX_AUTH_FILE = `${CODEX_HOME}/auth.json`
 const CODEX_AUTH_LOG = `${CODEX_HOME}/login.out`
 const CODEX_CONFIG_FILE = `${CODEX_HOME}/config.toml`
@@ -220,7 +212,9 @@ export const TaskSupervisorLive = Layer.scoped(
 	Effect.gen(function* () {
 		const sandboxService = yield* SandboxService
 		const env = yield* EnvService
-		const { db, query } = yield* DbService
+		const taskStore = yield* TaskStore
+		const traceStore = yield* TraceStore
+		const computeStore = yield* ComputeStore
 
 		const rt = yield* Effect.runtime<never>()
 		const runPromise = Runtime.runPromise(rt)
@@ -229,23 +223,21 @@ export const TaskSupervisorLive = Layer.scoped(
 		const activeTasks = new Map<string, ActiveTask>()
 
 		const loadAuthConfig = async (userId: string) => {
-			const rows = await db
-				.select({ authConfig: schema.computeVolumes.authConfig })
-				.from(schema.computeVolumes)
-				.where(eq(schema.computeVolumes.userId, userId))
-				.limit(1)
-			return rows[0]?.authConfig
+			return await runPromise(
+				computeStore.loadAuthConfig(userId).pipe(Effect.catchAll(() => Effect.succeed(null))),
+			)
 		}
 
 		const saveAuthConfig = async (userId: string, authConfig: unknown) => {
 			const next = readHarnessAuthConfig(authConfig)
-			await db
-				.update(schema.computeVolumes)
-				.set({
-					authConfig: Object.keys(next).length === 0 ? null : (next as Record<string, unknown>),
-					updatedAt: new Date(),
-				})
-				.where(eq(schema.computeVolumes.userId, userId))
+			await runPromise(
+				computeStore
+					.saveAuthConfig(
+						userId,
+						Object.keys(next).length === 0 ? null : (next as Record<string, unknown>),
+					)
+					.pipe(Effect.catchAll(() => Effect.void)),
+			)
 		}
 
 		const readSandboxText = async (sandbox: Sandbox, path: string) => {
@@ -373,11 +365,9 @@ export const TaskSupervisorLive = Layer.scoped(
 
 					const cmd = await task.sandbox.process.getSessionCommand(task.sessionId, task.commandId)
 
-					const hbNow = new Date()
-					await db
-						.update(schema.tasks)
-						.set({ heartbeatAt: hbNow, updatedAt: hbNow })
-						.where(eq(schema.tasks.id, task.taskId))
+					await runPromise(
+						taskStore.heartbeat(task.taskId).pipe(Effect.catchAll(() => Effect.void)),
+					)
 
 					task.consecutiveFailures = 0
 
@@ -398,18 +388,16 @@ export const TaskSupervisorLive = Layer.scoped(
 					)
 
 					if (task.consecutiveFailures >= MAX_HEARTBEAT_FAILURES) {
-						const rows = await db
-							.select({ status: schema.tasks.status, traceId: schema.tasks.traceId })
-							.from(schema.tasks)
-							.where(eq(schema.tasks.id, task.taskId))
-							.limit(1)
-						const current = rows[0]?.status as TaskStatus | undefined
+						const currentTask = await runPromise(
+							taskStore.getById(task.taskId).pipe(Effect.catchAll(() => Effect.succeed(null))),
+						)
+						const current = currentTask?.status as TaskStatus | undefined
 						if (!current || isTerminal(current)) {
 							activeTasks.delete(task.taskId)
 							continue
 						}
 						const completed = await runPromise(
-							completeTaskRecord(query, {
+							taskStore.completeTask({
 								taskId: task.taskId,
 								status: "lost",
 								summary: "Task lost after repeated heartbeat failures.",
@@ -417,9 +405,8 @@ export const TaskSupervisorLive = Layer.scoped(
 							}),
 						)
 						if (completed) {
-							await appendTaskTraceTerminalEvent({
-								db,
-								traceId: task.traceId ?? rows[0]?.traceId,
+							await appendTaskTraceTerminalEvent(traceStore, {
+								traceId: task.traceId ?? currentTask?.traceId,
 								taskId: task.taskId,
 								status: "lost",
 								reason: "heartbeat_failures",
@@ -434,18 +421,11 @@ export const TaskSupervisorLive = Layer.scoped(
 		async function finalizeTask(task: ActiveTask, exitCode: number) {
 			if (!activeTasks.has(task.taskId)) return
 
-			const rows = await db
-				.select({
-					status: schema.tasks.status,
-					traceId: schema.tasks.traceId,
-					runtime: schema.tasks.runtime,
-					runtimeData: schema.tasks.runtimeData,
-				})
-				.from(schema.tasks)
-				.where(eq(schema.tasks.id, task.taskId))
-				.limit(1)
-			const current = rows[0]?.status as TaskStatus | undefined
-			const traceId = rows[0]?.traceId
+			const currentTask = await runPromise(
+				taskStore.getById(task.taskId).pipe(Effect.catchAll(() => Effect.succeed(null))),
+			)
+			const current = currentTask?.status as TaskStatus | undefined
+			const traceId = currentTask?.traceId
 			if (current && isTerminal(current)) {
 				await deletePendingSession(task.sandbox, task.sessionId)
 				activeTasks.delete(task.taskId)
@@ -458,7 +438,7 @@ export const TaskSupervisorLive = Layer.scoped(
 				artifacts: [] as Array<Record<string, unknown>>,
 			}
 			try {
-				const runtimeData = rows[0] ? readSandboxRuntimeData(rows[0]) : null
+				const runtimeData = currentTask ? readSandboxRuntimeData(currentTask) : null
 				const executionData = await collectTaskExecutionData({
 					sandbox: task.sandbox,
 					provider,
@@ -476,7 +456,7 @@ export const TaskSupervisorLive = Layer.scoped(
 
 			const nextStatus = exitCode === 0 ? "succeeded" : "failed"
 			const completed = await runPromise(
-				completeTaskRecord(query, {
+				taskStore.completeTask({
 					taskId: task.taskId,
 					status: nextStatus,
 					summary: result.summary.slice(0, 2000),
@@ -491,8 +471,7 @@ export const TaskSupervisorLive = Layer.scoped(
 				}),
 			)
 			if (completed) {
-				await appendTaskTraceTerminalEvent({
-					db,
+				await appendTaskTraceTerminalEvent(traceStore, {
 					traceId: task.traceId ?? traceId,
 					taskId: task.taskId,
 					status: nextStatus,
@@ -508,15 +487,13 @@ export const TaskSupervisorLive = Layer.scoped(
 		async function timeoutTask(task: ActiveTask) {
 			await deletePendingSession(task.sandbox, task.sessionId)
 
-			const rows = await db
-				.select({ status: schema.tasks.status, traceId: schema.tasks.traceId })
-				.from(schema.tasks)
-				.where(eq(schema.tasks.id, task.taskId))
-				.limit(1)
-			const current = rows[0]?.status as TaskStatus | undefined
+			const currentTask = await runPromise(
+				taskStore.getById(task.taskId).pipe(Effect.catchAll(() => Effect.succeed(null))),
+			)
+			const current = currentTask?.status as TaskStatus | undefined
 			if (current && !isTerminal(current)) {
 				const completed = await runPromise(
-					completeTaskRecord(query, {
+					taskStore.completeTask({
 						taskId: task.taskId,
 						status: "timed_out",
 						summary: "Task timed out.",
@@ -524,9 +501,8 @@ export const TaskSupervisorLive = Layer.scoped(
 					}),
 				)
 				if (completed) {
-					await appendTaskTraceTerminalEvent({
-						db,
-						traceId: task.traceId ?? rows[0]?.traceId,
+					await appendTaskTraceTerminalEvent(traceStore, {
+						traceId: task.traceId ?? currentTask?.traceId,
 						taskId: task.taskId,
 						status: "timed_out",
 						reason: "task_timeout",
@@ -540,30 +516,20 @@ export const TaskSupervisorLive = Layer.scoped(
 		const recoverRunning = async () => {
 			let running: TaskRecord[]
 			try {
-				running = await db
-					.select()
-					.from(schema.tasks)
-					.where(and(eq(schema.tasks.status, "running"), eq(schema.tasks.runtime, "sandbox")))
+				running = await runPromise(taskStore.findRunningSandboxTasks())
 			} catch (err) {
 				console.error("[TaskSupervisor] recovery: failed to query running tasks:", err)
 				return
 			}
 
-			const preparingStaleBefore = new Date(Date.now() - PREPARING_TIMEOUT_MS)
 			try {
-				const lostPreparing = await db
-					.select({ id: schema.tasks.id, traceId: schema.tasks.traceId })
-					.from(schema.tasks)
-					.where(
-						and(
-							eq(schema.tasks.status, "preparing"),
-							eq(schema.tasks.runtime, "sandbox"),
-							lte(schema.tasks.createdAt, preparingStaleBefore),
-						),
-					)
+				const preparingStaleBefore = new Date(Date.now() - PREPARING_TIMEOUT_MS)
+				const lostPreparing = await runPromise(
+					taskStore.findStalePreparingSandboxTasks(preparingStaleBefore),
+				)
 				for (const row of lostPreparing) {
 					const completed = await runPromise(
-						completeTaskRecord(query, {
+						taskStore.completeTask({
 							taskId: row.id,
 							status: "lost",
 							summary: "Task did not start in time.",
@@ -576,8 +542,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					})
 					if (!completed) continue
 					try {
-						await appendTaskTraceTerminalEvent({
-							db,
+						await appendTaskTraceTerminalEvent(traceStore, {
 							traceId: row.traceId,
 							taskId: row.id,
 							status: "lost",
@@ -598,7 +563,7 @@ export const TaskSupervisorLive = Layer.scoped(
 				const runtimeData = readSandboxRuntimeData(task)
 				if (!runtimeData?.sandboxId || !runtimeData.sessionId || !runtimeData.commandId) {
 					const completed = await runPromise(
-						completeTaskRecord(query, {
+						taskStore.completeTask({
 							taskId: task.id,
 							status: "lost",
 							summary: "Task lost because the sandbox session metadata is missing.",
@@ -606,8 +571,7 @@ export const TaskSupervisorLive = Layer.scoped(
 						}),
 					)
 					if (completed) {
-						await appendTaskTraceTerminalEvent({
-							db,
+						await appendTaskTraceTerminalEvent(traceStore, {
 							traceId: task.traceId,
 							taskId: task.id,
 							status: "lost",
@@ -634,7 +598,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					})
 				} catch {
 					const completed = await runPromise(
-						completeTaskRecord(query, {
+						taskStore.completeTask({
 							taskId: task.id,
 							status: "lost",
 							summary: "Task lost because sandbox recovery failed.",
@@ -642,8 +606,7 @@ export const TaskSupervisorLive = Layer.scoped(
 						}),
 					)
 					if (completed) {
-						await appendTaskTraceTerminalEvent({
-							db,
+						await appendTaskTraceTerminalEvent(traceStore, {
 							traceId: task.traceId,
 							taskId: task.id,
 							status: "lost",
@@ -862,26 +825,15 @@ export const TaskSupervisorLive = Layer.scoped(
 					}
 
 					// Enforce per-user active task limit
-					const activeCount = yield* Effect.tryPromise({
-						try: async () => {
-							const rows = await db
-								.select({ id: schema.tasks.id })
-								.from(schema.tasks)
-								.where(
-									and(
-										eq(schema.tasks.userId, userId),
-										eq(schema.tasks.runtime, "sandbox"),
-										inArray(schema.tasks.status, ["preparing", "running"]),
-									),
-								)
-							return rows.length
-						},
-						catch: (error) =>
-							new SandboxError({
-								message: `Failed to check active tasks: ${error instanceof Error ? error.message : String(error)}`,
-								cause: error,
-							}),
-					})
+					const activeCount = yield* taskStore.countActiveSandboxTasks(userId).pipe(
+						Effect.mapError(
+							(error) =>
+								new SandboxError({
+									message: `Failed to check active tasks: ${error instanceof Error ? error.message : String(error)}`,
+									cause: error,
+								}),
+						),
+					)
 
 					if (activeCount >= MAX_ACTIVE_TASKS_PER_USER) {
 						return yield* new SandboxError({
@@ -906,13 +858,7 @@ export const TaskSupervisorLive = Layer.scoped(
 					let replyTarget: Record<string, unknown> | undefined
 
 					if (conversationId) {
-						const convRows = yield* query((d) =>
-							d
-								.select({ platform: schema.conversations.platform })
-								.from(schema.conversations)
-								.where(eq(schema.conversations.id, conversationId))
-								.limit(1),
-						).pipe(
+						const platform = yield* taskStore.getConversationPlatform(conversationId).pipe(
 							Effect.mapError(
 								(error) =>
 									new SandboxError({
@@ -921,19 +867,8 @@ export const TaskSupervisorLive = Layer.scoped(
 									}),
 							),
 						)
-						if (convRows[0]?.platform === "telegram") {
-							const accRows = yield* query((d) =>
-								d
-									.select({ metadata: schema.accounts.metadata })
-									.from(schema.accounts)
-									.where(
-										and(
-											eq(schema.accounts.userId, userId),
-											eq(schema.accounts.providerId, "telegram"),
-										),
-									)
-									.limit(1),
-							).pipe(
+						if (platform === "telegram") {
+							const accountMetadata = yield* taskStore.getTelegramAccountMetadata(userId).pipe(
 								Effect.mapError(
 									(error) =>
 										new SandboxError({
@@ -942,56 +877,58 @@ export const TaskSupervisorLive = Layer.scoped(
 										}),
 								),
 							)
-							const chatId = getTelegramChatId(accRows[0]?.metadata)
+							const chatId = getTelegramChatId(accountMetadata)
 							if (chatId !== undefined) replyTarget = { channel: "telegram" as const, chatId }
 						}
 					}
 
-					yield* createTaskRecord(query, {
-						id: taskId,
-						userId,
-						runtime: "sandbox",
-						provider: "codex",
-						status: "preparing",
-						threadId,
-						traceId,
-						parentTaskId,
-						rootTaskId: rootTaskId ?? taskId,
-						specialist,
-						runnerKind,
-						input,
-						confirmationState,
-						prompt,
-						requiresBrowser: needsBrowser ?? false,
-						runtimeData: mergeRuntimeData(null, {
-							authMode,
-							sandboxId: sandbox.id,
-						}),
-						conversationId,
-						replyTarget,
-						callbackId,
-						callbackSecretHash: creds.hash,
-						lastEventSeq: 0,
-						metadata,
-						eventPayload: {
-							conversationId: conversationId ?? null,
-							threadId: threadId ?? null,
-							traceId: traceId ?? null,
-							parentTaskId: parentTaskId ?? null,
-							rootTaskId: rootTaskId ?? taskId,
-							runtime: "sandbox",
-							provider: "codex",
-							runnerKind: runnerKind ?? null,
-						},
-					}).pipe(
-						Effect.mapError(
-							(error) =>
-								new SandboxError({
-									message: `Failed to create task: ${error instanceof Error ? error.message : String(error)}`,
-									cause: error,
+					yield* Effect.tryPromise({
+						try: () =>
+							runPromise(
+								taskStore.createTask({
+									id: taskId,
+									userId,
+									runtime: "sandbox",
+									provider: "codex",
+									status: "preparing",
+									threadId,
+									traceId,
+									parentTaskId,
+									rootTaskId: rootTaskId ?? taskId,
+									specialist,
+									runnerKind,
+									input,
+									confirmationState,
+									prompt,
+									requiresBrowser: needsBrowser ?? false,
+									runtimeData: mergeRuntimeData(null, {
+										authMode,
+										sandboxId: sandbox.id,
+									}),
+									conversationId,
+									replyTarget,
+									callbackId,
+									callbackSecretHash: creds.hash,
+									lastEventSeq: 0,
+									metadata,
+									eventPayload: {
+										conversationId: conversationId ?? null,
+										threadId: threadId ?? null,
+										traceId: traceId ?? null,
+										parentTaskId: parentTaskId ?? null,
+										rootTaskId: rootTaskId ?? taskId,
+										runtime: "sandbox",
+										provider: "codex",
+										runnerKind: runnerKind ?? null,
+									},
 								}),
-						),
-					)
+							),
+						catch: (error) =>
+							new SandboxError({
+								message: `Failed to create task: ${error instanceof Error ? error.message : String(error)}`,
+								cause: error,
+							}),
+					})
 
 					// Wrap post-insert steps so failures mark the task as failed and clean up
 					let sessionId: string | undefined
@@ -1020,11 +957,10 @@ export const TaskSupervisorLive = Layer.scoped(
 
 								const now = new Date()
 								await runPromise(
-									updateTaskRecord(query, taskId, {
+									taskStore.updateTask(taskId, {
 										status: "running",
 										startedAt: now,
 										heartbeatAt: now,
-										updatedAt: now,
 										runtimeData: mergeRuntimeData(
 											{
 												authMode,
@@ -1056,7 +992,7 @@ export const TaskSupervisorLive = Layer.scoped(
 								// Roll back: mark as failed and clean up the session
 								const message = cause instanceof Error ? cause.message : String(cause)
 								await runPromise(
-									completeTaskRecord(query, {
+									taskStore.completeTask({
 										taskId,
 										status: "failed",
 										summary: message,
@@ -1081,11 +1017,13 @@ export const TaskSupervisorLive = Layer.scoped(
 			getTask: (taskId, userId, waitSeconds) =>
 				Effect.gen(function* () {
 					const cappedWait = waitSeconds ? Math.min(waitSeconds, MAX_WAIT_SECONDS) : 0
-					const taskFilter = and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId))
 
 					const fetchTask = async () => {
-						const rows = await db.select().from(schema.tasks).where(taskFilter).limit(1)
-						return rows[0] ?? null
+						return await runPromise(
+							taskStore
+								.getByIdAndUser(taskId, userId)
+								.pipe(Effect.catchAll(() => Effect.succeed(null as TaskRecord | null))),
+						)
 					}
 
 					let task: TaskRecord | null
@@ -1108,18 +1046,14 @@ export const TaskSupervisorLive = Layer.scoped(
 								}),
 						})
 					} else {
-						task = yield* query((d) =>
-							d.select().from(schema.tasks).where(taskFilter).limit(1),
-						).pipe(
-							Effect.map((rows) => rows[0] ?? null),
-							Effect.mapError(
-								(error) =>
-									new SandboxError({
-										message: `Failed to get task: ${error instanceof Error ? error.message : String(error)}`,
-										cause: error,
-									}),
-							),
-						)
+						task = yield* Effect.tryPromise({
+							try: () => fetchTask(),
+							catch: (error) =>
+								new SandboxError({
+									message: `Failed to get task: ${error instanceof Error ? error.message : String(error)}`,
+									cause: error,
+								}),
+						})
 					}
 
 					// Live session check: if the task is still "running" in DB but not tracked
@@ -1191,13 +1125,7 @@ export const TaskSupervisorLive = Layer.scoped(
 
 			probeTask: (taskId, userId) =>
 				Effect.gen(function* () {
-					const taskRows = yield* query((d) =>
-						d
-							.select()
-							.from(schema.tasks)
-							.where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
-							.limit(1),
-					).pipe(
+					const task = yield* taskStore.getByIdAndUser(taskId, userId).pipe(
 						Effect.mapError(
 							(error) =>
 								new SandboxError({
@@ -1206,7 +1134,6 @@ export const TaskSupervisorLive = Layer.scoped(
 								}),
 						),
 					)
-					const task = taskRows[0]
 					if (!task) return null
 					if (!isSandboxTask(task)) return task
 					const sandbox = yield* sandboxService.ensure(userId)
@@ -1214,7 +1141,9 @@ export const TaskSupervisorLive = Layer.scoped(
 						try: () =>
 							probeSingleTask(
 								{
-									db,
+									taskStore,
+									traceStore,
+									computeStore,
 									ensureSandbox: async (uid) => {
 										if (uid !== userId) throw new Error("User mismatch")
 										return sandbox
@@ -1225,9 +1154,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							),
 						catch: sandboxErrorFromDefect,
 					})
-					const updated = yield* query((d) =>
-						d.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1),
-					).pipe(
+					const updated = yield* taskStore.getById(taskId).pipe(
 						Effect.mapError(
 							(error) =>
 								new SandboxError({
@@ -1236,19 +1163,14 @@ export const TaskSupervisorLive = Layer.scoped(
 								}),
 						),
 					)
-					return updated[0] ?? null
+					return updated ?? null
 				}),
 
 			getTaskArtifacts: (taskId, userId) =>
 				Effect.gen(function* () {
 					const executionData = yield* Effect.tryPromise({
 						try: async () => {
-							const taskRows = await db
-								.select()
-								.from(schema.tasks)
-								.where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
-								.limit(1)
-							const task = taskRows[0]
+							const task = await runPromise(taskStore.getByIdAndUser(taskId, userId))
 							if (!task) return null
 							if (!isSandboxTask(task)) return null
 							const runtimeData = readSandboxRuntimeData(task)
@@ -1278,12 +1200,7 @@ export const TaskSupervisorLive = Layer.scoped(
 			getTaskExecutionData: (taskId, userId) =>
 				Effect.tryPromise({
 					try: async () => {
-						const taskRows = await db
-							.select()
-							.from(schema.tasks)
-							.where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
-							.limit(1)
-						const task = taskRows[0]
+						const task = await runPromise(taskStore.getByIdAndUser(taskId, userId))
 						if (!task) return null
 						if (!isSandboxTask(task)) return null
 						const runtimeData = readSandboxRuntimeData(task)

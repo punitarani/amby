@@ -1,5 +1,5 @@
 import { kickOffSandboxProvisionIfNeeded, sandboxWorkflowId } from "@amby/computer/sandbox-config"
-import { CoreError } from "@amby/core"
+import { ComputeStore, CoreError } from "@amby/core"
 import { and, DbService, eq, schema } from "@amby/db"
 import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
 import type { WorkerBindings } from "@amby/env/workers"
@@ -11,7 +11,7 @@ import {
 } from "@amby/plugins/integrations"
 import { Effect } from "effect"
 import { getPostHogClient } from "../posthog"
-import { TelegramSender } from "./index"
+import { TelegramSender } from "./sender"
 
 // --- Types ---
 
@@ -218,7 +218,6 @@ const ensureTelegramConversation = (userId: string, chatId: number) =>
 					userId,
 					platform: "telegram",
 					externalConversationKey: String(chatId),
-					workspaceKey: "",
 				})
 				.onConflictDoNothing(),
 		)
@@ -232,7 +231,7 @@ const startTelegramSession = (
 ) =>
 	Effect.gen(function* () {
 		const env = yield* EnvService
-		const { db } = yield* DbService
+		const computeStore = yield* ComputeStore
 		const posthog = getPostHogClient(env.POSTHOG_KEY, env.POSTHOG_HOST)
 
 		yield* ensureTelegramConversation(userId, chatId)
@@ -241,7 +240,7 @@ const startTelegramSession = (
 		if (sandboxWorkflow) {
 			yield* Effect.tryPromise({
 				try: () =>
-					kickOffSandboxProvisionIfNeeded(db, userId, () =>
+					kickOffSandboxProvisionIfNeeded(computeStore, userId, () =>
 						sandboxWorkflow.create({
 							id: sandboxWorkflowId(userId),
 							params: { userId },

@@ -14,8 +14,7 @@ import {
 	VOLUME_MOUNT_PATH,
 	volumeWorkflowId,
 } from "@amby/computer/sandbox-config"
-import { CoreError } from "@amby/core"
-import { DbService } from "@amby/db"
+import { ComputeStore, CoreError } from "@amby/core"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
@@ -52,7 +51,7 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				target: env.DAYTONA_TARGET ?? "us",
 			})
 
-		const withRuntime = async <T>(effect: Effect.Effect<T, unknown, DbService>) => {
+		const withRuntime = async <T>(effect: Effect.Effect<T, unknown, ComputeStore>) => {
 			const runtime = makeRuntimeForConsumer(env)
 			try {
 				return await runtime.runPromise(effect)
@@ -69,10 +68,17 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 		) => {
 			await withRuntime(
 				Effect.gen(function* () {
-					const { db } = yield* DbService
+					const computeStore = yield* ComputeStore
 					yield* Effect.tryPromise({
 						try: () =>
-							upsertMainSandboxRow(db, userId, externalInstanceId, status, volumeId, snapshot),
+							upsertMainSandboxRow(
+								computeStore,
+								userId,
+								externalInstanceId,
+								status,
+								volumeId,
+								snapshot,
+							),
 						catch: (cause) =>
 							new CoreError({
 								message: `Failed to upsert sandbox row: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -110,9 +116,9 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 				const daytona = makeDaytona()
 				const row = await withRuntime(
 					Effect.gen(function* () {
-						const { db } = yield* DbService
+						const computeStore = yield* ComputeStore
 						return yield* Effect.tryPromise({
-							try: () => ensureVolume(daytona, db, userId, isDev),
+							try: () => ensureVolume(daytona, computeStore, userId, isDev),
 							catch: (cause) =>
 								new CoreError({
 									message: `Failed to ensure volume row: ${cause instanceof Error ? cause.message : String(cause)}`,

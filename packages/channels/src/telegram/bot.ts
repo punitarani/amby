@@ -1,14 +1,9 @@
-import { AgentService, makeAgentServiceLive } from "@amby/agent"
+import { ConversationRuntime, makeConversationRuntimeLive } from "@amby/agent"
 import { createMemoryState } from "@chat-adapter/state-memory"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
-import {
-	findOrCreateUser,
-	handleCommand,
-	parseTelegramCommand,
-	type TelegramFrom,
-} from "./telegram/utils"
+import { findOrCreateUser, handleCommand, parseTelegramCommand, type TelegramFrom } from "./utils"
 
 // biome-ignore lint/suspicious/noExplicitAny: Runtime type is complex; correctness verified at the call site
 export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, botToken: string) {
@@ -53,10 +48,10 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 			const sendReply = (t: string) => thread.post(t).then(() => {})
 
 			const response = yield* Effect.gen(function* () {
-				const agent = yield* AgentService
+				const agent = yield* ConversationRuntime
 				const conversationId = yield* agent.ensureConversation("telegram", String(chatId))
 				return yield* agent.handleMessage(conversationId, text, { telegram: raw }, sendReply)
-			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
+			}).pipe(Effect.provide(makeConversationRuntimeLive(userId)))
 
 			if (response.userResponse.text.trim()) {
 				yield* Effect.tryPromise(() => thread.post(response.userResponse.text))

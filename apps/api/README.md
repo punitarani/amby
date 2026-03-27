@@ -45,7 +45,7 @@ bun run --filter @amby/api typecheck
 
 ## Dependencies
 
-Hono, Effect, Sentry, PostHog, @chat-adapter/telegram, plus workspace packages: `@amby/agent`, `@amby/auth`, `@amby/browser`, `@amby/computer`, `@amby/core`, `@amby/db`, `@amby/env`, `@amby/memory`, `@amby/plugins`, `@amby/skills`.
+Hono, Effect, Sentry, PostHog, @chat-adapter/telegram, plus workspace packages: `@amby/agent`, `@amby/auth`, `@amby/browser`, `@amby/computer`, `@amby/core`, `@amby/db`, `@amby/env`, `@amby/plugins`, `@amby/skills`.
 
 ## Links
 

@@ -1,12 +1,14 @@
 import { BrowserService } from "@amby/browser"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
-import { type Platform, type PluginRegistry, PluginRegistryService } from "@amby/core"
+import { type Platform, PluginRegistryService, TaskStore } from "@amby/core"
 import { DbService, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { ToolSet } from "ai"
 import { Context, Effect, Layer } from "effect"
 import { prepareConversationContext } from "./context/builder"
 import { type ConversationEngineConfig, handleTurn, type ReplyFn } from "./conversation/engine"
+import { ensureConversation } from "./conversation/ensure"
+import { resolveToolGroupsFromRegistry } from "./conversation/tools"
 import { AgentError } from "./errors"
 import type { ToolGroups } from "./execution/registry"
 import { HIGH_INTELLIGENCE_MODEL_ID, ModelService } from "./models"
@@ -20,8 +22,8 @@ import { createCodexAuthTools } from "./tools/codex-auth"
 import { createTimezoneTools } from "./tools/settings"
 import type { AgentRunResult, StreamPart } from "./types/agent"
 
-export class AgentService extends Context.Tag("AgentService")<
-	AgentService,
+export class ConversationRuntime extends Context.Tag("ConversationRuntime")<
+	ConversationRuntime,
 	{
 		readonly handleMessage: (
 			conversationId: string,
@@ -45,53 +47,24 @@ export class AgentService extends Context.Tag("AgentService")<
 		readonly ensureConversation: (
 			platform: Platform,
 			externalConversationKey: string,
-			workspaceKey?: string,
 		) => Effect.Effect<string, AgentError>
 		readonly shutdown: () => Effect.Effect<void, AgentError>
 	}
 >() {}
 
-/**
- * Resolve tool groups from the plugin registry.
- *
- * Each tool provider is mapped to its declared group. The agent's
- * specialist registry uses these groups to select which tools are
- * visible to each specialist.
- */
-async function resolveToolGroupsFromRegistry(
-	registry: PluginRegistry,
-	userId: string,
-	conversationId: string,
-	threadId: string,
-): Promise<ToolGroups> {
-	const groups: ToolGroups = {}
-	const context = { userId, conversationId, threadId }
-	for (const provider of registry.toolProviders) {
-		try {
-			const tools = await provider.getTools(context)
-			if (tools && Object.keys(tools).length > 0) {
-				const group = provider.group as keyof ToolGroups
-				groups[group] = { ...(groups[group] ?? {}), ...tools } as ToolSet
-			}
-		} catch (err) {
-			console.warn(
-				`[agent] Tool provider "${provider.id}" (group: ${provider.group}) failed, skipping:`,
-				err instanceof Error ? err.message : String(err),
-			)
-		}
-	}
-	return groups
-}
+/** @deprecated Use `ConversationRuntime` instead. */
+export const AgentService = ConversationRuntime
 
-export const makeAgentServiceLive = (userId: string) =>
+export const makeConversationRuntimeLive = (userId: string) =>
 	Layer.effect(
-		AgentService,
+		ConversationRuntime,
 		Effect.gen(function* () {
 			const { db, query } = yield* DbService
 			const models = yield* ModelService
 			const sandbox = yield* SandboxService
 			const browserService = yield* BrowserService
 			const taskSupervisor = yield* TaskSupervisor
+			const taskStore = yield* TaskStore
 			const pluginRegistry = yield* PluginRegistryService
 			const env = yield* EnvService
 			initializeTelemetry({
@@ -154,6 +127,7 @@ export const makeAgentServiceLive = (userId: string) =>
 				buildToolGroups: (threadId: string) => buildToolGroups(conversationId, threadId),
 				query,
 				db,
+				taskStore,
 				pluginRegistry,
 				prepareContext: prepareConversationContext,
 				resolveThread,
@@ -203,40 +177,8 @@ export const makeAgentServiceLive = (userId: string) =>
 						onPart,
 					}),
 
-				ensureConversation: (platform, externalConversationKey, workspaceKey) =>
-					query((database) =>
-						database
-							.insert(schema.conversations)
-							.values({
-								userId,
-								platform,
-								externalConversationKey,
-								workspaceKey: workspaceKey ?? "",
-							})
-							.onConflictDoUpdate({
-								target: [
-									schema.conversations.userId,
-									schema.conversations.platform,
-									schema.conversations.workspaceKey,
-									schema.conversations.externalConversationKey,
-								],
-								set: { updatedAt: new Date() },
-							})
-							.returning({ id: schema.conversations.id }),
-					).pipe(
-						Effect.map((rows) => {
-							const row = rows[0]
-							if (!row) throw new Error("Failed to ensure conversation")
-							return row.id
-						}),
-						Effect.mapError(
-							(cause) =>
-								new AgentError({
-									message: cause instanceof Error ? cause.message : "Failed to ensure conversation",
-									cause,
-								}),
-						),
-					),
+				ensureConversation: (platform, externalConversationKey) =>
+					ensureConversation(query, userId, platform, externalConversationKey),
 
 				shutdown: () =>
 					Effect.gen(function* () {
@@ -256,3 +198,6 @@ export const makeAgentServiceLive = (userId: string) =>
 			}
 		}),
 	)
+
+/** @deprecated Use `makeConversationRuntimeLive` instead. */
+export const makeAgentServiceLive = makeConversationRuntimeLive

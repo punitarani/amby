@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers"
+import type { BufferedMessage, TelegramFrom } from "@amby/channels"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { setTelegramScope, setWorkerScope } from "../sentry"
-import type { BufferedMessage, TelegramFrom } from "../telegram/utils"
 
 interface SessionState {
 	status: "idle" | "debouncing" | "processing"

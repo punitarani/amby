@@ -1,0 +1,30 @@
+{
+	"name": "@amby/channels",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./telegram": "./src/telegram/index.ts"
+	},
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/index.ts --outdir dist --target bun"
+	},
+	"dependencies": {
+		"@amby/agent": "workspace:*",
+		"@amby/computer": "workspace:*",
+		"@amby/core": "workspace:*",
+		"@amby/db": "workspace:*",
+		"@amby/env": "workspace:*",
+		"@amby/plugins": "workspace:*",
+		"@chat-adapter/state-memory": "^4.20.2",
+		"@chat-adapter/telegram": "^4.20.2",
+		"chat": "^4.20.2",
+		"posthog-node": "^4.0.1"
+	},
+	"peerDependencies": {
+		"effect": "^3.21.0"
+	}
+}

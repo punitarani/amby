@@ -9,7 +9,7 @@ import {
 	TERMINAL_STATUSES,
 	verifyHmacSignature,
 } from "@amby/computer"
-import { CoreError } from "@amby/core"
+import { CoreError, TraceStore } from "@amby/core"
 import type { TaskEventKind, TaskEventSource, TaskStatus } from "@amby/db"
 import { and, DbService, eq, lt, notInArray, schema } from "@amby/db"
 import { Effect } from "effect"
@@ -101,6 +101,7 @@ export const handleTaskEventPost = (request: Request) =>
 	Effect.gen(function* () {
 		const { db } = yield* DbService
 		const taskSupervisor = yield* TaskSupervisor
+		const traceStore = yield* TraceStore
 
 		const rawBody = yield* Effect.tryPromise({
 			try: () => request.text(),
@@ -317,8 +318,7 @@ export const handleTaskEventPost = (request: Request) =>
 			) {
 				yield* Effect.tryPromise({
 					try: () =>
-						appendTaskTraceTerminalEvent({
-							db,
+						appendTaskTraceTerminalEvent(traceStore, {
 							traceId,
 							taskId: task.id,
 							status: nextStatus ?? (kind === "task.failed" ? "failed" : "succeeded"),
