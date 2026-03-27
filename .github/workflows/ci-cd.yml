@@ -87,13 +87,20 @@ jobs:
           # @posthog/cli: not a local dep — npx auto-downloads
           npx @posthog/cli --version
 
-          # Verify worker-env-keys.txt produces a non-empty key pattern
-          PATTERN=$(grep -v '^#' scripts/worker-env-keys.txt | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
-          if [ -z "$PATTERN" ]; then
+          # Verify the checked-in Worker key lists stay usable for local runtime generation
+          # and production Cloudflare secret sync.
+          ENV_PATTERN=$(grep -v '^#' scripts/worker-env-keys.txt | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
+          if [ -z "$ENV_PATTERN" ]; then
             echo "ERROR: scripts/worker-env-keys.txt produced an empty key pattern"
             exit 1
           fi
-          echo "Env key pattern: $PATTERN"
+          SYNC_PATTERN=$(grep -v '^#' scripts/worker-cloudflare-sync-keys.txt | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
+          if [ -z "$SYNC_PATTERN" ]; then
+            echo "ERROR: scripts/worker-cloudflare-sync-keys.txt produced an empty key pattern"
+            exit 1
+          fi
+          echo "Worker env key pattern: $ENV_PATTERN"
+          echo "Cloudflare sync key pattern: $SYNC_PATTERN"
 
   # --- Production only (push to main) ---
 
@@ -194,7 +201,7 @@ jobs:
 
       - name: Sync secrets to Cloudflare
         run: |
-          PATTERN=$(grep -v '^#' scripts/worker-env-keys.txt | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
+          PATTERN=$(grep -v '^#' scripts/worker-cloudflare-sync-keys.txt | grep -v '^$' | tr '\n' '|' | sed 's/|$//')
           doppler secrets download --no-file --format json | \
             jq -c --arg p "^($PATTERN)$" 'with_entries(select(.key | test($p)))' | \
             (cd apps/api && npx wrangler secret bulk)
