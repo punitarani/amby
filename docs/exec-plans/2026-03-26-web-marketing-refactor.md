@@ -75,7 +75,7 @@ Refactor the existing `apps/web` marketing site in place so the homepage and adj
   - surfaces / channels
   - final CTA
   - footer
-- Hero uses the provided background video with readable overlay copy.
+- Hero uses the provided `background.png` asset with readable overlay copy and a calmer, more reference-like composition.
 - Primary CTA opens the existing Telegram entrypoint.
 - Secondary CTA routes to `/vision` or other real internal destination.
 - Existing navigation and footer links still resolve correctly.
@@ -97,6 +97,13 @@ Refactor the existing `apps/web` marketing site in place so the homepage and adj
 - 2026-03-26: Final refinement pass pulled the hero composition higher on large screens and softened the background grid so the page tracks closer to the reference mood.
 - 2026-03-26: Final review loop tightened the homepage to track the reference more closely: shorter hero copy, denser CTA treatment, a more explicit `Why Amby` explainer visual, cleaner trust wording, and a smaller final CTA block.
 - 2026-03-26: Re-verified `/`, `/vision`, in-page anchor navigation, hero video playback, and responsive layouts with Playwright, then reran `lint`, `typecheck`, and `build` sequentially.
+- 2026-03-26: Main-repo refinement pass replaced the hero's over-abstract media treatment with the user-provided `apps/web/public/images/background.png`, removed the extra hero signal row, softened section reveal opacity, and rechecked the homepage on desktop, tablet, and mobile against the reference.
+- 2026-03-26: Added a ruthless `/`-first refinement pass: reduced grid-noise globally, retuned hero focal crop/overlays to suppress floating-card clutter and expose the lower-right hardware cue, simplified homepage footer density, and revalidated `/` on desktop/tablet/mobile before rechecking `/vision`.
+- 2026-03-26: Re-ran the full `@amby/web` verification chain after the last visual pass (`lint`, `typecheck`, `build`) and confirmed all routes, including `/` and `/vision`, still build statically.
+- 2026-03-26: Consolidated the useful `Vision` thesis content directly into `/` as a dedicated method section and supporting success/near-term blocks, removed homepage dependency on `/vision`, and simplified top nav to logo + Telegram action only.
+- 2026-03-26: Replaced the hero media treatment again by removing the image entirely and shifting to a plain cinematic pattern/gradient treatment with tuned spacing and roundings for stronger reference alignment.
+- 2026-03-26: Changed `/vision` to a lightweight redirect to `/#model` so historical links still resolve while `/` remains the single primary marketing narrative.
+- 2026-03-26: Re-verified `/` in Playwright at desktop/tablet/mobile (top and bottom states), checked `/vision` redirect behavior, and reran `lint`, `typecheck`, and `build`.
 
 ## Surprises / discoveries
 
@@ -106,6 +113,9 @@ Refactor the existing `apps/web` marketing site in place so the homepage and adj
 - Global CSS changes required a dev-server restart before Playwright reflected the new visual system consistently.
 - Framer Motion raised React dev warnings when `motion.article` wrapped mapped cards directly; using motion wrappers around plain `article` nodes resolved the warning cleanly.
 - `@amby/web typecheck` and `@amby/web build` both touch `.next/types`; they should be run sequentially, not in parallel.
+- The new `background.png` is materially closer to the reference hero than the prior video/device composition, even though it still does not expose the lower-right device as explicitly as the mock reference.
+- `OPENAI_API_KEY` is not set in this environment, so `imagegen`/`sora`-based hero asset generation was not available for this pass; hero fidelity tuning stayed code/CSS-driven.
+- The strongest path for this iteration was not additional generated media but removing media dependence from hero entirely; this reduced visual mismatch and improved consistency across breakpoints.
 
 ## Decision log
 
@@ -114,6 +124,10 @@ Refactor the existing `apps/web` marketing site in place so the homepage and adj
 - Align `/vision` to the new design system so the marketing surface feels like one product story.
 - Keep real CTA destinations focused on Telegram and `/vision`; do not promote GitHub as a homepage primary path.
 - Keep the header compact and premium, but use in-page anchors that read like product-level nav (`Product`, `Methodology`, `Privacy`) plus `/vision`.
+- Prefer the provided static hero background over the prior video-led hero because it tracks the supplied reference more closely and produces a cleaner first paint.
+- Prioritize `/` as the primary implementation target and treat `/vision` as a secondary alignment surface to avoid diluting quality on the main entry page.
+- Collapse meaningful Vision content into `/` to avoid split narrative and reduce context switching.
+- Keep `/vision` as a redirect to `/#model` for compatibility, not as a second full marketing story.
 
 ## Retrospective
 

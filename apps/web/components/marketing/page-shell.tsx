@@ -28,7 +28,7 @@ export const MarketingPageShell = ({
 				<div className="absolute -right-24 top-[8rem] size-[28rem] rounded-full bg-white/[0.05] blur-[160px]" />
 			</div>
 			<MarketingHeader action={headerAction} homeHref={homeHref} />
-			<main className={cn("relative z-10 pt-[5.15rem] md:pt-[5.6rem]", className)}>{children}</main>
+			<main className={cn("relative z-10 pt-[6.8rem] md:pt-[7.2rem]", className)}>{children}</main>
 			{showFooter ? <MarketingFooter /> : null}
 		</div>
 	)
