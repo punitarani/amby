@@ -43,14 +43,21 @@ sequenceDiagram
 sequenceDiagram
     participant Agent as AgentService
     participant Bot as bot.ts handler
-    participant CA as @chat-adapter/telegram
+    participant TF as Telegram Formatter
     participant TG as Telegram Bot API
 
-    Agent->>Bot: response / streaming callback
-    Bot->>CA: thread.post(text)
-    CA->>TG: sendMessage
-    Note over CA,TG: Streaming uses editMessageText for progressive updates
+    Agent->>Bot: markdown-like response text
+    Bot->>TF: renderTelegramMessageChunks(text)
+    TF->>TG: sendMessage(parse_mode=HTML)
 ```
+
+### Formatting contract
+
+- The agent generates a constrained markdown subset for the active channel: paragraphs, bold, italic, inline code, fenced code blocks, simple bullet lists, numbered lists, and inline links.
+- Telegram delivery converts that markdown into Telegram HTML and sends it with `parse_mode=HTML`.
+- Raw HTML from the model is escaped before sending.
+- We intentionally do **not** use Chat SDK's default Telegram markdown transport for outbound formatting, because `@chat-adapter/telegram` currently hardcodes Telegram's legacy `Markdown` parse mode while the agent emits standard CommonMark like `**bold**`.
+- Telegram streaming is disabled for now; typing indicators remain, but final responses are sent as fully rendered messages.
 
 ## Identity mapping
 
@@ -93,7 +100,7 @@ A Next.js app (port 3100) that emulates the Telegram Bot API for local developme
 
 | Method | Behavior |
 |---|---|
-| `sendMessage` | Stores message, emits SSE to UI |
+| `sendMessage` | Stores message, preserves `parse_mode`, emits SSE to UI |
 | `editMessageText` | Emits edit SSE event |
 | `deleteMessage` | Emits delete SSE event |
 | `sendChatAction` | Emits typing indicator |

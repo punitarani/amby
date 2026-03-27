@@ -46,6 +46,7 @@ export interface DisplayMessage {
 	id: string
 	role: "user" | "bot"
 	text: string
+	parseMode?: string
 	timestamp: number
 }
 

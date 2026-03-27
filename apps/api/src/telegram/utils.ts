@@ -413,34 +413,3 @@ export const handleCommand = (
 			}
 		}
 	})
-
-/** Split a long message into chunks that fit within Telegram's 4096-char limit. */
-export const splitTelegramMessage = (text: string, maxLength = 4096): string[] => {
-	if (text.length <= maxLength) return [text]
-
-	const chunks: string[] = []
-	let remaining = text
-
-	while (remaining.length > 0) {
-		if (remaining.length <= maxLength) {
-			chunks.push(remaining)
-			break
-		}
-
-		// Try to split at a newline near the limit
-		let splitIndex = remaining.lastIndexOf("\n", maxLength)
-		if (splitIndex === -1 || splitIndex < maxLength * 0.5) {
-			// Fall back to splitting at a space
-			splitIndex = remaining.lastIndexOf(" ", maxLength)
-		}
-		if (splitIndex === -1 || splitIndex < maxLength * 0.5) {
-			// Hard split at the limit
-			splitIndex = maxLength
-		}
-
-		chunks.push(remaining.slice(0, splitIndex))
-		remaining = remaining.slice(splitIndex).trimStart()
-	}
-
-	return chunks
-}

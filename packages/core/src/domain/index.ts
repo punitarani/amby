@@ -1,4 +1,5 @@
 export * from "./automation"
+export * from "./channel-presentation"
 export * from "./compute"
 export * from "./conversation"
 export * from "./execution"

@@ -1,3 +1,4 @@
+import { getChannelPresentation } from "@amby/core"
 import { eq, schema } from "@amby/db"
 import { Effect } from "effect"
 import {
@@ -53,8 +54,15 @@ export function prepareConversationContext(params: {
 			timeStyle: "long",
 		}).format(new Date())
 
-		const [threadRows, history, otherThreads, artifactRows] = yield* Effect.all(
+		const [conversationRows, threadRows, history, otherThreads, artifactRows] = yield* Effect.all(
 			[
+				query((db) =>
+					db
+						.select({ platform: schema.conversations.platform })
+						.from(schema.conversations)
+						.where(eq(schema.conversations.id, conversationId))
+						.limit(1),
+				),
 				query((db) =>
 					db
 						.select({
@@ -85,6 +93,7 @@ export function prepareConversationContext(params: {
 
 		const threadLabel = threadRows[0]?.label ?? null
 		const threadSynopsis = threadRows[0]?.synopsis?.trim() ?? ""
+		const channel = getChannelPresentation(conversationRows[0]?.platform ?? "telegram")
 		const artifactRecap = formatArtifactRecap(artifactRows, threadLabel)
 
 		const extraContext = [
@@ -106,7 +115,7 @@ export function prepareConversationContext(params: {
 			.join("\n\n")
 
 		const systemPrompt = [
-			buildConversationPrompt(formattedNow, userTimezone, runtime),
+			buildConversationPrompt(formattedNow, userTimezone, runtime, channel),
 			memoryContext ? `# User Memory Context\n${memoryContext}` : "",
 			extraContext,
 		]

@@ -14,6 +14,7 @@ type QueryFn = <T>(
  */
 function makeStubQuery(opts?: {
 	timezone?: string
+	platform?: "telegram"
 	threadLabel?: string
 	threadSynopsis?: string
 	messages?: Array<{ id: string; role: string; content: string }>
@@ -26,8 +27,11 @@ function makeStubQuery(opts?: {
 		if (callIndex === 1) {
 			return Effect.succeed([{ timezone: opts?.timezone ?? "UTC" }] as unknown as T)
 		}
-		// Calls 2-5 are concurrent: threadRows, history, otherThreads, artifacts
 		if (callIndex === 2) {
+			return Effect.succeed([{ platform: opts?.platform ?? "telegram" }] as unknown as T)
+		}
+		// Calls 3-6 are concurrent: threadRows, history, otherThreads, artifacts
+		if (callIndex === 3) {
 			// threadRows
 			return Effect.succeed([
 				{
@@ -204,5 +208,23 @@ describe("prepareConversationContext", () => {
 		)
 
 		expect(result.systemPrompt).toContain("Amby")
+	})
+
+	it("includes channel-specific formatting rules", async () => {
+		const query = makeStubQuery({ platform: "telegram" })
+		const result = await Effect.runPromise(
+			prepareConversationContext({
+				query,
+				userId: "user-1",
+				conversationId: "conv-1",
+				threadCtx: makeThreadCtx(),
+			}),
+		)
+
+		expect(result.systemPrompt).toContain("Active user channel: telegram.")
+		expect(result.systemPrompt).toContain("Write user-visible replies in simple markdown")
+		expect(result.systemPrompt).toContain(
+			"Do not use raw HTML, tables, task lists, or nested lists.",
+		)
 	})
 })

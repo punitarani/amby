@@ -3,6 +3,7 @@ import { createMemoryState } from "@chat-adapter/state-memory"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
+import { createTelegramBotApiClient } from "./telegram/bot-api"
 import {
 	findOrCreateUser,
 	handleCommand,
@@ -24,6 +25,10 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 		userName: "amby",
 		adapters: { telegram },
 		state: createMemoryState(),
+	})
+	const sender = createTelegramBotApiClient({
+		botToken,
+		apiBaseUrl: process.env.TELEGRAM_API_BASE_URL,
 	})
 
 	// Shared handler for both new mentions (first message) and subscribed threads
@@ -50,7 +55,7 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 
 		const effect = Effect.gen(function* () {
 			const userId = yield* findOrCreateUser(from, chatId)
-			const sendReply = (t: string) => thread.post(t).then(() => {})
+			const sendReply = (t: string) => sender.sendMessage(chatId, t).then(() => {})
 
 			const response = yield* Effect.gen(function* () {
 				const agent = yield* AgentService
@@ -59,7 +64,7 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
 
 			if (response.userResponse.text.trim()) {
-				yield* Effect.tryPromise(() => thread.post(response.userResponse.text))
+				yield* Effect.tryPromise(() => sender.sendMessage(chatId, response.userResponse.text))
 			}
 		}).pipe(
 			Effect.catchAllCause((cause) =>

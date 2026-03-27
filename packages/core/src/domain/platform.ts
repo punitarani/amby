@@ -1,11 +1,11 @@
 /**
  * Platform represents the external messaging surface.
- * With CLI removed, Telegram is the only active channel.
- * The union is kept open for future channels.
+ * Telegram is the only fully implemented remote channel today.
+ * The union stays aligned with persisted conversation platform values.
  */
-export type Platform = "telegram"
+export type Platform = "cli" | "telegram" | "slack" | "discord"
 
 /**
  * Channel type for transport layer routing.
  */
-export type ChannelType = "telegram"
+export type ChannelType = "telegram" | "slack" | "discord"

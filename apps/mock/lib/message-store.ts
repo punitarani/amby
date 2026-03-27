@@ -10,15 +10,33 @@ export function getMessages(): DisplayMessage[] {
 	return messages
 }
 
-export function addMessage(role: "user" | "bot", text: string): DisplayMessage {
+export function addMessage(role: "user" | "bot", text: string, parseMode?: string): DisplayMessage {
 	const msg: DisplayMessage = {
 		id: String(nextMessageId++),
 		role,
 		text,
+		parseMode,
 		timestamp: Date.now(),
 	}
 	messages.push(msg)
 	return msg
+}
+
+export function updateMessage(
+	id: string,
+	updates: Partial<Pick<DisplayMessage, "text" | "parseMode">>,
+): DisplayMessage | undefined {
+	const index = messages.findIndex((message) => message.id === id)
+	if (index === -1) return undefined
+	const current = messages[index]
+	if (!current) return undefined
+
+	const next: DisplayMessage = {
+		...current,
+		...updates,
+	}
+	messages[index] = next
+	return next
 }
 
 export function clearMessages(): void {
