@@ -1,5 +1,5 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
-import { AgentService, makeAgentServiceLive } from "@amby/agent"
+import { ConversationRuntime, makeConversationRuntimeLive } from "@amby/agent"
 import type { WorkerBindings } from "@amby/env/workers"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import * as Sentry from "@sentry/cloudflare"
@@ -129,7 +129,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 							const sendReply = (text: string) =>
 								adapter.postMessage(chatIdStr, text).then(() => {})
 							const effect = Effect.gen(function* () {
-								const agent = yield* AgentService
+								const agent = yield* ConversationRuntime
 								const convId =
 									conversationId ?? (yield* agent.ensureConversation("telegram", String(chatId)))
 								conversationId = convId
@@ -146,7 +146,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 									)
 								}
 								return yield* agent.handleMessage(convId, input, undefined, sendReply, onTextDelta)
-							}).pipe(Effect.provide(makeAgentServiceLive(finalUserId)))
+							}).pipe(Effect.provide(makeConversationRuntimeLive(finalUserId)))
 
 							const result = await runtime.runPromise(effect)
 							const finalText = result.userResponse.text

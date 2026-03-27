@@ -207,7 +207,7 @@ export interface TurnRequest {
 
 /**
  * ConversationEngine handles a single conversation turn.
- * This is the extracted core from the old AgentService.runRequest.
+ * This is the extracted core from ConversationRuntime.
  */
 export function handleTurn(
 	config: ConversationEngineConfig,

@@ -1,4 +1,4 @@
-import { AgentService, makeAgentServiceLive } from "@amby/agent"
+import { ConversationRuntime, makeConversationRuntimeLive } from "@amby/agent"
 import { createMemoryState } from "@chat-adapter/state-memory"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
@@ -53,10 +53,10 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 			const sendReply = (t: string) => thread.post(t).then(() => {})
 
 			const response = yield* Effect.gen(function* () {
-				const agent = yield* AgentService
+				const agent = yield* ConversationRuntime
 				const conversationId = yield* agent.ensureConversation("telegram", String(chatId))
 				return yield* agent.handleMessage(conversationId, text, { telegram: raw }, sendReply)
-			}).pipe(Effect.provide(makeAgentServiceLive(userId)))
+			}).pipe(Effect.provide(makeConversationRuntimeLive(userId)))
 
 			if (response.userResponse.text.trim()) {
 				yield* Effect.tryPromise(() => thread.post(response.userResponse.text))
