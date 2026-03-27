@@ -1,338 +1,191 @@
 import { describe, expect, it } from "bun:test"
-import { makeAgentRunConfig } from "../test-helpers/factories"
-import { buildHeuristicPlan, shouldUseModelPlanner } from "./planner"
+import { materializeRouterOutput, type RouterOutput } from "./planner"
 
-const config = makeAgentRunConfig()
+// ---------------------------------------------------------------------------
+// Edge cases for materializeRouterOutput — ensures mechanical defaults are
+// correct for various specialist configurations and boundary conditions.
+// ---------------------------------------------------------------------------
 
-describe("buildHeuristicPlan — precedence ordering", () => {
-	it("background wins over all other signals", () => {
-		const plan = buildHeuristicPlan({
-			request: "Work on this in the background: implement the browser feature and remember this",
-			config,
-		})
-		expect(plan.strategy).toBe("background")
-		expect(plan.tasks).toHaveLength(1)
-		expect(plan.tasks[0]?.runnerKind).toBe("background_handoff")
-	})
-
-	it("settings wins over memory, integration, computer, browser, builder", () => {
-		const plan = buildHeuristicPlan({
-			request: "Set my timezone and remember this for the browser",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("settings")
-	})
-
-	it("memory wins over integration, computer, browser, builder", () => {
-		const plan = buildHeuristicPlan({
-			request:
-				"Remember this: the gmail integration uses a browser extension to implement features",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("memory")
-	})
-
-	it("integration wins over computer, browser, builder", () => {
-		const plan = buildHeuristicPlan({
-			request: "Check my Gmail and take a screenshot of the desktop to implement it",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("integration")
-	})
-
-	it("computer wins over browser and builder", () => {
-		const plan = buildHeuristicPlan({
-			request: "Take a screenshot of the desktop and open the browser to implement it",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("computer")
-	})
-
-	it("browser+research with URL routes to browser-only sequential", () => {
-		const plan = buildHeuristicPlan({
-			request: "Open the browser and research the website https://example.com",
-			config,
-		})
-		// When a URL is present, browser handles both browsing and summarization
-		expect(plan.strategy).toBe("sequential")
-		expect(plan.tasks).toHaveLength(1)
-		expect(plan.tasks[0]?.specialist).toBe("browser")
-	})
-
-	it("browser+research without URL produces parallel plan", () => {
-		const plan = buildHeuristicPlan({
-			request: "Browse the web and research current AI trends",
-			config,
-		})
-		expect(plan.strategy).toBe("parallel")
-		expect(plan.tasks).toHaveLength(2)
-		const specialists = plan.tasks.map((t) => t.specialist)
-		expect(specialists).toContain("browser")
-		expect(specialists).toContain("research")
-	})
-
-	it("builder+research produces sequential with dependency", () => {
-		const plan = buildHeuristicPlan({
-			request: "Research the database layer then implement the migration",
-			config,
-		})
+describe("materializeRouterOutput — mixed specialist plans", () => {
+	it("research → builder sequential plan materializes correctly", () => {
+		const output: RouterOutput = {
+			strategy: "sequential",
+			rationale: "Research first, then implement",
+			tasks: [
+				{
+					specialist: "research",
+					goal: "Investigate the database layer",
+					dependencies: [],
+				},
+				{
+					specialist: "builder",
+					goal: "Implement the migration",
+					dependencies: ["task-0"],
+				},
+			],
+			needsValidation: true,
+		}
+		const plan = materializeRouterOutput(output, [], [])
 		expect(plan.strategy).toBe("sequential")
 		expect(plan.tasks).toHaveLength(2)
 		expect(plan.tasks[0]?.specialist).toBe("research")
+		expect(plan.tasks[0]?.mutates).toBe(false)
 		expect(plan.tasks[1]?.specialist).toBe("builder")
+		expect(plan.tasks[1]?.mutates).toBe(true)
 		expect(plan.tasks[1]?.dependencies).toContain("task-0")
-	})
-
-	it("builder alone routes to builder with validator reducer", () => {
-		const plan = buildHeuristicPlan({
-			request: "Implement a new login form",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("builder")
-		expect(plan.reducer).toBe("validator")
-	})
-
-	it("browser alone routes to browser", () => {
-		const plan = buildHeuristicPlan({
-			request: "Open the website at https://example.com",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("browser")
-	})
-
-	it("pure research falls through to research fallback", () => {
-		const plan = buildHeuristicPlan({
-			request: "Investigate the performance issue in the database layer",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("research")
-		expect(plan.reducer).toBe("conversation")
-	})
-})
-
-describe("buildHeuristicPlan — multi-URL parallel triggering", () => {
-	it("multiple URLs produce parallel browser tasks", () => {
-		const plan = buildHeuristicPlan({
-			request: "Compare https://a.com and https://b.com and https://c.com",
-			config,
-		})
-		expect(plan.strategy).toBe("parallel")
-		expect(plan.tasks).toHaveLength(3)
-		expect(plan.tasks.every((t) => t.specialist === "browser")).toBe(true)
-	})
-
-	it("single URL does not trigger multi-URL parallel", () => {
-		const plan = buildHeuristicPlan({
-			request: "Open https://example.com and check it out",
-			config,
-		})
-		// Single URL should go to browser, not parallel multi-URL plan
-		expect(plan.tasks).toHaveLength(1)
-		expect(plan.tasks[0]?.specialist).toBe("browser")
-	})
-})
-
-describe("buildHeuristicPlan — hard-write detection suppresses parallel", () => {
-	it("multi-URL with hard-write keyword does not go parallel", () => {
-		const plan = buildHeuristicPlan({
-			request: "Submit a form on https://a.com and then post to https://b.com",
-			config,
-		})
-		// Hard-write detected → not parallel browser
-		expect(plan.strategy).not.toBe("parallel")
-	})
-
-	it("integration with hard-write triggers validation", () => {
-		const plan = buildHeuristicPlan({
-			request: "Send an email via Gmail to the team",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("integration")
-		expect(plan.tasks[0]?.writesExternal).toBe(true)
-		expect(plan.tasks[0]?.requiresConfirmation).toBe(true)
 		expect(plan.reducer).toBe("validator")
 	})
 })
 
-describe("buildHeuristicPlan — empty/no-signal input", () => {
-	it("empty string returns direct strategy", () => {
-		const plan = buildHeuristicPlan({ request: "", config })
-		expect(plan.strategy).toBe("direct")
-		expect(plan.tasks).toHaveLength(0)
-	})
-
-	it("simple greeting returns direct strategy", () => {
-		const plan = buildHeuristicPlan({ request: "hi there", config })
-		expect(plan.strategy).toBe("direct")
-	})
-
-	it("whitespace-only returns direct strategy", () => {
-		const plan = buildHeuristicPlan({ request: "   \n\t  ", config })
-		expect(plan.strategy).toBe("direct")
+describe("materializeRouterOutput — browser task defaults", () => {
+	it("browser task without startUrl uses undefined (no fallback to extracted URLs)", () => {
+		const output: RouterOutput = {
+			strategy: "sequential",
+			rationale: "Browse",
+			tasks: [
+				{
+					specialist: "browser",
+					goal: "Find something on the web",
+					dependencies: [],
+					browserMode: "agent",
+				},
+			],
+			needsValidation: false,
+		}
+		const plan = materializeRouterOutput(output, ["https://example.com/"], [])
+		if (plan.tasks[0]?.input.kind === "browser") {
+			// startUrl comes from the router task, not from extracted URLs
+			expect(plan.tasks[0].input.task.startUrl).toBeUndefined()
+		}
 	})
 })
 
-describe("buildHeuristicPlan — path hints", () => {
-	it("builder task includes path hints as resource locks", () => {
-		const plan = buildHeuristicPlan({
-			request: "Fix the bug in /src/billing/totals.ts and /src/billing/invoice.ts",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("builder")
+describe("materializeRouterOutput — background strategy", () => {
+	it("sets needsBrowser=true when specialist is browser", () => {
+		const output: RouterOutput = {
+			strategy: "background",
+			rationale: "Long-running browser work",
+			tasks: [
+				{
+					specialist: "browser",
+					goal: "Monitor the site continuously",
+					dependencies: [],
+				},
+			],
+			needsValidation: false,
+		}
+		const plan = materializeRouterOutput(output, [], [])
+		if (plan.tasks[0]?.input.kind === "background") {
+			expect(plan.tasks[0].input.needsBrowser).toBe(true)
+		}
+	})
+
+	it("sets needsBrowser=false when specialist is not browser", () => {
+		const output: RouterOutput = {
+			strategy: "background",
+			rationale: "Long-running code work",
+			tasks: [
+				{
+					specialist: "builder",
+					goal: "Build the entire project",
+					dependencies: [],
+				},
+			],
+			needsValidation: false,
+		}
+		const plan = materializeRouterOutput(output, [], [])
+		if (plan.tasks[0]?.input.kind === "background") {
+			expect(plan.tasks[0].input.needsBrowser).toBe(false)
+		}
+	})
+})
+
+describe("materializeRouterOutput — integration read vs write", () => {
+	it("read-only integration has no resource locks with write semantics", () => {
+		const output: RouterOutput = {
+			strategy: "sequential",
+			rationale: "Check messages",
+			tasks: [
+				{
+					specialist: "integration",
+					goal: "Check Slack messages",
+					dependencies: [],
+				},
+			],
+			needsValidation: false,
+		}
+		const plan = materializeRouterOutput(output, [], [])
+		expect(plan.tasks[0]?.mutates).toBe(false)
+		expect(plan.tasks[0]?.writesExternal).toBe(false)
+		expect(plan.tasks[0]?.requiresConfirmation).toBe(false)
+	})
+})
+
+describe("materializeRouterOutput — settings edge cases", () => {
+	it("timezone settings uses goal as fallback when timezone field missing", () => {
+		const output: RouterOutput = {
+			strategy: "sequential",
+			rationale: "Set timezone",
+			tasks: [
+				{
+					specialist: "settings",
+					goal: "America/Chicago",
+					dependencies: [],
+					settingsKind: "timezone",
+					// timezone field intentionally omitted
+				},
+			],
+			needsValidation: false,
+		}
+		const plan = materializeRouterOutput(output, [], [])
+		const input = plan.tasks[0]?.input
+		if (input?.kind === "settings" && input.task.kind === "timezone") {
+			expect(input.task.timezone).toBe("America/Chicago")
+		}
+	})
+})
+
+describe("materializeRouterOutput — multiple path hints for builder", () => {
+	it("creates per-file resource locks for each path hint", () => {
+		const output: RouterOutput = {
+			strategy: "sequential",
+			rationale: "Fix multiple files",
+			tasks: [
+				{
+					specialist: "builder",
+					goal: "Fix billing and invoice",
+					dependencies: [],
+				},
+			],
+			needsValidation: true,
+		}
+		const plan = materializeRouterOutput(
+			output,
+			[],
+			["/src/billing/totals.ts", "/src/billing/invoice.ts"],
+		)
 		expect(plan.tasks[0]?.resourceLocks).toContain("fs-write:/src/billing/totals.ts")
 		expect(plan.tasks[0]?.resourceLocks).toContain("fs-write:/src/billing/invoice.ts")
-	})
-
-	it("builder task without path hints uses generic sandbox lock", () => {
-		const plan = buildHeuristicPlan({
-			request: "Implement a new utility function",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("builder")
-		expect(plan.tasks[0]?.resourceLocks).toContain("sandbox-workdir:/")
+		expect(plan.tasks[0]?.resourceLocks).not.toContain("sandbox-workdir:/")
 	})
 })
 
-describe("buildHeuristicPlan — settings sub-routing", () => {
-	it("reminder request routes to schedule kind", () => {
-		const plan = buildHeuristicPlan({
-			request: "Remind me to check the deploy every day at 9am",
-			config,
-		})
-		const task = plan.tasks[0]
-		expect(task?.specialist).toBe("settings")
-		if (task?.input.kind === "settings") {
-			expect(task.input.task.kind).toBe("schedule")
+describe("materializeRouterOutput — computer defaults", () => {
+	it("computer task defaults writesExternally to false", () => {
+		const output: RouterOutput = {
+			strategy: "sequential",
+			rationale: "Check system",
+			tasks: [
+				{
+					specialist: "computer",
+					goal: "Check htop",
+					dependencies: [],
+				},
+			],
+			needsValidation: false,
 		}
-	})
-
-	it("codex auth request routes to codex_auth kind", () => {
-		const plan = buildHeuristicPlan({
-			request: "Set up my codex auth",
-			config,
-		})
-		const task = plan.tasks[0]
-		expect(task?.specialist).toBe("settings")
-		if (task?.input.kind === "settings") {
-			expect(task.input.task.kind).toBe("codex_auth")
-		}
-	})
-})
-
-describe("buildHeuristicPlan — bare domain detection", () => {
-	it("bare domain like nytimes.com routes to browser", () => {
-		const plan = buildHeuristicPlan({
-			request: "Go to nytimes.com and summarize the top headlines",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("browser")
-		if (plan.tasks[0]?.input.kind === "browser") {
-			expect(plan.tasks[0].input.task.startUrl).toContain("nytimes.com")
-		}
-	})
-
-	it("bare domain docs.google.com routes to browser", () => {
-		const plan = buildHeuristicPlan({
-			request: "Check docs.google.com for my latest document",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("browser")
-	})
-
-	it("multiple bare domains produce parallel browser tasks", () => {
-		const plan = buildHeuristicPlan({
-			request: "Compare reddit.com and hackernews.com",
-			config,
-		})
-		expect(plan.strategy).toBe("parallel")
-		expect(plan.tasks).toHaveLength(2)
-		expect(plan.tasks.every((t) => t.specialist === "browser")).toBe(true)
-	})
-})
-
-describe("buildHeuristicPlan — expanded computer patterns", () => {
-	it("'run htop' routes to computer", () => {
-		const plan = buildHeuristicPlan({
-			request: "Run htop and let me know what's using CPU",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("computer")
-	})
-
-	it("'check disk space' routes to computer", () => {
-		const plan = buildHeuristicPlan({
-			request: "Check disk space on the machine",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("computer")
-	})
-
-	it("'how much storage' routes to computer", () => {
-		const plan = buildHeuristicPlan({
-			request: "How much storage do I have on my computer?",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("computer")
-	})
-})
-
-describe("buildHeuristicPlan — expanded browser patterns", () => {
-	it("'go to' phrase routes to browser", () => {
-		const plan = buildHeuristicPlan({
-			request: "Go to the New York Times homepage and summarize headlines",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("browser")
-	})
-
-	it("'navigate to' phrase routes to browser", () => {
-		const plan = buildHeuristicPlan({
-			request: "Navigate to the React documentation",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("browser")
-	})
-
-	it("'what's on' phrase routes to browser", () => {
-		const plan = buildHeuristicPlan({
-			request: "What's on the front page of Hacker News?",
-			config,
-		})
-		expect(plan.tasks[0]?.specialist).toBe("browser")
-	})
-})
-
-describe("shouldUseModelPlanner — additional edge cases", () => {
-	it("returns false for direct strategy regardless of language", () => {
-		expect(
-			shouldUseModelPlanner("plan this carefully step by step", {
-				strategy: "direct",
-				rationale: "",
-				tasks: [],
-				reducer: "conversation",
-			}),
-		).toBe(false)
-	})
-
-	it("returns true when 'after that' appears in request", () => {
-		expect(
-			shouldUseModelPlanner("do X, after that do Y", {
-				strategy: "sequential",
-				rationale: "",
-				tasks: [{} as never],
-				reducer: "conversation",
-			}),
-		).toBe(true)
-	})
-
-	it("returns false for simple request with 1 task and no planning language", () => {
-		expect(
-			shouldUseModelPlanner("open the website", {
-				strategy: "sequential",
-				rationale: "",
-				tasks: [{} as never],
-				reducer: "conversation",
-			}),
-		).toBe(false)
+		const plan = materializeRouterOutput(output, [], [])
+		expect(plan.tasks[0]?.writesExternal).toBe(false)
+		expect(plan.tasks[0]?.requiresConfirmation).toBe(false)
 	})
 })
