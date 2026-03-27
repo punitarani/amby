@@ -12,12 +12,12 @@ import {
 	ConnectorsService,
 	ConnectorsServiceLive,
 } from "@amby/plugins/integrations"
+import { PluginRegistryLive } from "@amby/plugins/registry"
 import type { Chat } from "chat"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
 import { createAmbyBot } from "./bot"
 import { getHomeResponse } from "./home"
-import { PluginRegistryLive } from "./shared/plugin-registry"
 import { TelegramSenderLite } from "./telegram"
 
 // Shared layers — constructed once at startup

@@ -7,8 +7,8 @@ import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/worke
 import { MemoryServiceLive } from "@amby/memory"
 import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
+import { PluginRegistryLive } from "@amby/plugins/registry"
 import { Layer, ManagedRuntime } from "effect"
-import { PluginRegistryLive } from "../shared/plugin-registry"
 import { TelegramSenderLite } from "../telegram"
 
 const makeBaseLive = (bindings: WorkerBindings) => {

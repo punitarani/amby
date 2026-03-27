@@ -1,17 +1,17 @@
 import { CoreError, createPluginRegistry, PluginRegistryService, registerPlugins } from "@amby/core"
 import { DbService } from "@amby/db"
 import { createMemoryPlugin, MemoryService } from "@amby/memory"
+import { createSkillService, createSkillsPlugin } from "@amby/skills"
+import { Effect, Layer } from "effect"
 import {
 	AutomationService,
 	adaptAutomationService,
 	computeNextCronRun,
 	createAutomationsPlugin,
-	createBrowserToolsPlugin,
-	createComputerToolsPlugin,
-} from "@amby/plugins"
-import { ConnectorsService, createIntegrationsPlugin } from "@amby/plugins/integrations"
-import { createSkillService, createSkillsPlugin } from "@amby/skills"
-import { Effect, Layer } from "effect"
+} from "../automations"
+import { createBrowserToolsPlugin } from "../browser-tools"
+import { createComputerToolsPlugin } from "../computer-tools"
+import { ConnectorsService, createIntegrationsPlugin } from "../integrations"
 
 /**
  * Build the PluginRegistry Layer from resolved services.

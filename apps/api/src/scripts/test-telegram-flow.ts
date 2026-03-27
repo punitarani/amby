@@ -17,8 +17,8 @@ import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { MemoryServiceLive } from "@amby/memory"
 import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
+import { PluginRegistryLive } from "@amby/plugins/registry"
 import { Effect, Layer, ManagedRuntime } from "effect"
-import { PluginRegistryLive } from "../shared/plugin-registry"
 
 // --- Test Configuration ---
 

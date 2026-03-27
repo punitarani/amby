@@ -1,0 +1,1 @@
+export { PluginRegistryLive } from "./composition"
