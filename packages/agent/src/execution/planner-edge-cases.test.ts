@@ -25,7 +25,7 @@ describe("materializeRouterOutput — mixed specialist plans", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.strategy).toBe("sequential")
 		expect(plan.tasks).toHaveLength(2)
 		expect(plan.tasks[0]?.specialist).toBe("research")
@@ -52,7 +52,8 @@ describe("materializeRouterOutput — browser task defaults", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, ["https://example.com/"], [])
+		const plan = materializeRouterOutput(output, [])
+		expect(plan.tasks[0]?.input.kind).toBe("browser")
 		if (plan.tasks[0]?.input.kind === "browser") {
 			// startUrl comes from the router task, not from extracted URLs
 			expect(plan.tasks[0].input.task.startUrl).toBeUndefined()
@@ -74,7 +75,8 @@ describe("materializeRouterOutput — background strategy", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
+		expect(plan.tasks[0]?.input.kind).toBe("background")
 		if (plan.tasks[0]?.input.kind === "background") {
 			expect(plan.tasks[0].input.needsBrowser).toBe(true)
 		}
@@ -93,7 +95,8 @@ describe("materializeRouterOutput — background strategy", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
+		expect(plan.tasks[0]?.input.kind).toBe("background")
 		if (plan.tasks[0]?.input.kind === "background") {
 			expect(plan.tasks[0].input.needsBrowser).toBe(false)
 		}
@@ -114,7 +117,7 @@ describe("materializeRouterOutput — integration read vs write", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.mutates).toBe(false)
 		expect(plan.tasks[0]?.writesExternal).toBe(false)
 		expect(plan.tasks[0]?.requiresConfirmation).toBe(false)
@@ -137,8 +140,9 @@ describe("materializeRouterOutput — settings edge cases", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		const input = plan.tasks[0]?.input
+		expect(input?.kind).toBe("settings")
 		if (input?.kind === "settings" && input.task.kind === "timezone") {
 			expect(input.task.timezone).toBe("America/Chicago")
 		}
@@ -159,11 +163,10 @@ describe("materializeRouterOutput — multiple path hints for builder", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(
-			output,
-			[],
-			["/src/billing/totals.ts", "/src/billing/invoice.ts"],
-		)
+		const plan = materializeRouterOutput(output, [
+			"/src/billing/totals.ts",
+			"/src/billing/invoice.ts",
+		])
 		expect(plan.tasks[0]?.resourceLocks).toContain("fs-write:/src/billing/totals.ts")
 		expect(plan.tasks[0]?.resourceLocks).toContain("fs-write:/src/billing/invoice.ts")
 		expect(plan.tasks[0]?.resourceLocks).not.toContain("sandbox-workdir:/")
@@ -184,7 +187,7 @@ describe("materializeRouterOutput — computer defaults", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.writesExternal).toBe(false)
 		expect(plan.tasks[0]?.requiresConfirmation).toBe(false)
 	})

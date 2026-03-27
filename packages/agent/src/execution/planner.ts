@@ -15,17 +15,29 @@ import { getSpecialistDefinition } from "./registry"
 const URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g
 /** Matches bare domain names like "nytimes.com", "docs.google.com" */
 const BARE_DOMAIN_RE =
-	/\b([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com|org|net|io|dev|co|ai|app|xyz|me|info|edu|gov)\b/i
+	/\b([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com|org|net|io|dev|co|ai|app|xyz|me|info|edu|gov)\b/gi
+const PATH_HINT_RE = /\/[A-Za-z0-9._~/-]+/g
 
 export function extractUrls(text: string): string[] {
 	const fullUrls = [...text.matchAll(URL_RE)]
 		.map((match) => sanitizeBrowserStartUrl(match[0]))
 		.filter((url): url is string => Boolean(url))
 
-	const bareDomains = [...text.matchAll(new RegExp(BARE_DOMAIN_RE, "gi"))]
+	const fullUrlHostnames = new Set(
+		fullUrls.map((url) => {
+			try {
+				return new URL(url).hostname
+			} catch {
+				return null
+			}
+		}),
+	)
+
+	const bareDomains = [...text.matchAll(BARE_DOMAIN_RE)]
 		.map((match) => {
-			const domain = match[0]
-			if (fullUrls.some((url) => url.includes(domain))) return null
+			const domain = match[0].toLowerCase()
+			// Skip if any full URL's hostname matches this bare domain exactly
+			if (fullUrlHostnames.has(domain)) return null
 			return sanitizeBrowserStartUrl(`https://${domain}`)
 		})
 		.filter((url): url is string => Boolean(url))
@@ -34,7 +46,9 @@ export function extractUrls(text: string): string[] {
 }
 
 export function extractPathHints(text: string): string[] {
-	const matches = text.match(/\/[A-Za-z0-9._~/-]+/g) ?? []
+	// Strip URLs before matching to avoid capturing URL path segments
+	const withoutUrls = text.replace(URL_RE, "")
+	const matches = withoutUrls.match(PATH_HINT_RE) ?? []
 	return [...new Set(matches)]
 }
 
@@ -547,11 +561,7 @@ function materializeTask(task: RouterTask, pathHints: string[]): PlannedTask {
 	}
 }
 
-export function materializeRouterOutput(
-	output: RouterOutput,
-	_urls: string[],
-	pathHints: string[],
-): ExecutionPlan {
+export function materializeRouterOutput(output: RouterOutput, pathHints: string[]): ExecutionPlan {
 	if (output.strategy === "direct" || output.tasks.length === 0) {
 		return {
 			strategy: "direct",
@@ -614,7 +624,7 @@ export async function buildExecutionPlan(params: {
 			schema: routerOutputSchema,
 			prompt,
 		})
-		return materializeRouterOutput(object, urls, pathHints)
+		return materializeRouterOutput(object, pathHints)
 	} catch (error) {
 		console.warn("[router] LLM router failed, defaulting to research:", error)
 		return {

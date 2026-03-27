@@ -53,6 +53,13 @@ describe("extractUrls", () => {
 		const urls = extractUrls("Open https://nytimes.com/article and nytimes.com")
 		expect(urls).toHaveLength(1)
 	})
+
+	it("keeps bare domain when full URL is a different subdomain", () => {
+		const urls = extractUrls("Visit https://api.example.com and example.com")
+		expect(urls.length).toBe(2)
+		expect(urls.some((u) => u.includes("api.example.com"))).toBe(true)
+		expect(urls.some((u) => u === "https://example.com/")).toBe(true)
+	})
 })
 
 // ---------------------------------------------------------------------------
@@ -73,6 +80,13 @@ describe("extractPathHints", () => {
 	it("returns empty for no paths", () => {
 		const paths = extractPathHints("Hello world")
 		expect(paths).toHaveLength(0)
+	})
+
+	it("does not extract path segments from URLs", () => {
+		const paths = extractPathHints("See https://github.com/user/repo and fix /src/foo.ts")
+		expect(paths).toContain("/src/foo.ts")
+		expect(paths.some((p) => p.includes("github.com"))).toBe(false)
+		expect(paths.some((p) => p.includes("/user/repo"))).toBe(false)
 	})
 })
 
@@ -167,7 +181,7 @@ describe("materializeRouterOutput — direct strategy", () => {
 			tasks: [],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.strategy).toBe("direct")
 		expect(plan.tasks).toHaveLength(0)
 		expect(plan.reducer).toBe("conversation")
@@ -180,7 +194,7 @@ describe("materializeRouterOutput — direct strategy", () => {
 			tasks: [],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.strategy).toBe("direct")
 		expect(plan.tasks).toHaveLength(0)
 	})
@@ -207,11 +221,12 @@ describe("materializeRouterOutput — browser tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, ["https://nytimes.com/"], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks).toHaveLength(1)
 		expect(plan.tasks[0]?.specialist).toBe("browser")
 		expect(plan.tasks[0]?.runnerKind).toBe("browser_service")
 		expect(plan.tasks[0]?.mutates).toBe(false)
+		expect(plan.tasks[0]?.input.kind).toBe("browser")
 		if (plan.tasks[0]?.input.kind === "browser") {
 			expect(plan.tasks[0].input.task.mode).toBe("extract")
 			expect(plan.tasks[0].input.task.startUrl).toBe("https://nytimes.com/")
@@ -235,7 +250,7 @@ describe("materializeRouterOutput — browser tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.mutates).toBe(true)
 		expect(plan.tasks[0]?.writesExternal).toBe(false)
 	})
@@ -256,7 +271,7 @@ describe("materializeRouterOutput — browser tasks", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.mutates).toBe(true)
 		expect(plan.tasks[0]?.writesExternal).toBe(true)
 		expect(plan.tasks[0]?.requiresConfirmation).toBe(true)
@@ -277,7 +292,8 @@ describe("materializeRouterOutput — browser tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
+		expect(plan.tasks[0]?.input.kind).toBe("browser")
 		if (plan.tasks[0]?.input.kind === "browser") {
 			expect(plan.tasks[0].input.task.mode).toBe("agent")
 			expect(plan.tasks[0].input.task.sideEffectLevel).toBe("read")
@@ -303,7 +319,7 @@ describe("materializeRouterOutput — computer tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.specialist).toBe("computer")
 		expect(plan.tasks[0]?.runnerKind).toBe("toolloop")
 		expect(plan.tasks[0]?.resourceLocks).toContain("computer-desktop")
@@ -324,7 +340,7 @@ describe("materializeRouterOutput — computer tasks", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.writesExternal).toBe(true)
 		expect(plan.tasks[0]?.requiresConfirmation).toBe(true)
 	})
@@ -348,7 +364,7 @@ describe("materializeRouterOutput — research tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.specialist).toBe("research")
 		expect(plan.tasks[0]?.mutates).toBe(false)
 		expect(plan.tasks[0]?.resourceLocks).toHaveLength(0)
@@ -374,7 +390,7 @@ describe("materializeRouterOutput — builder tasks", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.specialist).toBe("builder")
 		expect(plan.tasks[0]?.mutates).toBe(true)
 		expect(plan.tasks[0]?.requiresValidation).toBe(true)
@@ -395,7 +411,7 @@ describe("materializeRouterOutput — builder tasks", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(output, [], ["/src/billing/totals.ts"])
+		const plan = materializeRouterOutput(output, ["/src/billing/totals.ts"])
 		expect(plan.tasks[0]?.resourceLocks).toContain("fs-write:/src/billing/totals.ts")
 		expect(plan.tasks[0]?.resourceLocks).not.toContain("sandbox-workdir:/")
 	})
@@ -413,8 +429,9 @@ describe("materializeRouterOutput — builder tasks", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(output, [], ["/src/foo.ts"])
+		const plan = materializeRouterOutput(output, ["/src/foo.ts"])
 		const input = plan.tasks[0]?.input
+		expect(input?.kind).toBe("specialist")
 		if (input?.kind === "specialist") {
 			expect((input.payload as Record<string, unknown>).pathHints).toEqual(["/src/foo.ts"])
 		}
@@ -439,7 +456,7 @@ describe("materializeRouterOutput — integration tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.specialist).toBe("integration")
 		expect(plan.tasks[0]?.mutates).toBe(false)
 		expect(plan.tasks[0]?.writesExternal).toBe(false)
@@ -459,7 +476,7 @@ describe("materializeRouterOutput — integration tasks", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.mutates).toBe(true)
 		expect(plan.tasks[0]?.writesExternal).toBe(true)
 		expect(plan.tasks[0]?.requiresConfirmation).toBe(true)
@@ -486,7 +503,7 @@ describe("materializeRouterOutput — memory tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.specialist).toBe("memory")
 		expect(plan.tasks[0]?.mutates).toBe(true)
 		expect(plan.tasks[0]?.resourceLocks).toContain("memory-write")
@@ -513,10 +530,11 @@ describe("materializeRouterOutput — settings tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.specialist).toBe("settings")
 		expect(plan.tasks[0]?.mutates).toBe(true)
 		const input = plan.tasks[0]?.input
+		expect(input?.kind).toBe("settings")
 		if (input?.kind === "settings") {
 			expect(input.task).toEqual({ kind: "timezone", timezone: "America/New_York" })
 		}
@@ -536,8 +554,9 @@ describe("materializeRouterOutput — settings tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		const input = plan.tasks[0]?.input
+		expect(input?.kind).toBe("settings")
 		if (input?.kind === "settings") {
 			expect(input.task.kind).toBe("schedule")
 		}
@@ -557,8 +576,9 @@ describe("materializeRouterOutput — settings tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		const input = plan.tasks[0]?.input
+		expect(input?.kind).toBe("settings")
 		if (input?.kind === "settings") {
 			expect(input.task.kind).toBe("codex_auth")
 		}
@@ -577,7 +597,7 @@ describe("materializeRouterOutput — settings tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks[0]?.input.kind).toBe("specialist")
 	})
 })
@@ -600,7 +620,7 @@ describe("materializeRouterOutput — background tasks", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.strategy).toBe("background")
 		expect(plan.tasks).toHaveLength(1)
 		expect(plan.tasks[0]?.runnerKind).toBe("background_handoff")
@@ -614,7 +634,7 @@ describe("materializeRouterOutput — background tasks", () => {
 			tasks: [],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.strategy).toBe("direct")
 		expect(plan.tasks).toHaveLength(0)
 	})
@@ -649,7 +669,7 @@ describe("materializeRouterOutput — parallel strategy", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, ["https://a.com/", "https://b.com/"], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.strategy).toBe("parallel")
 		expect(plan.tasks).toHaveLength(2)
 		expect(plan.tasks.every((t) => t.specialist === "browser")).toBe(true)
@@ -679,7 +699,7 @@ describe("materializeRouterOutput — sequential with dependencies", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.tasks).toHaveLength(2)
 		expect(plan.tasks[0]?.specialist).toBe("research")
 		expect(plan.tasks[1]?.specialist).toBe("builder")
@@ -705,7 +725,7 @@ describe("materializeRouterOutput — validation flag", () => {
 			],
 			needsValidation: true,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.reducer).toBe("validator")
 	})
 
@@ -722,7 +742,7 @@ describe("materializeRouterOutput — validation flag", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.reducer).toBe("conversation")
 	})
 })
@@ -748,7 +768,7 @@ describe("materializeRouterOutput — rationale", () => {
 			],
 			needsValidation: false,
 		}
-		const plan = materializeRouterOutput(output, [], [])
+		const plan = materializeRouterOutput(output, [])
 		expect(plan.rationale).toBe("The user wants to browse a specific URL")
 	})
 })
