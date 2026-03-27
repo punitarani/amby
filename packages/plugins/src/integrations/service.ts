@@ -191,7 +191,7 @@ export function buildComposioSessionConfig(params?: {
 			]),
 		),
 		tags: { disable: [COMPOSIO_DESTRUCTIVE_TAG] },
-		workbench: { enableProxyExecution: false },
+		workbench: { enable: true, enableProxyExecution: false },
 		...(Object.keys(authConfigs).length > 0 ? { authConfigs } : {}),
 		...(Object.keys(connectedAccounts).length > 0 ? { connectedAccounts } : {}),
 	}
