@@ -30,7 +30,6 @@
 		"@amby/core": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
-		"@amby/memory": "workspace:*",
 		"@amby/plugins": "workspace:*",
 		"@amby/skills": "workspace:*",
 		"@chat-adapter/state-memory": "^4.20.2",

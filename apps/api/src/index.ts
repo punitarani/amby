@@ -5,13 +5,13 @@ import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { DbServiceLive } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
-import { MemoryServiceLive } from "@amby/memory"
 import { AutomationServiceLive } from "@amby/plugins"
 import {
 	buildSafeComposioRedirectUrl,
 	ConnectorsService,
 	ConnectorsServiceLive,
 } from "@amby/plugins/integrations"
+import { MemoryServiceLive } from "@amby/plugins/memory"
 import type { Chat } from "chat"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"

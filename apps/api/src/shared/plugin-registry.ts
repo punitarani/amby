@@ -1,6 +1,5 @@
 import { CoreError, createPluginRegistry, PluginRegistryService, registerPlugins } from "@amby/core"
 import { DbService } from "@amby/db"
-import { createMemoryPlugin, MemoryService } from "@amby/memory"
 import {
 	AutomationService,
 	adaptAutomationService,
@@ -10,6 +9,7 @@ import {
 	createComputerToolsPlugin,
 } from "@amby/plugins"
 import { ConnectorsService, createIntegrationsPlugin } from "@amby/plugins/integrations"
+import { createMemoryPlugin, MemoryService } from "@amby/plugins/memory"
 import { createSkillService, createSkillsPlugin } from "@amby/skills"
 import { Effect, Layer } from "effect"
 

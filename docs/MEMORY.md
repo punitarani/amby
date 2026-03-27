@@ -10,7 +10,7 @@ The memory system gives Amby persistent, per-user recall across conversations. I
 | `dynamic` | Temporary or evolving context | Agent (from conversations) | "Currently building a flight tracker" |
 | `inference` | Agent-inferred facts | Agent (implicit reasoning) | "Likely a backend engineer" |
 
-Categories are defined in `packages/memory/src/types.ts` as the `MemoryCategory` union type.
+Categories are defined in `packages/plugins/src/memory/types.ts` as the `MemoryCategory` union type.
 
 ## Storage
 
@@ -45,7 +45,7 @@ Before injection into prompts, memories are deduplicated with this priority:
 static > dynamic > search results
 ```
 
-A memory that appears in a higher-priority category is removed from lower ones. This logic lives in `deduplicateMemories()` in `packages/memory/src/prompt-builder.ts`.
+A memory that appears in a higher-priority category is removed from lower ones. This logic lives in `deduplicateMemories()` in `packages/plugins/src/memory/prompt-builder.ts`.
 
 ## Prompt Integration
 
@@ -62,7 +62,7 @@ The formatted output uses two sections:
 
 ## Tools
 
-The agent exposes memory tools to the LLM via `createMemoryTools()` in `packages/memory/src/tools.ts`.
+The agent exposes memory tools to the LLM via `createMemoryTools()` in `packages/plugins/src/memory/tools.ts`.
 
 | Tool | Purpose | When used |
 |---|---|---|
@@ -77,11 +77,11 @@ Tool groups in the agent runtime:
 
 ## Cache Layer
 
-`MemoryCache` (`packages/memory/src/cache.ts`) is a `Map`-based cache keyed by `userId:query`. It prevents redundant memory lookups within a single agent tool-calling loop where the same context may be requested multiple times. It has no eviction policy -- it is intended to be short-lived and discarded after the turn completes.
+`MemoryCache` (`packages/plugins/src/memory/cache.ts`) is a `Map`-based cache keyed by `userId:query`. It prevents redundant memory lookups within a single agent tool-calling loop where the same context may be requested multiple times. It has no eviction policy -- it is intended to be short-lived and discarded after the turn completes.
 
 ## MemoryService API
 
-Defined in `packages/memory/src/repository.ts` as an Effect service:
+Defined in `packages/plugins/src/memory/repository.ts` as an Effect service:
 
 | Method | Signature | Description |
 |---|---|---|
@@ -93,12 +93,12 @@ Defined in `packages/memory/src/repository.ts` as an Effect service:
 
 | File | Role |
 |---|---|
-| `packages/memory/src/types.ts` | `MemoryCategory`, `MemoryItem`, `ProfileMemories`, `DeduplicatedMemories` |
-| `packages/memory/src/repository.ts` | `MemoryService` Effect service (CRUD) |
-| `packages/memory/src/tools.ts` | `createMemoryTools()` -- agent tool definitions |
-| `packages/memory/src/prompt-builder.ts` | `deduplicateMemories()`, `formatProfile()`, `buildMemoriesText()` |
-| `packages/memory/src/cache.ts` | `MemoryCache` per-turn cache |
-| `packages/memory/src/errors.ts` | `MemoryError` tagged error |
+| `packages/plugins/src/memory/types.ts` | `MemoryCategory`, `MemoryItem`, `ProfileMemories`, `DeduplicatedMemories` |
+| `packages/plugins/src/memory/repository.ts` | `MemoryService` Effect service (CRUD) |
+| `packages/plugins/src/memory/tools.ts` | `createMemoryTools()` -- agent tool definitions |
+| `packages/plugins/src/memory/prompt-builder.ts` | `deduplicateMemories()`, `formatProfile()`, `buildMemoriesText()` |
+| `packages/plugins/src/memory/cache.ts` | `MemoryCache` per-turn cache |
+| `packages/plugins/src/memory/errors.ts` | `MemoryError` tagged error |
 | `packages/db/src/schema/memories.ts` | Drizzle table definition |
 | `packages/agent/src/context/builder.ts` | Memory injection into agent system prompt |
 

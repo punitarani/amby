@@ -28,7 +28,6 @@
         "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
-        "@amby/memory": "workspace:*",
         "@amby/plugins": "workspace:*",
         "@amby/skills": "workspace:*",
         "@chat-adapter/state-memory": "^4.20.2",
@@ -192,19 +191,6 @@
         "effect": "^3.21.0",
       },
     },
-    "packages/memory": {
-      "name": "@amby/memory",
-      "version": "0.1.0",
-      "dependencies": {
-        "@amby/core": "workspace:*",
-        "@amby/db": "workspace:*",
-      },
-      "peerDependencies": {
-        "ai": "^6.0.116",
-        "effect": "^3.21.0",
-        "zod": "^3.24.0",
-      },
-    },
     "packages/plugins": {
       "name": "@amby/plugins",
       "version": "0.1.0",
@@ -287,8 +273,6 @@
     "@amby/db": ["@amby/db@workspace:packages/db"],
 
     "@amby/env": ["@amby/env@workspace:packages/env"],
-
-    "@amby/memory": ["@amby/memory@workspace:packages/memory"],
 
     "@amby/mock": ["@amby/mock@workspace:apps/mock"],
 

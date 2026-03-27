@@ -5,7 +5,8 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
-		"./integrations": "./src/integrations/index.ts"
+		"./integrations": "./src/integrations/index.ts",
+		"./memory": "./src/memory/index.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",

@@ -4,7 +4,7 @@
 
 | Concept | What it is | Where it lives | How it works |
 |---------|-----------|----------------|--------------|
-| **Plugin** | Executable code that registers tools, context contributors, task runners | `packages/plugins/src/`, `packages/memory/src/`, `packages/skills/src/` | Runs at agent construction time via `PluginRegistry` |
+| **Plugin** | Executable code that registers tools, context contributors, task runners | `packages/plugins/src/`, `packages/skills/src/` | Runs at agent construction time via `PluginRegistry` |
 | **Skill** | Instruction bundle loaded from filesystem | `./skills/<name>/SKILL.md` | Discovered at runtime, activated on demand via tools |
 
 Plugins are **runtime behavior**. Skills are **prompt-level behavior**.
@@ -41,7 +41,7 @@ The `PluginRegistry` (`packages/core/src/plugins/registry.ts`) exposes these reg
 
 | Plugin | Package | What it provides |
 |--------|---------|-----------------|
-| Memory | `packages/memory/src/plugin.ts` | Profile context contributor + `search_memories`, `save_memory`, `forget_memory` tools |
+| Memory | `packages/plugins/src/memory/plugin.ts` | Profile context contributor + `search_memories`, `save_memory` tools |
 | Integrations | `packages/plugins/src/integrations/plugin.ts` | Connected app tools (Gmail, Notion, Slack, etc.) via Composio |
 | Automations | `packages/plugins/src/automations/` | Reminders, scheduled work, cron job management |
 | Browser Tools | `packages/plugins/src/browser-tools/plugin.ts` | `browse_web` tool via Stagehand |

@@ -14,7 +14,7 @@ Agent orchestration, model inference, tool routing, and execution coordination.
 
 - No direct Telegram or channel handling (that is `apps/api` via `@chat-adapter/telegram`)
 - No HTTP endpoints or webhook processing (that is the Cloudflare worker in `apps/api`)
-- No memory storage or embedding (that is `@amby/memory` and `@amby/db`)
+- No memory storage or embedding (that is `@amby/plugins/memory` and `@amby/db`)
 
 ## Key modules
 
