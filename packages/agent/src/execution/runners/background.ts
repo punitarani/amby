@@ -1,7 +1,7 @@
 import type { TaskSupervisor } from "@amby/computer"
 import { Effect } from "effect"
 import type { ExecutionTask, ExecutionTaskResult } from "../../types/execution"
-import type { TraceWriter } from "../ledger"
+import type { RunWriter } from "../ledger"
 
 export async function runBackgroundSpecialist(params: {
 	task: ExecutionTask
@@ -9,7 +9,7 @@ export async function runBackgroundSpecialist(params: {
 	userId: string
 	conversationId: string
 	threadId?: string
-	trace: TraceWriter
+	trace: RunWriter
 }) {
 	if (params.task.input.kind !== "background") {
 		throw new Error("Background runner received a non-background task input.")
@@ -23,7 +23,7 @@ export async function runBackgroundSpecialist(params: {
 			needsBrowser: params.task.input.needsBrowser,
 			conversationId: params.conversationId,
 			threadId: params.threadId,
-			traceId: params.trace.traceId,
+			traceId: params.trace.runId,
 			parentTaskId: params.task.parentTaskId,
 			rootTaskId: params.task.rootTaskId,
 			specialist: params.task.specialist,
@@ -51,10 +51,10 @@ export async function runBackgroundSpecialist(params: {
 		specialist: params.task.specialist,
 		status: "completed",
 		summary: "Background task started.",
-		traceRef: { traceId: params.trace.traceId },
+		traceRef: { traceId: params.trace.runId },
 		backgroundRef: {
 			taskId: started.taskId,
-			traceId: params.trace.traceId,
+			traceId: params.trace.runId,
 		},
 		data: {
 			status: started.status,

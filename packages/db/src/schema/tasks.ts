@@ -9,12 +9,8 @@ import {
 	timestamp,
 	uuid,
 } from "drizzle-orm/pg-core"
-import {
-	conversations,
-	conversationThreads,
-	type RunnerKind,
-	type SpecialistKind,
-} from "./conversations"
+import { conversations, conversationThreads } from "./conversations"
+import type { RunnerKind, SpecialistKind } from "./runs"
 import { users } from "./users"
 
 export type TaskStatus =

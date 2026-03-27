@@ -7,8 +7,7 @@ import {
 	upsertVolumeRow,
 	volumeName,
 } from "@amby/computer/sandbox-config"
-import { CoreError } from "@amby/core"
-import { DbService } from "@amby/db"
+import { ComputeStore, CoreError } from "@amby/core"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
@@ -52,7 +51,7 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 				target: env.DAYTONA_TARGET ?? "us",
 			})
 
-		const withRuntime = async <T>(effect: Effect.Effect<T, unknown, DbService>) => {
+		const withRuntime = async <T>(effect: Effect.Effect<T, unknown, ComputeStore>) => {
 			const runtime = makeRuntimeForConsumer(env)
 			try {
 				return await runtime.runPromise(effect)
@@ -71,9 +70,9 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 				const daytona = makeDaytona()
 				const row = await withRuntime(
 					Effect.gen(function* () {
-						const { db } = yield* DbService
+						const computeStore = yield* ComputeStore
 						return yield* Effect.tryPromise({
-							try: () => ensureProvisionableVolume(daytona, db, userId, isDev),
+							try: () => ensureProvisionableVolume(daytona, computeStore, userId, isDev),
 							catch: (cause) =>
 								new CoreError({
 									message: `Failed to ensure provisionable volume: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -106,9 +105,9 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 
 						const row = await withRuntime(
 							Effect.gen(function* () {
-								const { db } = yield* DbService
+								const computeStore = yield* ComputeStore
 								return yield* Effect.tryPromise({
-									try: () => upsertVolumeRow(db, userId, volume.id, status),
+									try: () => upsertVolumeRow(computeStore, userId, volume.id, status),
 									catch: (cause) =>
 										new CoreError({
 											message: `Failed to upsert volume row: ${cause instanceof Error ? cause.message : String(cause)}`,

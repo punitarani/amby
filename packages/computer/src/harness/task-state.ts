@@ -1,15 +1,6 @@
-import type { TaskStatus } from "@amby/db"
+import { type TaskStatus, TERMINAL_STATUSES } from "@amby/core"
 
-/** Terminal task statuses — no further status transitions except no-ops. */
-export const TERMINAL_STATUSES: TaskStatus[] = [
-	"succeeded",
-	"partial",
-	"escalated",
-	"failed",
-	"cancelled",
-	"timed_out",
-	"lost",
-]
+export { TERMINAL_STATUSES }
 
 export function isTerminal(status: TaskStatus): boolean {
 	return TERMINAL_STATUSES.includes(status)

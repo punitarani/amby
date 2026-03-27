@@ -1,6 +1,22 @@
 import { index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
 import { conversations, conversationThreads, messages } from "./conversations"
 
+// --- Types (migrated from conversations.ts traces) ---
+
+export type SpecialistKind =
+	| "conversation"
+	| "planner"
+	| "research"
+	| "builder"
+	| "integration"
+	| "computer"
+	| "browser"
+	| "memory"
+	| "settings"
+	| "validator"
+export type RunnerKind = "toolloop" | "browser_service" | "background_handoff"
+export type ExecutionMode = "direct" | "sequential" | "parallel" | "background"
+
 export type RunStatus = "running" | "completed" | "failed"
 export type RunEventKind =
 	| "context_built"
@@ -13,6 +29,8 @@ export type RunEventKind =
 	| "task_observed"
 	| "model_request"
 	| "model_response"
+	| "delegation_start"
+	| "delegation_end"
 	| "error"
 	| "completed"
 
@@ -23,18 +41,26 @@ export const runs = pgTable(
 		conversationId: uuid("conversation_id")
 			.notNull()
 			.references(() => conversations.id, { onDelete: "cascade" }),
-		threadId: uuid("thread_id")
-			.notNull()
-			.references(() => conversationThreads.id, { onDelete: "cascade" }),
+		threadId: uuid("thread_id").references(() => conversationThreads.id, {
+			onDelete: "set null",
+		}),
 		triggerMessageId: uuid("trigger_message_id").references(() => messages.id, {
 			onDelete: "set null",
 		}),
+		// --- Columns migrated from traces ---
+		messageId: uuid("message_id").references(() => messages.id, { onDelete: "set null" }),
+		parentRunId: uuid("parent_run_id"),
+		rootRunId: uuid("root_run_id"),
+		taskId: uuid("task_id"),
+		specialist: text("specialist").$type<SpecialistKind>(),
+		runnerKind: text("runner_kind").$type<RunnerKind>(),
+		depth: integer("depth"),
+		durationMs: integer("duration_ms"),
+		metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+		// --- Original runs columns ---
 		status: text("status").$type<RunStatus>().notNull().default("running"),
-		mode: text("mode")
-			.$type<"direct" | "sequential" | "parallel" | "background">()
-			.notNull()
-			.default("direct"),
-		modelId: text("model_id").notNull(),
+		mode: text("mode").$type<ExecutionMode>().notNull().default("direct"),
+		modelId: text("model_id"),
 		summary: text("summary"),
 		requestJson: jsonb("request_json").$type<Record<string, unknown>>(),
 		responseJson: jsonb("response_json").$type<Record<string, unknown>>(),
@@ -46,6 +72,11 @@ export const runs = pgTable(
 		index("runs_thread_idx").on(t.threadId),
 		index("runs_status_idx").on(t.status),
 		index("runs_started_at_idx").on(t.startedAt),
+		index("runs_parent_run_id_idx").on(t.parentRunId),
+		index("runs_root_run_id_idx").on(t.rootRunId),
+		index("runs_specialist_idx").on(t.specialist),
+		index("runs_task_id_idx").on(t.taskId),
+		index("runs_message_id_idx").on(t.messageId),
 	],
 )
 

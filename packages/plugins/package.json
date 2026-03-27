@@ -5,7 +5,9 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
-		"./integrations": "./src/integrations/index.ts"
+		"./integrations": "./src/integrations/index.ts",
+		"./memory": "./src/memory/index.ts",
+		"./registry": "./src/registry/index.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
@@ -15,6 +17,7 @@
 		"@amby/core": "workspace:*",
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
+		"@amby/skills": "workspace:*",
 		"@composio/core": "0.6.5",
 		"@composio/vercel": "0.6.5",
 		"croner": "^9.0.0"

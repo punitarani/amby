@@ -8,7 +8,7 @@ import type {
 	SpecialistResultShape,
 } from "../../types/execution"
 import type { ArtifactRef, TaskIssue } from "../../types/persistence"
-import type { TraceWriter } from "../ledger"
+import type { RunWriter } from "../ledger"
 import { getSpecialistDefinition, resolveVisibleTools, type ToolGroups } from "../registry"
 
 function buildPrompt(task: ExecutionTask): string {
@@ -100,7 +100,7 @@ export async function runToolloopSpecialist(params: {
 	config: AgentRunConfig
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
-	trace: TraceWriter
+	trace: RunWriter
 }): Promise<{
 	result: ExecutionTaskResult
 	toolEvents: Array<{ kind: "tool_call" | "tool_result"; payload: Record<string, unknown> }>
@@ -170,7 +170,7 @@ export async function runToolloopSpecialist(params: {
 		])
 
 		return {
-			result: mapOutput(params.task, result.output, params.trace.traceId, {
+			result: mapOutput(params.task, result.output, params.trace.runId, {
 				modelId,
 			}),
 			toolEvents,
@@ -190,7 +190,7 @@ export async function runToolloopSpecialist(params: {
 			status: "partial",
 			summary: lastText?.trim() || message,
 			issues: [{ code: "no_structured_output", message }],
-			traceRef: { traceId: params.trace.traceId },
+			traceRef: { traceId: params.trace.runId },
 			runtimeData: { modelId },
 		}
 		return { result: fallbackResult, toolEvents: [] }

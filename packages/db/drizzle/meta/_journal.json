@@ -78,6 +78,13 @@
 			"when": 1774426852224,
 			"tag": "0010_finalize_schema",
 			"breakpoints": true
+		},
+		{
+			"idx": 11,
+			"version": "7",
+			"when": 1774591441477,
+			"tag": "0011_slim_tusk",
+			"breakpoints": true
 		}
 	]
 }

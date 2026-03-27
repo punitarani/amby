@@ -12,7 +12,7 @@ Built-in plugins for integrations, automations, browser tools, and computer tool
 ## Non-responsibilities
 
 - No agent orchestration or conversation logic
-- No memory management (memory has its own plugin in `@amby/memory`)
+- No agent orchestration or memory wiring (memory is a built-in plugin at `@amby/plugins/memory`)
 - No skill discovery (skills are in `@amby/skills`)
 
 ## Key modules
@@ -23,12 +23,14 @@ Built-in plugins for integrations, automations, browser tools, and computer tool
 | `src/automations/` | Automation plugin — reminders, scheduled work |
 | `src/browser-tools/` | Browser tools plugin — `browse_web` via Stagehand |
 | `src/computer-tools/` | Computer tools plugin — sandbox task execution and query |
+| `src/memory/` | Memory plugin — persistent user memory (profile context + tools) |
 
 ## Public surface
 
 ```ts
 import { createIntegrationsPlugin, createBrowserToolsPlugin, createComputerToolsPlugin, createAutomationsPlugin } from "@amby/plugins"
 import { ConnectorsService } from "@amby/plugins/integrations"
+import { MemoryServiceLive, createMemoryPlugin, MemoryService } from "@amby/plugins/memory"
 ```
 
 ## Dependency rules

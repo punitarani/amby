@@ -1,4 +1,4 @@
-import { and, DbService, eq, lte, schema } from "@amby/db"
+import { and, DbService, eq, schema, sql } from "@amby/db"
 import { EnvService } from "@amby/env"
 import { Composio } from "@composio/core"
 import { VercelProvider } from "@composio/vercel"
@@ -84,19 +84,17 @@ export type VerifiedComposioWebhook = {
 	payload: unknown
 }
 
-type ConnectorPreferenceRow = {
+type IntegrationAccountPreferenceRow = {
 	userId: string
-	toolkit: string
-	preferredConnectedAccountId: string
+	provider: string
+	externalAccountId: string | null
 }
 
-type ConnectorAuthRequestRow = {
+type PendingAuthRow = {
 	id: string
 	userId: string
-	toolkit: string
-	redirectUrl: string
-	callbackUrl: string
-	expiresAt: string | Date
+	provider: string
+	metadataJson: Record<string, unknown> | null
 }
 
 /**
@@ -134,10 +132,14 @@ const buildConnectIntegrationUserMessages = (label: string, redirectUrl: string)
 	"Telegram should reopen when you're done. If not, come back and send /start.",
 ]
 
-const isConnectorAuthRequestReusable = (
-	request: Pick<ConnectorAuthRequestRow, "expiresAt">,
+const isPendingAuthReusable = (
+	row: Pick<PendingAuthRow, "metadataJson">,
 	now = new Date(),
-) => new Date(request.expiresAt).getTime() > now.getTime()
+): boolean => {
+	const expiresAt = row.metadataJson?.expiresAt
+	if (typeof expiresAt !== "string") return false
+	return new Date(expiresAt).getTime() > now.getTime()
+}
 
 const pickConnectedAccountUserId = (account: Partial<ConnectedAccountRecord>) =>
 	typeof account.userId === "string"
@@ -281,36 +283,40 @@ export const ConnectorsServiceLive = Layer.effect(
 			query((database) =>
 				database
 					.select({
-						userId: schema.connectorPreferences.userId,
-						toolkit: schema.connectorPreferences.toolkit,
-						preferredConnectedAccountId: schema.connectorPreferences.preferredConnectedAccountId,
+						userId: schema.integrationAccounts.userId,
+						provider: schema.integrationAccounts.provider,
+						externalAccountId: schema.integrationAccounts.externalAccountId,
 					})
-					.from(schema.connectorPreferences)
-					.where(eq(schema.connectorPreferences.userId, userId)),
-			).pipe(Effect.mapError(mapDatabaseError("failed_to_list_connector_preferences")))
+					.from(schema.integrationAccounts)
+					.where(
+						and(
+							eq(schema.integrationAccounts.userId, userId),
+							eq(schema.integrationAccounts.isPreferred, true),
+						),
+					),
+			).pipe(Effect.mapError(mapDatabaseError("failed_to_list_integration_preferences")))
 
 		const getPendingAuthRequest = (userId: string, toolkit: SupportedIntegrationToolkit) =>
 			query((database) =>
 				database
 					.select({
-						id: schema.connectorAuthRequests.id,
-						userId: schema.connectorAuthRequests.userId,
-						toolkit: schema.connectorAuthRequests.toolkit,
-						redirectUrl: schema.connectorAuthRequests.redirectUrl,
-						callbackUrl: schema.connectorAuthRequests.callbackUrl,
-						expiresAt: schema.connectorAuthRequests.expiresAt,
+						id: schema.integrationAccounts.id,
+						userId: schema.integrationAccounts.userId,
+						provider: schema.integrationAccounts.provider,
+						metadataJson: schema.integrationAccounts.metadataJson,
 					})
-					.from(schema.connectorAuthRequests)
+					.from(schema.integrationAccounts)
 					.where(
 						and(
-							eq(schema.connectorAuthRequests.userId, userId),
-							eq(schema.connectorAuthRequests.toolkit, toolkit),
+							eq(schema.integrationAccounts.userId, userId),
+							eq(schema.integrationAccounts.provider, toolkit),
+							eq(schema.integrationAccounts.status, "pending"),
 						),
 					)
 					.limit(1),
 			).pipe(
 				Effect.map((rows) => rows[0]),
-				Effect.mapError(mapDatabaseError("failed_to_read_pending_connector_auth_request")),
+				Effect.mapError(mapDatabaseError("failed_to_read_pending_auth_request")),
 			)
 
 		const upsertPendingAuthRequest = (
@@ -322,33 +328,39 @@ export const ConnectorsServiceLive = Layer.effect(
 		) =>
 			Effect.tryPromise({
 				try: () =>
-					db
-						.insert(schema.connectorAuthRequests)
-						.values({
-							userId,
-							toolkit,
-							redirectUrl,
-							callbackUrl,
-							expiresAt,
-						})
-						.onConflictDoUpdate({
-							target: [schema.connectorAuthRequests.userId, schema.connectorAuthRequests.toolkit],
-							set: {
-								redirectUrl,
-								callbackUrl,
-								expiresAt,
-								updatedAt: new Date(),
-							},
-						})
-						.returning({ id: schema.connectorAuthRequests.id }),
-				catch: mapDatabaseError("failed_to_write_pending_connector_auth_request"),
+					db.transaction(async (tx) => {
+						await tx
+							.delete(schema.integrationAccounts)
+							.where(
+								and(
+									eq(schema.integrationAccounts.userId, userId),
+									eq(schema.integrationAccounts.provider, toolkit),
+									eq(schema.integrationAccounts.status, "pending"),
+								),
+							)
+						const rows = await tx
+							.insert(schema.integrationAccounts)
+							.values({
+								userId,
+								provider: toolkit,
+								status: "pending",
+								metadataJson: {
+									redirectUrl,
+									callbackUrl,
+									expiresAt: expiresAt.toISOString(),
+								},
+							})
+							.returning({ id: schema.integrationAccounts.id })
+						return rows
+					}),
+				catch: mapDatabaseError("failed_to_write_pending_auth_request"),
 			}).pipe(
 				Effect.flatMap((rows) =>
 					rows[0]
 						? Effect.succeed(rows[0].id)
 						: Effect.fail(
 								new ConnectorsError({
-									message: "failed_to_write_pending_connector_auth_request",
+									message: "failed_to_write_pending_auth_request",
 								}),
 							),
 				),
@@ -357,24 +369,30 @@ export const ConnectorsServiceLive = Layer.effect(
 		const clearPendingAuthRequest = (userId: string, toolkit: SupportedIntegrationToolkit) =>
 			query((database) =>
 				database
-					.delete(schema.connectorAuthRequests)
+					.delete(schema.integrationAccounts)
 					.where(
 						and(
-							eq(schema.connectorAuthRequests.userId, userId),
-							eq(schema.connectorAuthRequests.toolkit, toolkit),
+							eq(schema.integrationAccounts.userId, userId),
+							eq(schema.integrationAccounts.provider, toolkit),
+							eq(schema.integrationAccounts.status, "pending"),
 						),
 					),
 			).pipe(
 				Effect.asVoid,
-				Effect.mapError(mapDatabaseError("failed_to_clear_pending_connector_auth_request")),
+				Effect.mapError(mapDatabaseError("failed_to_clear_pending_auth_request")),
 			)
 
-		/** Best-effort cleanup of expired auth requests to keep the table lean. */
+		/** Best-effort cleanup of expired pending auth rows. */
 		const purgeExpiredAuthRequests = () =>
 			query((database) =>
 				database
-					.delete(schema.connectorAuthRequests)
-					.where(lte(schema.connectorAuthRequests.expiresAt, new Date())),
+					.delete(schema.integrationAccounts)
+					.where(
+						and(
+							eq(schema.integrationAccounts.status, "pending"),
+							sql`(${schema.integrationAccounts.metadataJson}->>'expiresAt')::timestamptz <= now()`,
+						),
+					),
 			).pipe(
 				Effect.asVoid,
 				Effect.catchAll(() => Effect.void),
@@ -403,14 +421,18 @@ export const ConnectorsServiceLive = Layer.effect(
 				)
 			})
 
-		const getPreferredAccountMap = (rows: ConnectorPreferenceRow[]) =>
+		const getPreferredAccountMap = (rows: IntegrationAccountPreferenceRow[]) =>
 			Object.fromEntries(
 				rows
 					.filter(
-						(row): row is ConnectorPreferenceRow & { toolkit: SupportedIntegrationToolkit } =>
-							row.toolkit in TOOLKIT_REGISTRY,
+						(
+							row,
+						): row is IntegrationAccountPreferenceRow & {
+							provider: SupportedIntegrationToolkit
+							externalAccountId: string
+						} => row.provider in TOOLKIT_REGISTRY && typeof row.externalAccountId === "string",
 					)
-					.map((row) => [row.toolkit, row.preferredConnectedAccountId]),
+					.map((row) => [row.provider, row.externalAccountId]),
 			) as Partial<Record<SupportedIntegrationToolkit, string>>
 
 		const summarizeAccount = (
@@ -524,13 +546,14 @@ export const ConnectorsServiceLive = Layer.effect(
 
 					const existingRequest = yield* getPendingAuthRequest(userId, toolkit)
 
-					if (existingRequest && isConnectorAuthRequestReusable(existingRequest)) {
+					if (existingRequest && isPendingAuthReusable(existingRequest)) {
+						const meta = existingRequest.metadataJson as Record<string, unknown>
 						const connectUrl = buildConnectLinkUrl(env.API_URL, existingRequest.id)
 						return {
 							toolkit,
 							label,
 							redirectUrl: connectUrl,
-							callbackUrl: existingRequest.callbackUrl,
+							callbackUrl: typeof meta.callbackUrl === "string" ? meta.callbackUrl : callbackUrl,
 							userMessages: buildConnectIntegrationUserMessages(label, connectUrl),
 						}
 					}
@@ -646,9 +669,13 @@ export const ConnectorsServiceLive = Layer.effect(
 
 					yield* query((database) =>
 						database
-							.delete(schema.connectorPreferences)
+							.update(schema.integrationAccounts)
+							.set({ isPreferred: false, updatedAt: new Date() })
 							.where(
-								eq(schema.connectorPreferences.preferredConnectedAccountId, selectedAccount.id),
+								and(
+									eq(schema.integrationAccounts.externalAccountId, selectedAccount.id),
+									eq(schema.integrationAccounts.isPreferred, true),
+								),
 							),
 					).pipe(Effect.mapError(mapDatabaseError("failed_to_clear_preferred_connected_account")))
 
@@ -672,19 +699,47 @@ export const ConnectorsServiceLive = Layer.effect(
 						})
 					}
 
+					// Clear isPreferred for all accounts of this user+provider
 					yield* Effect.tryPromise({
 						try: () =>
 							db
-								.insert(schema.connectorPreferences)
+								.update(schema.integrationAccounts)
+								.set({ isPreferred: false, updatedAt: new Date() })
+								.where(
+									and(
+										eq(schema.integrationAccounts.userId, userId),
+										eq(schema.integrationAccounts.provider, toolkit),
+										eq(schema.integrationAccounts.isPreferred, true),
+									),
+								),
+						catch: (cause) =>
+							new ConnectorsError({
+								message: "failed_to_update_preferred_connected_account",
+								cause,
+							}),
+					})
+
+					// Upsert the target account as preferred
+					yield* Effect.tryPromise({
+						try: () =>
+							db
+								.insert(schema.integrationAccounts)
 								.values({
 									userId,
-									toolkit,
-									preferredConnectedAccountId: connectedAccountId,
+									provider: toolkit,
+									externalAccountId: connectedAccountId,
+									status: "active",
+									isPreferred: true,
 								})
 								.onConflictDoUpdate({
-									target: [schema.connectorPreferences.userId, schema.connectorPreferences.toolkit],
+									target: [
+										schema.integrationAccounts.userId,
+										schema.integrationAccounts.provider,
+										schema.integrationAccounts.externalAccountId,
+									],
 									set: {
-										preferredConnectedAccountId: connectedAccountId,
+										isPreferred: true,
+										status: "active",
 										updatedAt: new Date(),
 									},
 								}),
@@ -705,11 +760,17 @@ export const ConnectorsServiceLive = Layer.effect(
 			clearPreferredAccountByConnectedAccountId: (connectedAccountId) =>
 				query((database) =>
 					database
-						.delete(schema.connectorPreferences)
-						.where(eq(schema.connectorPreferences.preferredConnectedAccountId, connectedAccountId))
+						.update(schema.integrationAccounts)
+						.set({ isPreferred: false, updatedAt: new Date() })
+						.where(
+							and(
+								eq(schema.integrationAccounts.externalAccountId, connectedAccountId),
+								eq(schema.integrationAccounts.isPreferred, true),
+							),
+						)
 						.returning({
-							userId: schema.connectorPreferences.userId,
-							toolkit: schema.connectorPreferences.toolkit,
+							userId: schema.integrationAccounts.userId,
+							toolkit: schema.integrationAccounts.provider,
 						}),
 				).pipe(
 					Effect.map((rows) =>
@@ -752,17 +813,22 @@ export const ConnectorsServiceLive = Layer.effect(
 				query((database) =>
 					database
 						.select({
-							redirectUrl: schema.connectorAuthRequests.redirectUrl,
-							expiresAt: schema.connectorAuthRequests.expiresAt,
+							metadataJson: schema.integrationAccounts.metadataJson,
 						})
-						.from(schema.connectorAuthRequests)
-						.where(eq(schema.connectorAuthRequests.id, id))
+						.from(schema.integrationAccounts)
+						.where(
+							and(
+								eq(schema.integrationAccounts.id, id),
+								eq(schema.integrationAccounts.status, "pending"),
+							),
+						)
 						.limit(1),
 				).pipe(
 					Effect.map((rows) => {
 						const row = rows[0]
-						if (!row) return undefined
-						return isConnectorAuthRequestReusable(row) ? row.redirectUrl : undefined
+						if (!row || !isPendingAuthReusable(row)) return undefined
+						const redirectUrl = row.metadataJson?.redirectUrl
+						return typeof redirectUrl === "string" ? redirectUrl : undefined
 					}),
 					Effect.mapError(mapDatabaseError("failed_to_resolve_connect_link")),
 				),

@@ -62,8 +62,8 @@ const config: AgentRunConfig = {
 	},
 }
 
-describe("trace metadata", () => {
-	it("normalizes environments to the supported trace set", () => {
+describe("trace metadata (backward compatibility shim)", () => {
+	it("normalizes environments via the deprecated alias", () => {
 		expect(normalizeTraceEnvironment("production")).toBe("production")
 		expect(normalizeTraceEnvironment("development")).toBe("development")
 		expect(normalizeTraceEnvironment("staging")).toBe("development")
@@ -71,7 +71,7 @@ describe("trace metadata", () => {
 		expect(normalizeTraceEnvironment(null)).toBe("development")
 	})
 
-	it("builds agent metadata from request context", () => {
+	it("builds agent metadata via the deprecated alias", () => {
 		expect(
 			buildAgentTraceMetadata({
 				request,
@@ -96,7 +96,7 @@ describe("trace metadata", () => {
 		})
 	})
 
-	it("builds persisted root trace metadata from request context", () => {
+	it("builds persisted root trace metadata via the deprecated alias", () => {
 		expect(buildRootTraceMetadata(config)).toMatchObject({
 			requestId: "request-1",
 			conversationId: "conversation-1",
@@ -104,7 +104,7 @@ describe("trace metadata", () => {
 		})
 	})
 
-	it("builds persisted task trace metadata from request context", () => {
+	it("builds persisted task trace metadata via the deprecated alias", () => {
 		expect(
 			buildTaskTraceMetadata({
 				request,

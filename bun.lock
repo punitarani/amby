@@ -24,18 +24,16 @@
         "@amby/agent": "workspace:*",
         "@amby/auth": "workspace:*",
         "@amby/browser": "workspace:*",
+        "@amby/channels": "workspace:*",
         "@amby/computer": "workspace:*",
         "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
-        "@amby/memory": "workspace:*",
         "@amby/plugins": "workspace:*",
         "@amby/skills": "workspace:*",
-        "@chat-adapter/state-memory": "^4.20.2",
         "@chat-adapter/telegram": "^4.20.2",
         "@cloudflare/playwright": "^1.1.2",
         "@sentry/cloudflare": "^10.44.0",
-        "chat": "^4.20.2",
         "effect": "^3.21.0",
         "hono": "^4.7.0",
         "posthog-node": "^4.0.1",
@@ -144,12 +142,30 @@
         "zod": "^3.24.0",
       },
     },
+    "packages/channels": {
+      "name": "@amby/channels",
+      "version": "0.1.0",
+      "dependencies": {
+        "@amby/agent": "workspace:*",
+        "@amby/computer": "workspace:*",
+        "@amby/core": "workspace:*",
+        "@amby/db": "workspace:*",
+        "@amby/env": "workspace:*",
+        "@amby/plugins": "workspace:*",
+        "@chat-adapter/state-memory": "^4.20.2",
+        "@chat-adapter/telegram": "^4.20.2",
+        "chat": "^4.20.2",
+        "posthog-node": "^4.0.1",
+      },
+      "peerDependencies": {
+        "effect": "^3.21.0",
+      },
+    },
     "packages/computer": {
       "name": "@amby/computer",
       "version": "0.1.0",
       "dependencies": {
         "@amby/core": "workspace:*",
-        "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
         "@daytonaio/sdk": "^0.153.0",
       },
@@ -170,6 +186,7 @@
       "name": "@amby/db",
       "version": "0.1.0",
       "dependencies": {
+        "@amby/core": "workspace:*",
         "@amby/env": "workspace:*",
         "drizzle-orm": "^0.45.1",
         "postgres": "^3.4.7",
@@ -192,19 +209,6 @@
         "effect": "^3.21.0",
       },
     },
-    "packages/memory": {
-      "name": "@amby/memory",
-      "version": "0.1.0",
-      "dependencies": {
-        "@amby/core": "workspace:*",
-        "@amby/db": "workspace:*",
-      },
-      "peerDependencies": {
-        "ai": "^6.0.116",
-        "effect": "^3.21.0",
-        "zod": "^3.24.0",
-      },
-    },
     "packages/plugins": {
       "name": "@amby/plugins",
       "version": "0.1.0",
@@ -212,6 +216,7 @@
         "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
         "@amby/env": "workspace:*",
+        "@amby/skills": "workspace:*",
         "@composio/core": "0.6.5",
         "@composio/vercel": "0.6.5",
         "croner": "^9.0.0",
@@ -280,6 +285,8 @@
 
     "@amby/browser": ["@amby/browser@workspace:packages/browser"],
 
+    "@amby/channels": ["@amby/channels@workspace:packages/channels"],
+
     "@amby/computer": ["@amby/computer@workspace:packages/computer"],
 
     "@amby/core": ["@amby/core@workspace:packages/core"],
@@ -287,8 +294,6 @@
     "@amby/db": ["@amby/db@workspace:packages/db"],
 
     "@amby/env": ["@amby/env@workspace:packages/env"],
-
-    "@amby/memory": ["@amby/memory@workspace:packages/memory"],
 
     "@amby/mock": ["@amby/mock@workspace:apps/mock"],
 

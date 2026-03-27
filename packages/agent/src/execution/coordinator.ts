@@ -1,8 +1,9 @@
 import type { BrowserService } from "@amby/browser"
-import { appendTaskProgressEvent, type TaskSupervisor } from "@amby/computer"
+import type { TaskSupervisor } from "@amby/computer"
+import type { TaskStoreService } from "@amby/core"
 import type { LanguageModel } from "ai"
 import { Effect } from "effect"
-import { buildTaskTraceMetadata } from "../trace-metadata"
+import { buildTaskRunMetadata } from "../run-metadata"
 import type { AgentRunConfig } from "../types/agent"
 import type {
 	ExecutionPlan,
@@ -11,7 +12,7 @@ import type {
 	ExecutionTaskResult,
 } from "../types/execution"
 import type { ExecutionRequestEnvelope, ExecutionResponseEnvelope } from "../types/persistence"
-import { createTrace, type QueryFn, type TraceWriter } from "./ledger"
+import { createRun, type QueryFn, type RunWriter } from "./ledger"
 import { buildReadyBatch } from "./locks"
 import { buildExecutionPlan } from "./planner"
 import { buildExecutionSummary } from "./reducer"
@@ -115,28 +116,29 @@ function buildResponseEnvelope(result: ExecutionTaskResult): ExecutionResponseEn
 async function runTaskWithTrace(params: {
 	task: ExecutionTask
 	query: QueryFn
+	taskStore: TaskStoreService
 	config: AgentRunConfig
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
 	browser: import("effect").Context.Tag.Service<typeof BrowserService>
 	supervisor: import("effect").Context.Tag.Service<typeof TaskSupervisor>
-	rootTrace: TraceWriter
+	rootTrace: RunWriter
 }) {
 	const requestEnvelope = buildRequestEnvelope(params.task)
 	let progressSeq = 0
 	const trace = await Effect.runPromise(
-		createTrace({
+		createRun({
 			query: params.query,
 			conversationId: params.config.request.conversationId,
 			threadId: params.config.request.threadId,
-			parentTraceId: params.rootTrace.traceId,
-			rootTraceId: params.rootTrace.traceId,
+			parentRunId: params.rootTrace.runId,
+			rootRunId: params.rootTrace.runId,
 			taskId: params.task.id,
 			specialist: params.task.specialist,
 			runnerKind: params.task.runnerKind,
 			mode: params.task.mode,
 			depth: params.task.depth,
-			metadata: buildTaskTraceMetadata({
+			metadata: buildTaskRunMetadata({
 				request: params.config.request,
 				executionRequest: requestEnvelope,
 			}),
@@ -153,11 +155,11 @@ async function runTaskWithTrace(params: {
 	)
 
 	if (params.task.runnerKind !== "background_handoff") {
-		await persistTaskCreated(params.query, params.task, {
+		await persistTaskCreated(params.taskStore, params.task, {
 			userId: params.config.request.userId,
 			conversationId: params.config.request.conversationId,
 			threadId: params.config.request.threadId,
-			traceId: trace.traceId,
+			traceId: trace.runId,
 		})
 	}
 
@@ -172,7 +174,7 @@ async function runTaskWithTrace(params: {
 							progressSeq += 1
 							try {
 								await Effect.runPromise(
-									appendTaskProgressEvent(params.query, {
+									params.taskStore.appendProgressEvent({
 										taskId: params.task.id,
 										seq: progressSeq,
 										kind: "task.progress",
@@ -220,7 +222,7 @@ async function runTaskWithTrace(params: {
 		if (params.task.runnerKind === "background_handoff") {
 			await Effect.runPromise(
 				trace.updateMetadata(
-					buildTaskTraceMetadata({
+					buildTaskRunMetadata({
 						request: params.config.request,
 						executionRequest: requestEnvelope,
 						executionResponse: buildResponseEnvelope(runResult.result),
@@ -241,14 +243,14 @@ async function runTaskWithTrace(params: {
 		await Effect.runPromise(
 			trace.complete(
 				runResult.result.status === "failed" ? "failed" : "completed",
-				buildTaskTraceMetadata({
+				buildTaskRunMetadata({
 					request: params.config.request,
 					executionRequest: requestEnvelope,
 					executionResponse: responseEnvelope,
 				}),
 			),
 		)
-		await persistTaskCompleted(params.query, params.task.id, runResult.result)
+		await persistTaskCompleted(params.taskStore, params.task.id, runResult.result)
 		return runResult.result
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error)
@@ -261,7 +263,7 @@ async function runTaskWithTrace(params: {
 			status: "failed",
 			summary: message,
 			issues: [{ code: "execution_failed", message }],
-			traceRef: { traceId: trace.traceId },
+			traceRef: { traceId: trace.runId },
 		}
 		await Effect.runPromise(
 			trace.append("error", {
@@ -272,7 +274,7 @@ async function runTaskWithTrace(params: {
 		await Effect.runPromise(
 			trace.complete(
 				"failed",
-				buildTaskTraceMetadata({
+				buildTaskRunMetadata({
 					request: params.config.request,
 					executionRequest: requestEnvelope,
 					executionResponse: buildResponseEnvelope(failedResult),
@@ -280,7 +282,7 @@ async function runTaskWithTrace(params: {
 			),
 		)
 		if (params.task.runnerKind !== "background_handoff") {
-			await persistTaskCompleted(params.query, params.task.id, failedResult)
+			await persistTaskCompleted(params.taskStore, params.task.id, failedResult)
 		}
 		return failedResult
 	}
@@ -288,12 +290,13 @@ async function runTaskWithTrace(params: {
 
 async function runValidatorIfNeeded(params: {
 	query: QueryFn
+	taskStore: TaskStoreService
 	config: AgentRunConfig
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
 	browser: import("effect").Context.Tag.Service<typeof BrowserService>
 	supervisor: import("effect").Context.Tag.Service<typeof TaskSupervisor>
-	rootTrace: TraceWriter
+	rootTrace: RunWriter
 	plan: ExecutionPlan
 	taskResults: ExecutionTaskResult[]
 }): Promise<ExecutionTaskResult | undefined> {
@@ -335,6 +338,7 @@ async function runValidatorIfNeeded(params: {
 	return runTaskWithTrace({
 		task: validatorTask,
 		query: params.query,
+		taskStore: params.taskStore,
 		config: params.config,
 		getModel: params.getModel,
 		toolGroups: params.toolGroups,
@@ -347,12 +351,13 @@ async function runValidatorIfNeeded(params: {
 export async function executeRequestPlan(params: {
 	request: string
 	query: QueryFn
+	taskStore: TaskStoreService
 	config: AgentRunConfig
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
 	browser: import("effect").Context.Tag.Service<typeof BrowserService>
 	supervisor: import("effect").Context.Tag.Service<typeof TaskSupervisor>
-	rootTrace: TraceWriter
+	rootTrace: RunWriter
 }): Promise<ExecutionSummary> {
 	const plan = await buildExecutionPlan({
 		request: params.request,
@@ -378,7 +383,7 @@ export async function executeRequestPlan(params: {
 
 			completed.set(
 				task.id,
-				buildBlockedDependencyResult(task, blockingDependency, params.rootTrace.traceId),
+				buildBlockedDependencyResult(task, blockingDependency, params.rootTrace.runId),
 			)
 			const index = pending.findIndex((candidate) => candidate.id === task.id)
 			if (index >= 0) pending.splice(index, 1)
@@ -423,6 +428,7 @@ export async function executeRequestPlan(params: {
 							runTaskWithTrace({
 								task,
 								query: params.query,
+								taskStore: params.taskStore,
 								config: params.config,
 								getModel: params.getModel,
 								toolGroups: params.toolGroups,
@@ -436,6 +442,7 @@ export async function executeRequestPlan(params: {
 						await runTaskWithTrace({
 							task: firstRunnable,
 							query: params.query,
+							taskStore: params.taskStore,
 							config: params.config,
 							getModel: params.getModel,
 							toolGroups: params.toolGroups,
@@ -455,6 +462,7 @@ export async function executeRequestPlan(params: {
 	const taskResults = [...completed.values()]
 	const validatorResult = await runValidatorIfNeeded({
 		query: params.query,
+		taskStore: params.taskStore,
 		config: params.config,
 		getModel: params.getModel,
 		toolGroups: params.toolGroups,

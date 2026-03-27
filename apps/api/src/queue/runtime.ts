@@ -1,15 +1,20 @@
 import { ModelServiceLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
+import { TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { makeDbServiceFromHyperdrive } from "@amby/db"
+import {
+	ComputeStoreLive,
+	makeDbServiceFromHyperdrive,
+	TaskStoreLive,
+	TraceStoreLive,
+} from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
-import { MemoryServiceLive } from "@amby/memory"
 import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
+import { MemoryServiceLive } from "@amby/plugins/memory"
+import { PluginRegistryLive } from "@amby/plugins/registry"
 import { Layer, ManagedRuntime } from "effect"
-import { PluginRegistryLive } from "../shared/plugin-registry"
-import { TelegramSenderLite } from "../telegram"
 
 const makeBaseLive = (bindings: WorkerBindings) => {
 	const connectionString = bindings.HYPERDRIVE?.connectionString ?? bindings.DATABASE_URL ?? ""
@@ -19,8 +24,13 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		)
 	}
 
+	const DbLive = makeDbServiceFromHyperdrive(connectionString)
+	const StoreLive = Layer.mergeAll(TaskStoreLive, TraceStoreLive, ComputeStoreLive).pipe(
+		Layer.provideMerge(DbLive),
+	)
+
 	const InfraLive = Layer.mergeAll(SandboxServiceLive).pipe(
-		Layer.provideMerge(makeDbServiceFromHyperdrive(connectionString)),
+		Layer.provideMerge(StoreLive),
 		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
 	)
 

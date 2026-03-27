@@ -8,17 +8,26 @@
  * Usage: doppler run -- bun run scripts/test-telegram-flow.ts
  */
 
-import { AgentService, ModelServiceLive, makeAgentServiceLive } from "@amby/agent"
+import { ConversationRuntime, ModelServiceLive, makeConversationRuntimeLive } from "@amby/agent"
 import { AuthServiceLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { and, DbService, DbServiceLive, eq, schema } from "@amby/db"
+import {
+	and,
+	ComputeStoreLive,
+	DbService,
+	DbServiceLive,
+	eq,
+	schema,
+	TaskStoreLive,
+	TraceStoreLive,
+} from "@amby/db"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
-import { MemoryServiceLive } from "@amby/memory"
 import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
+import { MemoryServiceLive } from "@amby/plugins/memory"
+import { PluginRegistryLive } from "@amby/plugins/registry"
 import { Effect, Layer, ManagedRuntime } from "effect"
-import { PluginRegistryLive } from "../shared/plugin-registry"
 
 // --- Test Configuration ---
 
@@ -33,8 +42,12 @@ const SIMULATED_FROM = {
 
 // --- Runtime Setup (mirrors apps/api/src/index.ts) ---
 
-const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
+const StoreLive = Layer.mergeAll(TaskStoreLive, TraceStoreLive, ComputeStoreLive).pipe(
 	Layer.provideMerge(DbServiceLive),
+)
+
+const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
+	Layer.provideMerge(StoreLive),
 	Layer.provideMerge(EnvServiceLive),
 )
 
@@ -182,9 +195,9 @@ async function main() {
 	try {
 		maybeConversationId = await runtime.runPromise(
 			Effect.gen(function* () {
-				const agent = yield* AgentService
+				const agent = yield* ConversationRuntime
 				return yield* agent.ensureConversation("telegram", String(SIMULATED_CHAT_ID))
-			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
+			}).pipe(Effect.provide(makeConversationRuntimeLive(userId))),
 		)
 
 		record("Conversation created/found", true)
@@ -204,9 +217,9 @@ async function main() {
 	try {
 		const convId2 = await runtime.runPromise(
 			Effect.gen(function* () {
-				const agent = yield* AgentService
+				const agent = yield* ConversationRuntime
 				return yield* agent.ensureConversation("telegram", String(SIMULATED_CHAT_ID))
-			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
+			}).pipe(Effect.provide(makeConversationRuntimeLive(userId))),
 		)
 
 		if (convId2 === conversationId) {
@@ -223,9 +236,9 @@ async function main() {
 	try {
 		const result = await runtime.runPromise(
 			Effect.gen(function* () {
-				const agent = yield* AgentService
+				const agent = yield* ConversationRuntime
 				return yield* agent.handleMessage(conversationId, "Hello! How are you?")
-			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
+			}).pipe(Effect.provide(makeConversationRuntimeLive(userId))),
 		)
 
 		if (result.userResponse.text.trim().length > 0) {
@@ -244,12 +257,12 @@ async function main() {
 	try {
 		const result = await runtime.runPromise(
 			Effect.gen(function* () {
-				const agent = yield* AgentService
+				const agent = yield* ConversationRuntime
 				return yield* agent.handleMessage(
 					conversationId,
 					"Remember this: my favorite programming language is TypeScript",
 				)
-			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
+			}).pipe(Effect.provide(makeConversationRuntimeLive(userId))),
 		)
 
 		record("Memory save", true)
@@ -264,12 +277,12 @@ async function main() {
 	try {
 		const result = await runtime.runPromise(
 			Effect.gen(function* () {
-				const agent = yield* AgentService
+				const agent = yield* ConversationRuntime
 				return yield* agent.handleMessage(
 					conversationId,
 					"Investigate what day of the week March 25, 2026 falls on",
 				)
-			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
+			}).pipe(Effect.provide(makeConversationRuntimeLive(userId))),
 		)
 
 		record("Research request", true)
@@ -284,9 +297,9 @@ async function main() {
 	try {
 		const result = await runtime.runPromise(
 			Effect.gen(function* () {
-				const agent = yield* AgentService
+				const agent = yield* ConversationRuntime
 				return yield* agent.handleMessage(conversationId, "Set my timezone to America/Los_Angeles")
-			}).pipe(Effect.provide(makeAgentServiceLive(userId))),
+			}).pipe(Effect.provide(makeConversationRuntimeLive(userId))),
 		)
 
 		record("Timezone setting", true)
@@ -313,20 +326,17 @@ async function main() {
 						.from(schema.conversationThreads)
 						.where(eq(schema.conversationThreads.conversationId, conversationId)),
 				)
-				const traces = yield* query((db) =>
+				const runs = yield* query((db) =>
 					db
-						.select({ id: schema.traces.id })
-						.from(schema.traces)
-						.where(eq(schema.traces.conversationId, conversationId)),
+						.select({ id: schema.runs.id })
+						.from(schema.runs)
+						.where(eq(schema.runs.conversationId, conversationId)),
 				)
-				return { messages: msgs.length, threads: threads.length, traces: traces.length }
+				return { messages: msgs.length, threads: threads.length, runs: runs.length }
 			}),
 		)
 
-		log(
-			"ℹ️",
-			`Messages: ${dbState.messages}, Threads: ${dbState.threads}, Traces: ${dbState.traces}`,
-		)
+		log("ℹ️", `Messages: ${dbState.messages}, Threads: ${dbState.threads}, Runs: ${dbState.runs}`)
 		record("DB state populated", dbState.messages > 0 || dbState.threads > 0)
 	} catch (err) {
 		record("DB state populated", false, String(err))
@@ -352,9 +362,9 @@ async function main() {
 				const { query } = yield* DbService
 
 				if (conversationId) {
-					// traceEvents cascade-deletes via FK on traces.id
+					// runEvents cascade-deletes via FK on runs.id
 					yield* query((db) =>
-						db.delete(schema.traces).where(eq(schema.traces.conversationId, conversationId)),
+						db.delete(schema.runs).where(eq(schema.runs.conversationId, conversationId)),
 					)
 					yield* query((db) =>
 						db.delete(schema.messages).where(eq(schema.messages.conversationId, conversationId)),

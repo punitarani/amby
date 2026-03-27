@@ -1,5 +1,5 @@
 import type { ExecutionMode, SpecialistKind, TaskStatus } from "@amby/db"
-import type { TraceEnvironment } from "../trace-metadata"
+import type { RunEnvironment } from "../run-metadata"
 import type { ExecutionTaskResult } from "./execution"
 
 export type AgentRunConfig = {
@@ -9,7 +9,7 @@ export type AgentRunConfig = {
 		threadId?: string
 		userId: string
 		mode: "message" | "batched-message" | "stream-message"
-		environment: TraceEnvironment
+		environment: RunEnvironment
 		metadata?: Record<string, unknown>
 	}
 	modelPolicy: {

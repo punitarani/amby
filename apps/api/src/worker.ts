@@ -1,3 +1,4 @@
+import { type ChatSdkDeps, getOrCreateChat, type TelegramQueueMessage } from "@amby/channels"
 import type { WorkerBindings } from "@amby/env/workers"
 import {
 	buildSafeComposioRedirectUrl,
@@ -19,9 +20,7 @@ import { getHomeResponse } from "./home"
 import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
 import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "./queue/runtime"
-import { getSentryOptions, getSentryOptionsOrFallback } from "./sentry"
-import { getOrCreateChat } from "./telegram/chat-sdk"
-import type { TelegramQueueMessage } from "./telegram/utils"
+import { getSentryOptions, getSentryOptionsOrFallback, setTelegramScope } from "./sentry"
 import { AgentExecutionWorkflow as AgentExecutionWorkflowBase } from "./workflows/agent-execution"
 import { SandboxProvisionWorkflow as SandboxProvisionWorkflowBase } from "./workflows/sandbox-provision"
 import { VolumeProvisionWorkflow as VolumeProvisionWorkflowBase } from "./workflows/volume-provision"
@@ -126,9 +125,18 @@ app.get("/composio/redirect", (c) => {
 	return c.redirect(buildSafeComposioRedirectUrl(c.req.url), 302)
 })
 
+// Chat SDK dependency injection — bridges @amby/channels to apps/api Sentry and runtime
+const chatSdkDeps: ChatSdkDeps = {
+	makeRuntimeForConsumer,
+	setTelegramScope,
+	captureException: (err) => Sentry.captureException(err),
+	captureCommandError: (command, chatId, err) =>
+		console.error(`[ChatSDK] Command ${command} failed for chat ${chatId}:`, err),
+}
+
 // Webhook handler — Chat SDK handles secret verification, parsing, and routing via waitUntil
 app.post("/telegram/webhook", async (c) => {
-	const { chat } = getOrCreateChat(c.env)
+	const { chat } = getOrCreateChat(c.env, chatSdkDeps)
 	return chat.webhooks.telegram(c.req.raw, {
 		waitUntil: (task) => c.executionCtx.waitUntil(task),
 	})

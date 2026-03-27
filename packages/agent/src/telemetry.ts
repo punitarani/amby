@@ -4,7 +4,7 @@ import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-ho
 import { BasicTracerProvider, type SpanProcessor } from "@opentelemetry/sdk-trace-base"
 import type { TelemetrySettings } from "ai"
 import { Effect } from "effect"
-import { type AgentTraceMetadata, buildAgentTraceMetadata } from "./trace-metadata"
+import { type AgentRunMetadata, buildAgentRunMetadata } from "./run-metadata"
 import type { AgentRunConfig } from "./types/agent"
 
 type TelemetryState = {
@@ -75,7 +75,7 @@ export const createTelemetrySettings = ({
 	functionId: string
 	request: AgentRunConfig["request"]
 	modelId: string
-	agentRole: AgentTraceMetadata["agent_role"]
+	agentRole: AgentRunMetadata["agent_role"]
 	specialistName?: string
 	taskId?: string
 }): TelemetrySettings => {
@@ -83,7 +83,7 @@ export const createTelemetrySettings = ({
 		return { isEnabled: false }
 	}
 
-	const metadata = buildAgentTraceMetadata({
+	const metadata = buildAgentRunMetadata({
 		request,
 		modelId,
 		agentRole,
