@@ -14,13 +14,37 @@ const readKeyFile = async (relativePath: string) => {
 	return new Set(keys)
 }
 
+const extractInterfaceBody = (source: string, interfaceName: string) => {
+	const declaration = `export interface ${interfaceName} `
+	const declarationIndex = source.indexOf(declaration)
+
+	expect(declarationIndex).toBeGreaterThanOrEqual(0)
+
+	const bodyStart = source.indexOf("{", declarationIndex + declaration.length)
+	expect(bodyStart).toBeGreaterThanOrEqual(0)
+
+	let depth = 0
+	for (let index = bodyStart; index < source.length; index += 1) {
+		const char = source[index]
+		if (char === "{") {
+			depth += 1
+			continue
+		}
+		if (char === "}") {
+			depth -= 1
+			if (depth === 0) {
+				return source.slice(bodyStart + 1, index)
+			}
+		}
+	}
+
+	throw new Error(`Could not find the end of interface ${interfaceName}`)
+}
+
 const readWorkerBindingKeys = async () => {
 	const source = await Bun.file(resolve(repoRoot, "packages/env/src/workers.ts")).text()
-	const interfaceMatch = source.match(/export interface WorkerBindings \{([\s\S]*?)\n\}/)
-
-	expect(interfaceMatch).not.toBeNull()
-
-	const keys = Array.from(interfaceMatch![1].matchAll(/^\s*([A-Z0-9_]+)\??:/gm), (match) => match[1])
+	const interfaceBody = extractInterfaceBody(source, "WorkerBindings")
+	const keys = Array.from(interfaceBody.matchAll(/^\s*([A-Z0-9_]+)\??:/gm), (match) => match[1])
 	return new Set(keys)
 }
 
