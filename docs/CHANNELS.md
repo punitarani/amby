@@ -76,7 +76,7 @@ The `findOrCreateUser` function in `apps/api/src/telegram/utils.ts` handles upse
 
 The local Bun bot initializes in `apps/api/src/index.ts` via `@chat-adapter/telegram` in `"auto"` mode and keeps the in-memory Chat SDK state adapter for Bun-only development.
 
-The Cloudflare Worker path in `apps/api/src/worker.ts` uses a dedicated `ChatStateDO` Durable Object for Chat SDK subscriptions, locks, dedupe keys, and message history. The higher-level per-chat debounce/workflow state remains in the separate `ConversationSession` Durable Object.
+The Cloudflare Worker path in `apps/api/src/worker.ts` uses a dedicated `ChatStateDO` Durable Object for Chat SDK subscriptions, locks, dedupe keys, and message history. The higher-level per-chat debounce/workflow state remains in the separate `ConversationSession` Durable Object. That Chat SDK state currently routes through a single unsharded DO instance and can be sharded later by adapter name if throughput or lock contention requires it.
 
 Bot commands (`/start`, `/stop`, `/help`) are registered via `setMyCommands` at startup.
 

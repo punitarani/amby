@@ -147,13 +147,19 @@ const chatSdkDeps: ChatSdkDeps = {
 		console.error(`[ChatSDK] Command ${command} failed for chat ${chatId}:`, err),
 }
 
+let workerChatState: ReturnType<typeof createCloudflareChatState> | null = null
+
+function getOrCreateWorkerChatState(env: ApiBindings) {
+	if (workerChatState) return workerChatState
+	// Intentionally route all Chat SDK transport state through one unsharded DO instance for now.
+	// Shard by adapter name once webhook throughput or lock contention justifies it.
+	workerChatState = createCloudflareChatState({ namespace: env.CHAT_STATE })
+	return workerChatState
+}
+
 // Webhook handler — Chat SDK handles secret verification, parsing, and routing via waitUntil
 app.post("/telegram/webhook", async (c) => {
-	const { chat } = getOrCreateChat(
-		c.env,
-		chatSdkDeps,
-		createCloudflareChatState({ namespace: c.env.CHAT_STATE }),
-	)
+	const { chat } = getOrCreateChat(c.env, chatSdkDeps, getOrCreateWorkerChatState(c.env))
 	return chat.webhooks.telegram(c.req.raw, {
 		waitUntil: (task) => c.executionCtx.waitUntil(task),
 	})

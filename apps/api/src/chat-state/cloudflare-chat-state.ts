@@ -1,14 +1,18 @@
-interface ChatStateLock {
-	expiresAt: number
-	threadId: string
-	token: string
+import type { Lock, StateAdapter } from "chat"
+
+function tryParseJson<T>(raw: string): { ok: true; value: T } | { ok: false } {
+	try {
+		return { ok: true, value: JSON.parse(raw) as T }
+	} catch {
+		return { ok: false }
+	}
 }
 
 export interface ChatStateStub {
 	subscribe(threadId: string): Promise<void> | void
 	unsubscribe(threadId: string): Promise<void> | void
 	isSubscribed(threadId: string): Promise<boolean> | boolean
-	acquireLock(threadId: string, ttlMs: number): Promise<ChatStateLock | null> | ChatStateLock | null
+	acquireLock(threadId: string, ttlMs: number): Promise<Lock | null> | Lock | null
 	forceReleaseLock(threadId: string): Promise<void> | void
 	releaseLock(threadId: string, token: string): Promise<void> | void
 	extendLock(threadId: string, token: string, ttlMs: number): Promise<boolean> | boolean
@@ -38,7 +42,7 @@ export interface CloudflareChatStateOptions {
 	namespace: ChatStateNamespaceLike
 }
 
-export class CloudflareChatStateAdapter {
+export class CloudflareChatStateAdapter implements StateAdapter {
 	private readonly defaultName: string
 	private readonly namespace: ChatStateNamespaceLike
 	private connected = false
@@ -88,22 +92,19 @@ export class CloudflareChatStateAdapter {
 		await this.stub().forceReleaseLock(threadId)
 	}
 
-	async releaseLock(lock: ChatStateLock) {
+	async releaseLock(lock: Lock) {
 		await this.stub().releaseLock(lock.threadId, lock.token)
 	}
 
-	async extendLock(lock: ChatStateLock, ttlMs: number) {
+	async extendLock(lock: Lock, ttlMs: number) {
 		return await this.stub().extendLock(lock.threadId, lock.token, ttlMs)
 	}
 
 	async get<T = unknown>(key: string): Promise<T | null> {
 		const raw = await this.stub().cacheGet(key)
 		if (raw === null) return null
-		try {
-			return JSON.parse(raw) as T
-		} catch {
-			return raw as T
-		}
+		const parsed = tryParseJson<T>(raw)
+		return parsed.ok ? parsed.value : null
 	}
 
 	async set<T = unknown>(key: string, value: T, ttlMs?: number) {
@@ -128,7 +129,14 @@ export class CloudflareChatStateAdapter {
 
 	async getList<T = unknown>(key: string): Promise<T[]> {
 		const values = await this.stub().listGet(key)
-		return values.map((value) => JSON.parse(value) as T)
+		const parsedValues: T[] = []
+		for (const value of values) {
+			const parsed = tryParseJson<T>(value)
+			if (parsed.ok) {
+				parsedValues.push(parsed.value)
+			}
+		}
+		return parsedValues
 	}
 }
 

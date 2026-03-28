@@ -5,6 +5,48 @@ import {
 	createCloudflareChatState,
 } from "./cloudflare-chat-state"
 
+function makeNamespace(stub: ChatStateStub): ChatStateNamespaceLike {
+	return {
+		idFromName(name: string) {
+			return { toString: () => name }
+		},
+		get() {
+			return stub
+		},
+	}
+}
+
+function makeStub(overrides: Partial<ChatStateStub> = {}): ChatStateStub {
+	return {
+		subscribe() {},
+		unsubscribe() {},
+		isSubscribed() {
+			return false
+		},
+		acquireLock() {
+			return null
+		},
+		forceReleaseLock() {},
+		releaseLock() {},
+		extendLock() {
+			return false
+		},
+		cacheGet() {
+			return null
+		},
+		cacheSet() {},
+		cacheSetIfNotExists() {
+			return false
+		},
+		cacheDelete() {},
+		listAppend() {},
+		listGet() {
+			return []
+		},
+		...overrides,
+	}
+}
+
 function makeFakeNamespace() {
 	let now = 1_000
 	const subscriptions = new Set<string>()
@@ -107,20 +149,11 @@ function makeFakeNamespace() {
 		},
 	}
 
-	const namespace: ChatStateNamespaceLike = {
-		idFromName(name: string) {
-			return { toString: () => name }
-		},
-		get() {
-			return stub
-		},
-	}
-
 	return {
 		advanceBy(ms: number) {
 			now += ms
 		},
-		namespace,
+		namespace: makeNamespace(stub),
 	}
 }
 
@@ -187,5 +220,38 @@ describe("createCloudflareChatState", () => {
 
 		fake.advanceBy(60)
 		expect(await state.getList("msg-history:thread-1")).toEqual([])
+	})
+
+	it("treats malformed cached JSON as missing", async () => {
+		const state = createCloudflareChatState({
+			namespace: makeNamespace(
+				makeStub({
+					cacheGet() {
+						return "not-json"
+					},
+				}),
+			),
+		})
+
+		await state.connect()
+		expect(await state.get<boolean>("dedupe:key")).toBeNull()
+	})
+
+	it("skips malformed list entries instead of throwing", async () => {
+		const state = createCloudflareChatState({
+			namespace: makeNamespace(
+				makeStub({
+					listGet() {
+						return ['{"id":1}', "not-json", '{"id":2}']
+					},
+				}),
+			),
+		})
+
+		await state.connect()
+		expect(await state.getList<{ id: number }>("msg-history:thread-1")).toEqual([
+			{ id: 1 },
+			{ id: 2 },
+		])
 	})
 })

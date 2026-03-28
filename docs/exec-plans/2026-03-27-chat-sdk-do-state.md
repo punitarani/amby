@@ -82,6 +82,8 @@ Replace the Worker Chat SDK memory state with a Cloudflare Durable Object-backed
 - 2026-03-27: Added adapter contract tests in `apps/api` and changed the package test script from a placeholder to `bun test`.
 - 2026-03-27: Installed workspace dependencies, fixed the resulting TypeScript and Biome issues in the new files, and verified `@amby/api` and `@amby/channels` tests/typechecks plus repo lint.
 - 2026-03-27: Validated the Worker bundle with `wrangler deploy --dry-run --outdir dist-worker` and confirmed Wrangler recognizes the new `CHAT_STATE` Durable Object binding.
+- 2026-03-27: Addressed review follow-ups by caching the Worker state adapter, hardening adapter JSON parsing, moving list TTL computation fully inside the DO transaction, explicitly implementing the Chat SDK `StateAdapter` contract, and documenting the current single-DO scaling choice.
+- 2026-03-27: Verified the repo-wide command set requested for merge readiness: `bun run format`, `bun run lint:fix`, `bun run typecheck`, `bun run build`, and `bun run test`.
 
 ## Surprises / discoveries
 

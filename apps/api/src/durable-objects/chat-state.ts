@@ -224,9 +224,10 @@ export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 	}
 
 	listAppend(key: string, value: string, options?: { maxLength?: number; ttlMs?: number }) {
-		const expiresAt = options?.ttlMs ? Date.now() + options.ttlMs : null
+		let shouldScheduleCleanup = false
 		this.ctx.storage.transactionSync(() => {
 			const now = Date.now()
+			const expiresAt = options?.ttlMs ? now + options.ttlMs : null
 			const row = readCacheRow(
 				this.sql
 					.exec("SELECT value, expires_at FROM cache WHERE key = ? LIMIT 1", key)
@@ -256,9 +257,12 @@ export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 				JSON.stringify(list),
 				expiresAt,
 			)
+			if (expiresAt !== null) {
+				shouldScheduleCleanup = true
+			}
 		})
 
-		if (expiresAt !== null) {
+		if (shouldScheduleCleanup) {
 			this.scheduleCleanupIfNeeded()
 		}
 	}
