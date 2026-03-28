@@ -85,22 +85,24 @@ app.onError(async (err, c) => {
 	if (status >= 500 && posthogKey) {
 		try {
 			const posthog = getPostHogClient(posthogKey, c.env.POSTHOG_HOST ?? "https://us.i.posthog.com")
-			posthog.captureException(err, c.get("posthogDistinctId"), {
-				framework: "hono",
-				runtime: "cloudflare-worker",
-				status,
-				method: c.req.method,
-				path: c.req.path,
-				url: c.req.url,
-				cf_ray: c.req.header("cf-ray") ?? null,
-				content_type: c.req.header("content-type") ?? null,
-				user_agent: c.req.header("user-agent") ?? null,
-			})
-			c.executionCtx.waitUntil(
-				posthog.flush().catch((flushError) => {
-					console.error("[API] Failed to flush PostHog exception:", flushError)
-				}),
-			)
+			if (posthog) {
+				posthog.captureException(err, c.get("posthogDistinctId"), {
+					framework: "hono",
+					runtime: "cloudflare-worker",
+					status,
+					method: c.req.method,
+					path: c.req.path,
+					url: c.req.url,
+					cf_ray: c.req.header("cf-ray") ?? null,
+					content_type: c.req.header("content-type") ?? null,
+					user_agent: c.req.header("user-agent") ?? null,
+				})
+				c.executionCtx.waitUntil(
+					posthog.flush().catch((flushError) => {
+						console.error("[API] Failed to flush PostHog exception:", flushError)
+					}),
+				)
+			}
 		} catch (captureError) {
 			console.error("[API] Failed to capture exception in PostHog:", captureError)
 		}
