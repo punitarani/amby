@@ -30,6 +30,9 @@ const EnvConfig = Config.all({
 		Config.withDefault(Redacted.make("")),
 	),
 	TELEGRAM_API_BASE_URL: Config.string("TELEGRAM_API_BASE_URL").pipe(Config.option),
+	ATTACHMENTS_SIGNING_SECRET: Config.redacted("ATTACHMENTS_SIGNING_SECRET").pipe(
+		Config.withDefault(Redacted.make("dev-attachments-secret")),
+	),
 	COMPOSIO_API_KEY: Config.redacted("COMPOSIO_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 	COMPOSIO_WEBHOOK_SECRET: Config.redacted("COMPOSIO_WEBHOOK_SECRET").pipe(
 		Config.withDefault(Redacted.make("")),
@@ -81,6 +84,7 @@ export const EnvServiceLive = Layer.effect(
 			TELEGRAM_BOT_USERNAME: raw.TELEGRAM_BOT_USERNAME,
 			TELEGRAM_WEBHOOK_SECRET: Redacted.value(raw.TELEGRAM_WEBHOOK_SECRET),
 			TELEGRAM_API_BASE_URL: Option.getOrUndefined(raw.TELEGRAM_API_BASE_URL),
+			ATTACHMENTS_SIGNING_SECRET: Redacted.value(raw.ATTACHMENTS_SIGNING_SECRET),
 			COMPOSIO_API_KEY: Redacted.value(raw.COMPOSIO_API_KEY),
 			COMPOSIO_WEBHOOK_SECRET: Redacted.value(raw.COMPOSIO_WEBHOOK_SECRET),
 			COMPOSIO_AUTH_CONFIG_GMAIL: raw.COMPOSIO_AUTH_CONFIG_GMAIL,

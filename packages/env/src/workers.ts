@@ -20,6 +20,7 @@ export interface WorkerBindings {
 	TELEGRAM_BOT_USERNAME?: string
 	TELEGRAM_WEBHOOK_SECRET?: string
 	TELEGRAM_API_BASE_URL?: string
+	ATTACHMENTS_SIGNING_SECRET?: string
 	COMPOSIO_API_KEY?: string
 	COMPOSIO_WEBHOOK_SECRET?: string
 	COMPOSIO_AUTH_CONFIG_GMAIL?: string
@@ -42,6 +43,10 @@ export interface WorkerBindings {
 	AI?: unknown
 	/** Optional AI Gateway id for Workers AI browser runs. */
 	CLOUDFLARE_AI_GATEWAY_ID?: string
+	ATTACHMENTS_BUCKET?: {
+		put(key: string, value: ArrayBuffer | ArrayBufferView | Blob | string): Promise<void>
+		get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>
+	}
 
 	// Cloudflare primitives — typed structurally for portability
 	TELEGRAM_QUEUE?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
@@ -72,6 +77,7 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		TELEGRAM_BOT_USERNAME: bindings.TELEGRAM_BOT_USERNAME ?? DEFAULT_TELEGRAM_BOT_USERNAME,
 		TELEGRAM_WEBHOOK_SECRET: bindings.TELEGRAM_WEBHOOK_SECRET ?? "",
 		TELEGRAM_API_BASE_URL: bindings.TELEGRAM_API_BASE_URL,
+		ATTACHMENTS_SIGNING_SECRET: bindings.ATTACHMENTS_SIGNING_SECRET ?? "dev-attachments-secret",
 		COMPOSIO_API_KEY: bindings.COMPOSIO_API_KEY ?? "",
 		COMPOSIO_WEBHOOK_SECRET: bindings.COMPOSIO_WEBHOOK_SECRET ?? "",
 		COMPOSIO_AUTH_CONFIG_GMAIL: bindings.COMPOSIO_AUTH_CONFIG_GMAIL ?? "",

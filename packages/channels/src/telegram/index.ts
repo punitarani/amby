@@ -1,8 +1,14 @@
 export { createAmbyBot } from "./bot"
 export { type ChatSdkDeps, getOrCreateChat } from "./chat-sdk"
-export { TelegramSender, TelegramSenderLite, TelegramSenderLive } from "./sender"
+export {
+	TelegramReplySenderLive,
+	TelegramSender,
+	TelegramSenderLite,
+	TelegramSenderLive,
+} from "./sender"
 export {
 	type BufferedMessage,
+	buildBufferedTelegramMessage,
 	buildProfileMetadata,
 	findOrCreateUser,
 	handleCommand,
@@ -11,8 +17,10 @@ export {
 	splitTelegramMessage,
 	TELEGRAM_COMMANDS,
 	type TelegramCommandName,
+	type TelegramDocument,
 	type TelegramFrom,
 	type TelegramMessage,
+	type TelegramPhotoSize,
 	type TelegramQueueMessage,
 	type TelegramUpdate,
 } from "./utils"

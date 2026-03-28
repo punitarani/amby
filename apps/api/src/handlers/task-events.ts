@@ -1,3 +1,4 @@
+import { AttachmentService } from "@amby/attachments"
 import {
 	appendTaskTraceTerminalEvent,
 	CALLBACK_HEARTBEAT_INTERVAL_MS,
@@ -12,7 +13,7 @@ import {
 import { CoreError, TraceStore } from "@amby/core"
 import type { TaskEventKind, TaskEventSource, TaskStatus } from "@amby/db"
 import { and, DbService, eq, lt, notInArray, schema } from "@amby/db"
-import { Effect } from "effect"
+import { Effect, Runtime } from "effect"
 
 type TaskEventBody = {
 	eventId: string
@@ -101,7 +102,10 @@ export const handleTaskEventPost = (request: Request) =>
 	Effect.gen(function* () {
 		const { db } = yield* DbService
 		const taskSupervisor = yield* TaskSupervisor
+		const attachments = yield* AttachmentService
 		const traceStore = yield* TraceStore
+		const rt = yield* Effect.runtime<never>()
+		const runPromise = Runtime.runPromise(rt)
 
 		const rawBody = yield* Effect.tryPromise({
 			try: () => request.text(),
@@ -252,7 +256,34 @@ export const handleTaskEventPost = (request: Request) =>
 				patch.callbackSecretHash = null
 				if (executionData) {
 					patch.output = executionData.output ? { result: executionData.output } : null
-					patch.artifacts = executionData.artifacts
+					const publishedArtifacts = yield* attachments
+						.publishTaskArtifacts({
+							userId: task.userId,
+							taskId: task.id,
+							conversationId: task.conversationId,
+							threadId: task.threadId,
+							artifacts: executionData.artifacts as Array<{
+								title?: string
+								uri?: string
+								metadata?: Record<string, unknown>
+							}>,
+							readArtifact: async (artifact) => {
+								const filename = artifact.title || artifact.uri?.split("/").pop()
+								if (!filename) return null
+								return await runPromise(
+									taskSupervisor.readTaskArtifact(task.id, task.userId, filename),
+								)
+							},
+						})
+						.pipe(
+							Effect.catchAll((error) =>
+								Effect.sync(() => {
+									console.error("[task-events] Failed to publish task artifacts:", error)
+									return []
+								}),
+							),
+						)
+					patch.artifacts = publishedArtifacts
 					patch.outputSummary = executionData.summary.slice(0, 2000)
 					if (kind === "task.failed") {
 						patch.error = executionData.summary.slice(0, 4000)

@@ -1,4 +1,9 @@
-import { handleCommand, parseTelegramCommand, type TelegramQueueMessage } from "@amby/channels"
+import {
+	buildBufferedTelegramMessage,
+	handleCommand,
+	parseTelegramCommand,
+	type TelegramQueueMessage,
+} from "@amby/channels"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { setTelegramScope, setWorkerScope } from "../sentry"
@@ -73,8 +78,12 @@ export async function handleQueueBatch(
 						} finally {
 							await runtime.dispose()
 						}
-					} else if (message.text) {
-						// Route text messages to ConversationSession Durable Object
+					} else {
+						const bufferedMessage = buildBufferedTelegramMessage(message)
+						if (!bufferedMessage) {
+							return
+						}
+						// Route supported Telegram messages to ConversationSession Durable Object
 						const doBinding = env.CONVERSATION_SESSION
 						if (!doBinding) {
 							console.error("[Queue] CONVERSATION_SESSION binding not available")
@@ -91,7 +100,7 @@ export async function handleQueueBatch(
 								},
 								async () => {
 									await stub.ingestMessage({
-										text: message.text,
+										message: bufferedMessage,
 										chatId,
 										messageId: message.message_id,
 										date: message.date,
@@ -103,7 +112,7 @@ export async function handleQueueBatch(
 								telegram_chat_id: chatId,
 								telegram_from_id: from.id,
 								telegram_message_id: message.message_id,
-								message_length: message.text.length,
+								message_length: bufferedMessage.textSummary.length,
 							})
 						} catch (err) {
 							Sentry.captureException(err)

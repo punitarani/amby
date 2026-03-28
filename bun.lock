@@ -22,6 +22,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@amby/agent": "workspace:*",
+        "@amby/attachments": "workspace:*",
         "@amby/auth": "workspace:*",
         "@amby/browser": "workspace:*",
         "@amby/channels": "workspace:*",
@@ -94,6 +95,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@ai-sdk/provider": "^3.0.0",
+        "@amby/attachments": "workspace:*",
         "@amby/browser": "workspace:*",
         "@amby/computer": "workspace:*",
         "@amby/core": "workspace:*",
@@ -108,6 +110,21 @@
         "@opentelemetry/exporter-trace-otlp-http": "^0.207.0",
         "@opentelemetry/sdk-trace-base": "^2.6.0",
         "braintrust": "^3.4.0",
+      },
+      "peerDependencies": {
+        "ai": "^6.0.116",
+        "effect": "^3.21.0",
+        "zod": "^3.24.0",
+      },
+    },
+    "packages/attachments": {
+      "name": "@amby/attachments",
+      "version": "0.1.0",
+      "dependencies": {
+        "@amby/core": "workspace:*",
+        "@amby/db": "workspace:*",
+        "@amby/env": "workspace:*",
+        "@daytonaio/sdk": "^0.153.0",
       },
       "peerDependencies": {
         "ai": "^6.0.116",
@@ -148,6 +165,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@amby/agent": "workspace:*",
+        "@amby/attachments": "workspace:*",
         "@amby/computer": "workspace:*",
         "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",
@@ -281,6 +299,8 @@
     "@amby/agent": ["@amby/agent@workspace:packages/agent"],
 
     "@amby/api": ["@amby/api@workspace:apps/api"],
+
+    "@amby/attachments": ["@amby/attachments@workspace:packages/attachments"],
 
     "@amby/auth": ["@amby/auth@workspace:packages/auth"],
 

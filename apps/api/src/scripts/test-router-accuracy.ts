@@ -20,6 +20,7 @@ import {
 	makeModelServiceLive,
 	ROUTER_MODEL_ID,
 } from "@amby/agent"
+import { makeAttachmentServicesLocal } from "@amby/attachments/local"
 import { AuthServiceLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
@@ -365,6 +366,7 @@ const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).p
 	Layer.provideMerge(StoreLive),
 	Layer.provideMerge(EnvServiceLive),
 )
+const AttachmentLive = makeAttachmentServicesLocal().pipe(Layer.provideMerge(InfraLive))
 
 const ServicesLive = Layer.mergeAll(
 	MemoryServiceLive,
@@ -374,7 +376,7 @@ const ServicesLive = Layer.mergeAll(
 	AuthServiceLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
-).pipe(Layer.provideMerge(InfraLive))
+).pipe(Layer.provideMerge(InfraLive), Layer.provideMerge(AttachmentLive))
 const SharedLive = PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 
 // ---------------------------------------------------------------------------

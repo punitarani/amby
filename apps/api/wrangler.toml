@@ -52,6 +52,7 @@ required = [
   "DAYTONA_API_KEY",
   "OPENROUTER_API_KEY",
   "SENTRY_DSN",
+  "ATTACHMENTS_SIGNING_SECRET",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_WEBHOOK_SECRET",
 ]
@@ -86,6 +87,10 @@ remote = true
 binding = "HYPERDRIVE"
 id = "5b4f5571613141edbb3545c17bd44cdf"
 localConnectionString = "postgresql://postgres:postgres@localhost:54322/postgres"
+
+[[r2_buckets]]
+binding = "ATTACHMENTS_BUCKET"
+bucket_name = "amby-attachments"
 
 # --- Queue: inbound Telegram messages ---
 [[queues.producers]]

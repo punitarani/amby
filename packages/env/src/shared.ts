@@ -55,6 +55,7 @@ export interface Env {
 	readonly TELEGRAM_BOT_USERNAME: string
 	readonly TELEGRAM_WEBHOOK_SECRET: string
 	readonly TELEGRAM_API_BASE_URL?: string
+	readonly ATTACHMENTS_SIGNING_SECRET: string
 	readonly COMPOSIO_API_KEY: string
 	readonly COMPOSIO_WEBHOOK_SECRET: string
 	readonly COMPOSIO_AUTH_CONFIG_GMAIL: string

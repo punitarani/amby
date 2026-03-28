@@ -13,6 +13,7 @@ import {
 	MAX_WAIT_SECONDS,
 	POLL_INTERVAL_MS,
 	PREPARING_TIMEOUT_MS,
+	TASK_BASE,
 	taskSessionId,
 } from "../config"
 import { SandboxError, sandboxErrorFromDefect } from "../errors"
@@ -63,6 +64,10 @@ interface ActiveTask {
 const stripAnsi = (value: string) => value.replace(ANSI_RE, "")
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function shellQuote(value: string): string {
+	return `'${value.replaceAll("'", `'"'"'`)}'`
+}
 
 const summarizeLoginFailure = (log: string | null, exitCode?: number | null) => {
 	const tail = (log ? stripAnsi(log) : "")
@@ -168,6 +173,7 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 			taskId?: string
 			userId: string
 			prompt: string
+			instructions?: string
 			needsBrowser?: boolean
 			conversationId?: string
 			threadId?: string
@@ -178,6 +184,7 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 			runnerKind?: RunnerKind
 			input?: Record<string, unknown>
 			metadata?: Record<string, unknown>
+			attachmentDownloads?: Array<{ attachmentId: string; filename: string; url: string }>
 			confirmationState?: "not_required" | "required" | "confirmed" | "rejected"
 		}) => Effect.Effect<{ taskId: string; status: string }, SandboxError>
 		readonly probeTask: (
@@ -203,6 +210,11 @@ export class TaskSupervisor extends Context.Tag("TaskSupervisor")<
 			{ output: string; summary: string; artifacts: Array<Record<string, unknown>> } | null,
 			SandboxError
 		>
+		readonly readTaskArtifact: (
+			taskId: string,
+			userId: string,
+			filename: string,
+		) => Effect.Effect<ArrayBuffer | null, SandboxError>
 		readonly shutdown: () => Effect.Effect<void>
 	}
 >() {}
@@ -791,6 +803,7 @@ export const TaskSupervisorLive = Layer.scoped(
 				taskId: providedTaskId,
 				userId,
 				prompt,
+				instructions,
 				needsBrowser,
 				conversationId,
 				threadId,
@@ -801,6 +814,7 @@ export const TaskSupervisorLive = Layer.scoped(
 				runnerKind,
 				input,
 				metadata,
+				attachmentDownloads,
 				confirmationState,
 			}) =>
 				Effect.gen(function* () {
@@ -938,6 +952,17 @@ export const TaskSupervisorLive = Layer.scoped(
 								const command = await provider.prepareAndBuildCommand(sandbox, {
 									taskId,
 									prompt,
+									instructions:
+										attachmentDownloads && attachmentDownloads.length > 0
+											? [
+													instructions?.trim() || "",
+													"Input files are staged in ../inputs/ before the task starts.",
+													"Available input files:",
+													...attachmentDownloads.map((file) => `- ${file.filename}`),
+												]
+													.filter(Boolean)
+													.join("\n")
+											: instructions,
 									authMode,
 									needsBrowser: needsBrowser ?? false,
 									timeoutSeconds: DEFAULT_TASK_TIMEOUT_SECONDS,
@@ -946,6 +971,16 @@ export const TaskSupervisorLive = Layer.scoped(
 									callbackId,
 									callbackSecret: creds.raw,
 								})
+
+								if (attachmentDownloads && attachmentDownloads.length > 0) {
+									const inputDir = `${TASK_BASE}/${taskId}/inputs`
+									await sandbox.process.executeCommand(`mkdir -p ${shellQuote(inputDir)}`)
+									for (const download of attachmentDownloads) {
+										await sandbox.process.executeCommand(
+											`curl -fsSL ${shellQuote(download.url)} -o ${shellQuote(`${inputDir}/${download.filename}`)}`,
+										)
+									}
+								}
 
 								sessionId = taskSessionId(taskId)
 								await sandbox.process.createSession(sessionId)
@@ -1218,6 +1253,25 @@ export const TaskSupervisorLive = Layer.scoped(
 							summary: executionData.summary,
 							artifacts: executionData.artifacts,
 						}
+					},
+					catch: sandboxErrorFromDefect,
+				}),
+
+			readTaskArtifact: (taskId, userId, filename) =>
+				Effect.tryPromise({
+					try: async () => {
+						if (!filename || filename.includes("/") || filename.includes("\\")) {
+							throw new Error("Invalid artifact filename.")
+						}
+						const task = await runPromise(taskStore.getByIdAndUser(taskId, userId))
+						if (!task) return null
+						if (!isSandboxTask(task)) return null
+						const runtimeData = readSandboxRuntimeData(task)
+						if (!runtimeData?.artifactRoot) return null
+
+						const sandbox = await runPromise(sandboxService.ensure(userId))
+						const file = await sandbox.fs.downloadFile(`${runtimeData.artifactRoot}/${filename}`)
+						return Uint8Array.from(file).buffer
 					},
 					catch: sandboxErrorFromDefect,
 				}),

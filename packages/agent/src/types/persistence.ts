@@ -6,6 +6,9 @@ export type ArtifactRef = {
 	kind: string
 	title?: string
 	uri?: string
+	attachmentId?: string
+	filename?: string
+	mediaType?: string
 	metadata?: Record<string, unknown>
 }
 

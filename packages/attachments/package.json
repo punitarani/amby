@@ -1,0 +1,27 @@
+{
+	"name": "@amby/attachments",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./local": "./src/local.ts",
+		"./workers": "./src/workers.ts"
+	},
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"build": "bun build ./src/index.ts ./src/local.ts --outdir dist --target bun && cp ./src/workers.ts ./dist/workers.ts"
+	},
+	"dependencies": {
+		"@amby/core": "workspace:*",
+		"@amby/db": "workspace:*",
+		"@amby/env": "workspace:*",
+		"@daytonaio/sdk": "^0.153.0"
+	},
+	"peerDependencies": {
+		"ai": "^6.0.116",
+		"effect": "^3.21.0",
+		"zod": "^3.24.0"
+	}
+}

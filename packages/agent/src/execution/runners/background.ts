@@ -1,25 +1,63 @@
+import type { AttachmentService } from "@amby/attachments"
 import type { TaskSupervisor } from "@amby/computer"
 import { Effect } from "effect"
 import type { ExecutionTask, ExecutionTaskResult } from "../../types/execution"
 import type { RunWriter } from "../ledger"
 
+function sanitizeFilename(filename: string): string {
+	const cleaned = filename
+		.trim()
+		.replaceAll(/[^A-Za-z0-9._-]+/g, "-")
+		.replaceAll(/-+/g, "-")
+		.replaceAll(/^\.+/, "")
+		.slice(0, 120)
+	return cleaned || "attachment.bin"
+}
+
+function readCurrentAttachments(metadata?: Record<string, unknown>) {
+	const value = metadata?.currentAttachments
+	if (!Array.isArray(value)) return []
+	return value
+		.filter(
+			(item): item is { id: string; filename?: string | null; title?: string | null } =>
+				typeof item === "object" &&
+				item !== null &&
+				typeof (item as { id?: unknown }).id === "string",
+		)
+		.map((item) => ({
+			id: item.id,
+			filename: sanitizeFilename(item.filename || item.title || `${item.id}.bin`),
+		}))
+}
+
 export async function runBackgroundSpecialist(params: {
 	task: ExecutionTask
 	supervisor: import("effect").Context.Tag.Service<typeof TaskSupervisor>
+	attachments: import("effect").Context.Tag.Service<typeof AttachmentService>
 	userId: string
 	conversationId: string
 	threadId?: string
+	requestMetadata?: Record<string, unknown>
 	trace: RunWriter
 }) {
 	if (params.task.input.kind !== "background") {
 		throw new Error("Background runner received a non-background task input.")
 	}
 
+	const attachmentDownloads = await Promise.all(
+		readCurrentAttachments(params.requestMetadata).map(async (attachment) => ({
+			attachmentId: attachment.id,
+			filename: attachment.filename,
+			url: await Effect.runPromise(params.attachments.buildSignedDownloadUrl(attachment.id)),
+		})),
+	)
+
 	const started = await Effect.runPromise(
 		params.supervisor.startTask({
 			taskId: params.task.id,
 			userId: params.userId,
 			prompt: params.task.input.prompt,
+			instructions: params.task.input.instructions,
 			needsBrowser: params.task.input.needsBrowser,
 			conversationId: params.conversationId,
 			threadId: params.threadId,
@@ -39,6 +77,7 @@ export async function runBackgroundSpecialist(params: {
 				requiresConfirmation: params.task.requiresConfirmation,
 				requiresValidation: params.task.requiresValidation,
 			},
+			attachmentDownloads,
 			confirmationState: params.task.requiresConfirmation ? "required" : "not_required",
 		}),
 	)

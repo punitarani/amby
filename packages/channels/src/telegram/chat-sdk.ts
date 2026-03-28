@@ -2,8 +2,8 @@ import type { WorkerBindings } from "@amby/env/workers"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat, type StateAdapter } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
-import type { TelegramFrom } from "./utils"
-import { handleCommand, parseTelegramCommand } from "./utils"
+import type { TelegramFrom, TelegramMessage } from "./utils"
+import { buildBufferedTelegramMessage, handleCommand, parseTelegramCommand } from "./utils"
 
 export interface ChatSdkDeps {
 	// biome-ignore lint/suspicious/noExplicitAny: Runtime type parameters vary by caller; correctness verified at the call site
@@ -63,13 +63,7 @@ async function routeIncomingMessage(
 ) {
 	if (!_deps) throw new Error("[ChatSDK] getOrCreateChat must be called before routing messages")
 	const deps = _deps
-	const raw = message.raw as {
-		from?: TelegramFrom
-		chat: { id: number }
-		text?: string
-		message_id: number
-		date: number
-	}
+	const raw = message.raw as TelegramMessage
 	const from = raw.from
 	const chatId = raw.chat.id
 	const text = raw.text
@@ -111,7 +105,8 @@ async function routeIncomingMessage(
 		return
 	}
 
-	if (!text) return
+	const bufferedMessage = buildBufferedTelegramMessage(raw)
+	if (!bufferedMessage) return
 
 	// Text messages: route to ConversationSession DO for debouncing
 	const doBinding = env.CONVERSATION_SESSION
@@ -124,7 +119,7 @@ async function routeIncomingMessage(
 		const doId = doBinding.idFromName(String(chatId))
 		const stub = doBinding.get(doId)
 		await stub.ingestMessage({
-			text,
+			message: bufferedMessage,
 			chatId,
 			messageId: raw.message_id,
 			date: raw.date,

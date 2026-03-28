@@ -24,6 +24,7 @@
 	"dependencies": {
 		"@cloudflare/playwright": "^1.1.2",
 		"@amby/agent": "workspace:*",
+		"@amby/attachments": "workspace:*",
 		"@amby/auth": "workspace:*",
 		"@amby/browser": "workspace:*",
 		"@amby/channels": "workspace:*",

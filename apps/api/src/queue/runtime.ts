@@ -1,7 +1,8 @@
 import { ModelServiceLive } from "@amby/agent"
+import { makeAttachmentServicesFromBindings } from "@amby/attachments/workers"
 import { AuthServiceLive } from "@amby/auth"
 import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
-import { TelegramSenderLite } from "@amby/channels"
+import { TelegramReplySenderLive, TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import {
 	ComputeStoreLive,
@@ -34,6 +35,9 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		Layer.provideMerge(StoreLive),
 		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
 	)
+	const AttachmentLive = makeAttachmentServicesFromBindings(bindings).pipe(
+		Layer.provideMerge(InfraLive),
+	)
 
 	const ServicesLive = Layer.mergeAll(
 		MemoryServiceLive,
@@ -41,6 +45,7 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		ModelServiceLive,
 		AuthServiceLive,
 		TelegramSenderLite,
+		TelegramReplySenderLive,
 		ConnectorsServiceLive,
 		makeBrowserServiceFromBindings(bindings, {
 			logger: (entry) => {
@@ -48,7 +53,7 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 				Sentry.logger[level](`[BrowserService] ${entry.message}`, entry)
 			},
 		}),
-	).pipe(Layer.provideMerge(InfraLive))
+	).pipe(Layer.provideMerge(InfraLive), Layer.provideMerge(AttachmentLive))
 
 	return PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 }

@@ -14,7 +14,7 @@ interface SessionState {
 }
 
 interface IngestPayload {
-	text: string
+	message: BufferedMessage
 	chatId: number
 	messageId: number
 	date: number
@@ -49,6 +49,34 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		await this.ctx.storage.put("state", this.state)
 	}
 
+	private mergeBufferedMessages(
+		existing: BufferedMessage,
+		incoming: BufferedMessage,
+	): BufferedMessage {
+		const existingText = existing.parts.find((part) => part.type === "text")
+		const incomingText = incoming.parts.find((part) => part.type === "text")
+		const textSummary =
+			existingText?.text.trim() || incomingText?.text.trim() || incoming.textSummary
+		const existingRawIds = Array.isArray(existing.rawSource?.messageIds)
+			? existing.rawSource.messageIds
+			: [existing.sourceMessageId]
+		const incomingRawIds = Array.isArray(incoming.rawSource?.messageIds)
+			? incoming.rawSource.messageIds
+			: [incoming.sourceMessageId]
+		return {
+			sourceMessageId: existing.sourceMessageId,
+			date: Math.min(existing.date, incoming.date),
+			textSummary,
+			parts: [...existing.parts, ...incoming.parts],
+			mediaGroupId: existing.mediaGroupId ?? incoming.mediaGroupId ?? null,
+			from: existing.from ?? incoming.from ?? null,
+			rawSource: {
+				platform: "telegram",
+				messageIds: [...existingRawIds, ...incomingRawIds],
+			},
+		}
+	}
+
 	async ingestMessage(payload: IngestPayload): Promise<void> {
 		await this.hydrate()
 		setTelegramScope({
@@ -73,11 +101,19 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		await this.ctx.storage.put("pendingFrom", payload.from)
 
 		// Buffer the message
-		this.state.buffer.push({
-			text: payload.text,
-			messageId: payload.messageId,
-			date: payload.date,
-		})
+		const lastBuffered = this.state.buffer.at(-1)
+		if (
+			lastBuffered?.mediaGroupId &&
+			payload.message.mediaGroupId &&
+			lastBuffered.mediaGroupId === payload.message.mediaGroupId
+		) {
+			this.state.buffer[this.state.buffer.length - 1] = this.mergeBufferedMessages(
+				lastBuffered,
+				payload.message,
+			)
+		} else {
+			this.state.buffer.push(payload.message)
+		}
 
 		if (this.state.status === "processing") {
 			// Agent is already running — forward as interrupt to the active workflow
@@ -92,7 +128,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 						async () => {
 							await instance.sendEvent({
 								type: "user-message",
-								payload: { text: payload.text, messageId: payload.messageId },
+								payload: { message: payload.message, messageId: payload.messageId },
 							})
 						},
 					)

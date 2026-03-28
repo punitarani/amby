@@ -1,7 +1,9 @@
 import { ModelServiceLive } from "@amby/agent"
+import { AttachmentService } from "@amby/attachments"
+import { makeAttachmentServicesLocal } from "@amby/attachments/local"
 import { AuthServiceLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
-import { createAmbyBot, TelegramSenderLite } from "@amby/channels"
+import { createAmbyBot, TelegramReplySenderLive, TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import { ComputeStoreLive, DbServiceLive, TaskStoreLive, TraceStoreLive } from "@amby/db"
 import { EnvService } from "@amby/env"
@@ -28,6 +30,7 @@ const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).p
 	Layer.provideMerge(StoreLive),
 	Layer.provideMerge(EnvServiceLive),
 )
+const AttachmentLive = makeAttachmentServicesLocal().pipe(Layer.provideMerge(InfraLive))
 
 const ServicesLive = Layer.mergeAll(
 	MemoryServiceLive,
@@ -37,7 +40,8 @@ const ServicesLive = Layer.mergeAll(
 	AuthServiceLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
-).pipe(Layer.provideMerge(InfraLive))
+	TelegramReplySenderLive,
+).pipe(Layer.provideMerge(InfraLive), Layer.provideMerge(AttachmentLive))
 
 const SharedLive = PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 
@@ -47,6 +51,21 @@ const app = new Hono()
 
 app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
+
+app.get("/attachments/:id", async (c) => {
+	const result = await runtime.runPromise(
+		Effect.gen(function* () {
+			const attachments = yield* AttachmentService
+			yield* attachments.verifySignedDownload({
+				attachmentId: c.req.param("id"),
+				expires: c.req.query("expires") ?? "",
+				signature: c.req.query("sig") ?? "",
+			})
+			return yield* attachments.getDownloadResponse(c.req.param("id"))
+		}).pipe(Effect.either),
+	)
+	return Either.isRight(result) ? result.right : c.json({ error: "Unauthorized" }, 401)
+})
 
 // White-label connect link — resolves UUID to the underlying Composio auth URL
 app.get("/link/:id", async (c) => {

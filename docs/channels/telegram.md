@@ -2,6 +2,8 @@
 
 This document explains the Telegram channel end to end: where messages enter, how commands and normal text diverge, which runtime owns each piece of state, and how replies get back to the user.
 
+For the attachment-specific storage, classification, sandbox, and delivery path, see [../chat/telegram-attachments.md](../chat/telegram-attachments.md).
+
 ## Scope
 
 This doc covers:
@@ -9,7 +11,7 @@ This doc covers:
 - the production Cloudflare Worker path
 - the local Bun dev path
 - command handling
-- normal message handling
+- normal message handling, including attachment-bearing messages
 - Telegram-specific state ownership
 - local mock testing
 
@@ -22,6 +24,7 @@ Telegram logic is a transport boundary. It is responsible for:
 - accepting Telegram updates
 - verifying and parsing them through `@chat-adapter/telegram`
 - deciding whether a message is a simple command or a normal user message
+- converting supported Telegram media into structured buffered message parts
 - mapping Telegram identity to an Amby user and conversation
 - delivering replies back through the Telegram Bot API
 
@@ -49,7 +52,9 @@ sequenceDiagram
     participant State as ChatStateDO
     participant Sess as ConversationSession DO
     participant WF as AgentExecutionWorkflow
+    participant Attach as "@amby/attachments"
     participant Agent as ConversationRuntime
+    participant Send as ReplySender
     participant DB as DB + services
     participant API as Telegram Bot API
 
@@ -61,14 +66,16 @@ sequenceDiagram
     alt /start, /stop, /help
         SDK->>DB: handleCommand(...)
         DB->>API: sendMessage
-    else normal text
+    else normal message
         SDK->>Sess: ingestMessage(...)
         Sess->>Sess: buffer + debounce
         Sess->>WF: create workflow
         WF->>DB: findOrCreateUser(...)
-        WF->>Agent: ensureConversation + handleMessage / handleBatchedMessages
+        WF->>Attach: ingest buffered parts + store attachments
+        WF->>Agent: ensureConversation + handleStructuredMessage / handleStructuredBatch
         Agent-->>WF: final response
-        WF->>API: postMessage / editMessage / deleteMessage
+        WF->>Send: send reply parts
+        Send->>API: post/edit text, sendPhoto, sendDocument
         WF->>Sess: completeExecution(...)
     end
 ```
@@ -132,13 +139,13 @@ flowchart LR
 
 Keeping them separate matters because they solve different problems.
 
-### 4. Command vs normal text split
+### 4. Command vs normal message split
 
 `routeIncomingMessage(...)` extracts:
 
 - `from`
 - `chatId`
-- `text`
+- structured buffered message parts
 - `message_id`
 - `date`
 
@@ -162,13 +169,22 @@ Supported commands live in `packages/channels/src/telegram/utils.ts`:
 
 Commands do not go through the buffering Durable Object or the agent workflow.
 
-#### Normal text path
+#### Normal message path
 
-If the message is not a command and has text, `routeIncomingMessage(...)` forwards it to `ConversationSession.ingestMessage(...)` using one Durable Object instance per Telegram chat id.
+If the message is not a command and can be normalized into a `BufferedInboundMessage`, `routeIncomingMessage(...)` forwards it to `ConversationSession.ingestMessage(...)` using one Durable Object instance per Telegram chat id.
+
+For v1 this includes:
+
+- plain text
+- photos
+- PDFs
+- small text-like documents such as `.txt`, `.md`, `.csv`, and `.json`
+
+Unsupported files are still buffered as attachment descriptors so the workflow can store them and stage them for sandbox fallback.
 
 ### 5. Per-chat buffering and debounce
 
-`apps/api/src/durable-objects/conversation-session.ts` is the control point for normal text.
+`apps/api/src/durable-objects/conversation-session.ts` is the control point for normal user messages.
 
 It buffers incoming messages and uses alarms to debounce bursts of input before starting agent work.
 
@@ -187,6 +203,7 @@ Key behavior:
 
 - first message starts a 3 second debounce window
 - more messages during debounce are appended to the same buffer
+- Telegram media groups are merged into one buffered turn when they share a `media_group_id`
 - messages arriving during processing are forwarded to the active workflow as events and also rebuffered
 - when the workflow completes, a shorter 1 second debounce is used if follow-up messages arrived mid-run
 
@@ -198,13 +215,15 @@ When the debounce alarm fires, `ConversationSession` starts `AgentExecutionWorkf
 
 1. sends a typing indicator
 2. re-resolves the user with `findOrCreateUser(...)`
-3. builds the input from the buffered message texts
-4. calls `ConversationRuntime` through the agent runtime
-5. streams interim output by posting once and then editing every 500ms
-6. splits long final messages to stay within Telegram limits
-7. tells `ConversationSession` that execution finished
+3. ingests buffered attachment descriptors into private storage after user resolution
+4. builds compact routing text plus current-turn structured parts
+5. calls `ConversationRuntime` through the agent runtime
+6. streams interim output by posting once and then editing every 500ms
+7. sends final reply parts through `ReplySender`, using native Telegram photo/document delivery when possible
+8. falls back to signed Amby download links for unsupported outbound files
+9. tells `ConversationSession` that execution finished
 
-The workflow is where Telegram delivery and agent execution meet.
+The workflow is where Telegram delivery, attachment ingest, and agent execution meet.
 
 ## Identity and persistence
 
@@ -230,10 +249,10 @@ Telegram replies leave the system through `@chat-adapter/telegram`.
 There are three main outbound styles:
 
 - command replies via `TelegramSender`
-- workflow replies via `createTelegramAdapter(...).postMessage(...)`
-- streamed workflow edits via `editMessage(...)`
+- workflow replies via `ReplySender`
+- streamed workflow edits via the reply sender draft handle
 
-Long final responses are split with `splitTelegramMessage(...)` to fit Telegram's message size limit.
+Long final text responses are split with `splitTelegramMessage(...)` to fit Telegram's message size limit. Images go through `sendPhoto`, documents go through `sendDocument`, and unsupported outbound files fall back to signed attachment URLs.
 
 ## Local Bun path
 
