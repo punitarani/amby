@@ -5,6 +5,7 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
+		"./posthog": "./src/posthog.ts",
 		"./telegram": "./src/telegram/index.ts"
 	},
 	"scripts": {

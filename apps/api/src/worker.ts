@@ -1,4 +1,5 @@
 import { type ChatSdkDeps, getOrCreateChat, type TelegramQueueMessage } from "@amby/channels"
+import { getPostHogClient } from "@amby/channels/posthog"
 import type { WorkerBindings } from "@amby/env/workers"
 import {
 	buildSafeComposioRedirectUrl,
@@ -22,7 +23,6 @@ import { ConversationSession as ConversationSessionBase } from "./durable-object
 import { handleScheduledReconciliation } from "./handlers/reconciliation"
 import { handleTaskEventPost } from "./handlers/task-events"
 import { getHomeResponse } from "./home"
-import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
 import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "./queue/runtime"
 import { getSentryOptions, getSentryOptionsOrFallback, setTelegramScope } from "./sentry"
