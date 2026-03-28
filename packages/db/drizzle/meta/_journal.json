@@ -92,6 +92,13 @@
 			"when": 1774679463005,
 			"tag": "0012_align_migrated_schema",
 			"breakpoints": true
+		},
+		{
+			"idx": 13,
+			"version": "7",
+			"when": 1774600327261,
+			"tag": "0013_dear_big_bertha",
+			"breakpoints": true
 		}
 	]
 }

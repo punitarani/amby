@@ -1,9 +1,15 @@
 import { ConversationRuntime, makeConversationRuntimeLive } from "@amby/agent"
+import { TELEGRAM_RELINK_REQUIRED_MESSAGE } from "@amby/auth"
 import { createMemoryState } from "@chat-adapter/state-memory"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
-import { findOrCreateUser, handleCommand, parseTelegramCommand, type TelegramFrom } from "./utils"
+import {
+	handleCommand,
+	parseTelegramCommand,
+	resolveTelegramUser,
+	type TelegramFrom,
+} from "./utils"
 
 // biome-ignore lint/suspicious/noExplicitAny: Runtime type is complex; correctness verified at the call site
 export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, botToken: string) {
@@ -44,7 +50,12 @@ export function createAmbyBot(runtime: ManagedRuntime.ManagedRuntime<any, any>, 
 		await thread.startTyping()
 
 		const effect = Effect.gen(function* () {
-			const userId = yield* findOrCreateUser(from, chatId)
+			const resolvedUser = yield* resolveTelegramUser(from, chatId)
+			if (resolvedUser.status === "blocked") {
+				yield* Effect.tryPromise(() => thread.post(TELEGRAM_RELINK_REQUIRED_MESSAGE))
+				return
+			}
+			const userId = resolvedUser.userId
 			const sendReply = (t: string) => thread.post(t).then(() => {})
 
 			const response = yield* Effect.gen(function* () {

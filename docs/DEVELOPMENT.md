@@ -22,6 +22,8 @@ If using Doppler, run `doppler setup` first and skip the `.env` copy step.
 
 CI/CD enforces the checked-in migration path: `generate` produces SQL, `migrate` applies pending SQL, and `check` validates the migration history. `db:push` remains a local development shortcut and is not used as the correctness gate in CI.
 
+For Telegram auth work, keep `BETTER_AUTH_URL=http://localhost:3001`. Better Auth is mounted on the API origin and appends `/api/auth` internally.
+
 ## Key Commands
 
 | Command | Description |
@@ -51,8 +53,14 @@ Copy `.env.example` to `.env`. Key variables:
 |----------|----------|-------|
 | `DATABASE_URL` | Yes | Default from docker-compose: `postgresql://postgres:postgres@localhost:54322/postgres` |
 | `BETTER_AUTH_SECRET` | Yes | Any string for local dev |
+| `BETTER_AUTH_URL` | Yes | API origin root, not the web origin. Local default: `http://localhost:3001` |
 | `TELEGRAM_BOT_TOKEN` | For Telegram | Get from [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_BOT_USERNAME` | For Telegram | Your bot's username |
+| `TELEGRAM_LOGIN_WIDGET_ENABLED` | Optional | Enables Login Widget endpoints and mock auth panel flows |
+| `TELEGRAM_MINI_APP_ENABLED` | Optional | Enables Mini App endpoints |
+| `TELEGRAM_OIDC_CLIENT_ID` | For Telegram OIDC | Client ID from BotFather Web Login |
+| `TELEGRAM_OIDC_CLIENT_SECRET` | For Telegram OIDC | Client secret from BotFather Web Login |
+| `TELEGRAM_MAX_AUTH_AGE_SECONDS` | Optional | Max age for widget auth replay protection |
 | `OPENROUTER_API_KEY` | For LLM | [OpenRouter](https://openrouter.ai) |
 | `COMPOSIO_API_KEY` | For integrations | [Composio](https://composio.dev) |
 | `DAYTONA_API_KEY` | For sandboxes | [Daytona](https://app.daytona.io) |
@@ -72,7 +80,17 @@ Docker Compose runs PostgreSQL on port 54322 with pgvector enabled.
 
 ### Mock Channel
 
-The mock app emulates a Telegram-like chat interface for local testing without a real bot. Start it with `bun run mock` and set `TELEGRAM_API_BASE_URL` to point at it. See [channels/telegram.md](./channels/telegram.md) for details.
+The mock app emulates a Telegram-like chat interface for local testing without a real bot. It also includes a Telegram auth panel that calls the first-party Better Auth plugin on the API origin.
+
+Start it with `bun run mock` and set:
+
+- `TELEGRAM_API_BASE_URL=http://localhost:3100/api/mock-bot`
+- `BETTER_AUTH_URL=http://localhost:3001`
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_LOGIN_WIDGET_ENABLED=true` if you want widget flows
+- `TELEGRAM_MINI_APP_ENABLED=true` if you want Mini App flows
+
+See [CHANNELS.md](./CHANNELS.md), [channels/telegram.md](./channels/telegram.md), and [apps/mock/README.md](../apps/mock/README.md) for details.
 
 ### Bun vs Worker API paths
 
@@ -105,6 +123,15 @@ bun test --coverage                         # With coverage
 2. Use `describe` blocks matching the function name
 3. Test boundary conditions, not just happy paths
 4. Use `it.each()` for parametric tests
+
+For Telegram auth changes, prefer this verification order:
+
+1. `bun test packages/auth`
+2. `bun test packages/channels`
+3. `bun run --filter @amby/api typecheck`
+4. `bun run --filter @amby/mock typecheck`
+5. `bun run lint`
+6. Manual verification with `bun run api:dev` and `bun run mock`
 
 ## Docs Maintenance
 

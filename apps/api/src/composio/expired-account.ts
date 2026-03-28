@@ -1,3 +1,4 @@
+import { TELEGRAM_PROVIDER_ID } from "@amby/auth"
 import { TelegramSender } from "@amby/channels"
 import { getTelegramChatId } from "@amby/computer"
 import { and, DbService, eq, inArray, schema } from "@amby/db"
@@ -52,12 +53,12 @@ export const handleExpiredConnectedAccount = (connectedAccountId: string) =>
 						database
 							.select({
 								userId: schema.accounts.userId,
-								metadata: schema.accounts.metadata,
+								telegramChatId: schema.accounts.telegramChatId,
 							})
 							.from(schema.accounts)
 							.where(
 								and(
-									eq(schema.accounts.providerId, "telegram"),
+									eq(schema.accounts.providerId, TELEGRAM_PROVIDER_ID),
 									inArray(schema.accounts.userId, userIds),
 								),
 							),
@@ -65,7 +66,7 @@ export const handleExpiredConnectedAccount = (connectedAccountId: string) =>
 
 		const chatIdByUserId = new Map<string, number>()
 		for (const account of telegramAccounts) {
-			const chatId = getTelegramChatId(account.metadata)
+			const chatId = getTelegramChatId(account.telegramChatId)
 			if (chatId !== undefined && !chatIdByUserId.has(account.userId)) {
 				chatIdByUserId.set(account.userId, chatId)
 			}

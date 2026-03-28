@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"@amby/agent": "workspace:*",
+		"@amby/auth": "workspace:*",
 		"@amby/computer": "workspace:*",
 		"@amby/core": "workspace:*",
 		"@amby/db": "workspace:*",

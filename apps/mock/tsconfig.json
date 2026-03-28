@@ -7,7 +7,8 @@
 		"plugins": [{ "name": "next" }],
 		"types": ["node", "bun-types"],
 		"paths": {
-			"@/*": ["./*"]
+			"@/*": ["./*"],
+			"@amby/auth": ["../../packages/auth/src/index.ts"]
 		}
 	},
 	"include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

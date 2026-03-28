@@ -1,5 +1,5 @@
 import { ModelServiceLive } from "@amby/agent"
-import { AuthServiceLive } from "@amby/auth"
+import { AuthLive } from "@amby/auth"
 import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
 import { TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
@@ -39,7 +39,7 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		MemoryServiceLive,
 		AutomationServiceLive,
 		ModelServiceLive,
-		AuthServiceLive,
+		AuthLive,
 		TelegramSenderLite,
 		ConnectorsServiceLive,
 		makeBrowserServiceFromBindings(bindings, {

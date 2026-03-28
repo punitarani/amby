@@ -1,3 +1,4 @@
+import { AuthService, resolveAuthCorsOrigin } from "@amby/auth"
 import { type ChatSdkDeps, getOrCreateChat, type TelegramQueueMessage } from "@amby/channels"
 import { getPostHogClient } from "@amby/channels/posthog"
 import type { WorkerBindings } from "@amby/env/workers"
@@ -12,6 +13,7 @@ import {
 import * as Sentry from "@sentry/cloudflare"
 import { Effect, Either } from "effect"
 import { Hono } from "hono"
+import { cors } from "hono/cors"
 import { HTTPException } from "hono/http-exception"
 import {
 	type ChatStateNamespaceLike,
@@ -113,6 +115,39 @@ app.onError(async (err, c) => {
 	}
 
 	return c.json({ error: "Internal Server Error" }, 500)
+})
+
+app.use("/api/auth/*", async (c, next) =>
+	cors({
+		origin: (origin) =>
+			resolveAuthCorsOrigin(origin, {
+				NODE_ENV: c.env.NODE_ENV ?? "production",
+				APP_URL: c.env.APP_URL ?? "https://hiamby.com",
+				API_URL: c.env.API_URL ?? "https://api.hiamby.com",
+				BETTER_AUTH_URL: c.env.BETTER_AUTH_URL ?? c.env.API_URL ?? "https://api.hiamby.com",
+			}),
+		allowMethods: ["GET", "POST", "OPTIONS"],
+		allowHeaders: ["Content-Type", "Authorization"],
+		exposeHeaders: ["Set-Cookie"],
+		credentials: true,
+	})(c, next),
+)
+
+// Per-request runtime is intentional for Cloudflare Workers: each isolate is short-lived
+// and env bindings are per-request, so a long-lived singleton would hold stale bindings.
+// The local Node runtime in apps/api/src/index.ts correctly uses a shared ManagedRuntime.
+app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+	const runtime = makeRuntimeForConsumer(c.env)
+	try {
+		const auth = await runtime.runPromise(
+			Effect.gen(function* () {
+				return yield* AuthService
+			}),
+		)
+		return auth.handler(c.req.raw)
+	} finally {
+		await runtime.dispose()
+	}
 })
 
 app.get("/", (c) => c.json(getHomeResponse()))

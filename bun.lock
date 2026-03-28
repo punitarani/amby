@@ -49,6 +49,7 @@
       "name": "@amby/mock",
       "version": "0.1.0",
       "dependencies": {
+        "@amby/auth": "workspace:*",
         "lucide-react": "^0.577.0",
         "next": "16",
         "react": "19",
@@ -123,6 +124,7 @@
         "@amby/env": "workspace:*",
         "@better-auth/api-key": "^1.5.5",
         "better-auth": "^1.5.5",
+        "zod": "^3.25.76",
       },
       "peerDependencies": {
         "effect": "^3.21.0",
@@ -148,6 +150,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@amby/agent": "workspace:*",
+        "@amby/auth": "workspace:*",
         "@amby/computer": "workspace:*",
         "@amby/core": "workspace:*",
         "@amby/db": "workspace:*",

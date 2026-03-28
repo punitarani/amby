@@ -1,5 +1,5 @@
 import { ModelServiceLive } from "@amby/agent"
-import { AuthServiceLive } from "@amby/auth"
+import { AuthLive, AuthService, resolveAuthCorsOrigin } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { createAmbyBot, TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
@@ -16,6 +16,7 @@ import { MemoryServiceLive } from "@amby/plugins/memory"
 import { PluginRegistryLive } from "@amby/plugins/registry"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
+import { cors } from "hono/cors"
 import { getHomeResponse } from "./home"
 
 // Shared layers — constructed once at startup
@@ -34,7 +35,7 @@ const ServicesLive = Layer.mergeAll(
 	AutomationServiceLive,
 	TaskSupervisorLive,
 	ModelServiceLive,
-	AuthServiceLive,
+	AuthLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
 ).pipe(Layer.provideMerge(InfraLive))
@@ -44,6 +45,33 @@ const SharedLive = PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 const runtime = ManagedRuntime.make(SharedLive)
 
 const app = new Hono()
+
+const localAuthEnv = {
+	NODE_ENV: process.env.NODE_ENV ?? "development",
+	APP_URL: process.env.APP_URL ?? "http://localhost:3000",
+	API_URL: process.env.API_URL ?? "http://localhost:3001",
+	BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:3001",
+}
+
+app.use(
+	"/api/auth/*",
+	cors({
+		origin: (origin) => resolveAuthCorsOrigin(origin, localAuthEnv),
+		allowMethods: ["GET", "POST", "OPTIONS"],
+		allowHeaders: ["Content-Type", "Authorization"],
+		exposeHeaders: ["Set-Cookie"],
+		credentials: true,
+	}),
+)
+
+app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+	const auth = await runtime.runPromise(
+		Effect.gen(function* () {
+			return yield* AuthService
+		}),
+	)
+	return auth.handler(c.req.raw)
+})
 
 app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
