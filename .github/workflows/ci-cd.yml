@@ -142,7 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [format, lint, test, build, db-validate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    environment: github-actions
+    environment: cloudflare-workers
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -178,7 +178,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [computer-version]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.computer-version.outputs.bump == 'true'
-    environment: github-actions
+    environment: cloudflare-workers
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
