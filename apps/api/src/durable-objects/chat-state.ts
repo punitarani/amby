@@ -35,6 +35,17 @@ function readNextExpiry(row: Record<string, unknown> | undefined) {
 	return typeof nextExpiry === "number" ? nextExpiry : null
 }
 
+function parseStringList(raw: string): string[] {
+	try {
+		const parsed = JSON.parse(raw)
+		return Array.isArray(parsed)
+			? parsed.filter((entry): entry is string => typeof entry === "string")
+			: []
+	} catch {
+		return []
+	}
+}
+
 export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 	private readonly sql: DurableObjectStorage["sql"]
 
@@ -233,21 +244,11 @@ export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 					.exec("SELECT value, expires_at FROM cache WHERE key = ? LIMIT 1", key)
 					.toArray()[0],
 			)
-			let list: string[] = []
-
-			if (row && (row.expires_at === null || row.expires_at > now)) {
-				try {
-					const parsed = JSON.parse(row.value)
-					if (Array.isArray(parsed)) {
-						list = parsed.filter((entry): entry is string => typeof entry === "string")
-					}
-				} catch {
-					list = []
-				}
-			}
+			let list: string[] =
+				row && (row.expires_at === null || row.expires_at > now) ? parseStringList(row.value) : []
 
 			list.push(value)
-			if (options?.maxLength && list.length > options.maxLength) {
+			if (options?.maxLength != null && list.length > options.maxLength) {
 				list = list.slice(list.length - options.maxLength)
 			}
 
@@ -270,21 +271,16 @@ export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 	listGet(key: string) {
 		const raw = this.cacheGet(key)
 		if (raw === null) return []
-		try {
-			const parsed = JSON.parse(raw)
-			return Array.isArray(parsed)
-				? parsed.filter((entry): entry is string => typeof entry === "string")
-				: []
-		} catch {
-			return []
-		}
+		return parseStringList(raw)
 	}
 
 	async alarm(): Promise<void> {
 		try {
 			const now = Date.now()
-			this.sql.exec("DELETE FROM locks WHERE expires_at <= ?", now)
-			this.sql.exec("DELETE FROM cache WHERE expires_at IS NOT NULL AND expires_at <= ?", now)
+			this.ctx.storage.transactionSync(() => {
+				this.sql.exec("DELETE FROM locks WHERE expires_at <= ?", now)
+				this.sql.exec("DELETE FROM cache WHERE expires_at IS NOT NULL AND expires_at <= ?", now)
+			})
 			const next = this.nextExpiry()
 			if (next !== null) {
 				await this.ctx.storage.setAlarm(next)

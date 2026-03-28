@@ -153,6 +153,7 @@ function getOrCreateWorkerChatState(env: ApiBindings) {
 	if (workerChatState) return workerChatState
 	// Intentionally route all Chat SDK transport state through one unsharded DO instance for now.
 	// Shard by adapter name once webhook throughput or lock contention justifies it.
+	// connect() is not called here — the Chat SDK calls state.connect() during init.
 	workerChatState = createCloudflareChatState({ namespace: env.CHAT_STATE })
 	return workerChatState
 }

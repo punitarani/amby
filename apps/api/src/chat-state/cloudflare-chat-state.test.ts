@@ -127,7 +127,7 @@ function makeFakeNamespace() {
 				}
 			}
 			list.push(value)
-			if (options?.maxLength && list.length > options.maxLength) {
+			if (options?.maxLength != null && list.length > options.maxLength) {
 				list = list.slice(list.length - options.maxLength)
 			}
 			cache.set(key, {
