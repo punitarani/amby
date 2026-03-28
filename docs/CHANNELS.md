@@ -1,8 +1,8 @@
 # Channels
 
-Channels are transport adapters that connect external messaging surfaces to the Amby agent runtime. They own message ingress, egress, and delivery semantics. They do not own reasoning, memory, or execution planning.
+Channel documentation now lives under [`docs/channels/`](./channels/README.md).
 
-## Platform enum
+## Implemented channels
 
 The platform type is defined in `packages/db/src/schema/conversations.ts`:
 
@@ -164,3 +164,7 @@ To add a new channel (e.g., Slack):
 5. Implement outbound delivery (send/edit/stream via platform API)
 6. Provide a stable `externalConversationKey` for conversation identity (e.g., Slack channel ID)
 7. Register the webhook route in `apps/api/src/index.ts`
+
+## Detailed channel docs
+
+- [Telegram](./channels/telegram.md) — end-to-end entrypoints, command handling, Worker flow, state ownership, and local mock testing

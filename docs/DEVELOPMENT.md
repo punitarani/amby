@@ -85,7 +85,12 @@ Start it with `bun run mock` and set:
 - `TELEGRAM_LOGIN_WIDGET_ENABLED=true` if you want widget flows
 - `TELEGRAM_MINI_APP_ENABLED=true` if you want Mini App flows
 
-See [CHANNELS.md](./CHANNELS.md) and [apps/mock/README.md](../apps/mock/README.md) for details.
+See [CHANNELS.md](./CHANNELS.md), [channels/telegram.md](./channels/telegram.md), and [apps/mock/README.md](../apps/mock/README.md) for details.
+
+### Bun vs Worker API paths
+
+- `bun run api:dev` uses the Bun entrypoint in `apps/api/src/index.ts` and keeps Chat SDK state in memory.
+- `bun run api:dev:worker` uses the Cloudflare Worker entrypoint in `apps/api/src/worker.ts` and exercises the Durable Object-backed Chat SDK state path used in production.
 
 ## Testing
 
@@ -136,5 +141,5 @@ Update documentation when code changes affect setup, commands, architecture, or 
 ## Further Reading
 
 - [ARCHITECTURE.md](../ARCHITECTURE.md) -- system map and module boundaries
-- [CHANNELS.md](./CHANNELS.md) -- channel integration details
+- [channels/telegram.md](./channels/telegram.md) -- channel integration details
 - [DATA_MODEL.md](./DATA_MODEL.md) -- data model and schema reference

@@ -1,8 +1,7 @@
 import { TELEGRAM_RELINK_REQUIRED_MESSAGE } from "@amby/auth"
 import type { WorkerBindings } from "@amby/env/workers"
-import { createMemoryState } from "@chat-adapter/state-memory"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
-import { Chat } from "chat"
+import { Chat, type StateAdapter } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
 import type { TelegramFrom } from "./utils"
 import { handleCommand, parseTelegramCommand, resolveTelegramUser } from "./utils"
@@ -25,10 +24,10 @@ let _deps: ChatSdkDeps | null = null
 
 /**
  * Returns (or creates) the singleton Chat instance.
- * NOTE: `deps` is captured only on first call. Subsequent calls reuse the
- * existing singleton and ignore the `deps` argument.
+ * NOTE: `deps` and `state` are captured only on first call. Subsequent calls
+ * reuse the existing singleton and ignore later arguments.
  */
-export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps) {
+export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps, state: StateAdapter) {
 	if (_chat) return { chat: _chat }
 	_deps = deps
 
@@ -38,11 +37,6 @@ export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps) {
 		secretToken: env.TELEGRAM_WEBHOOK_SECRET,
 		mode: "webhook",
 	})
-
-	// Memory state is sufficient — the DO pipeline handles all session state,
-	// debouncing, and retries. Chat SDK state is only used for subscription
-	// routing (onNewMention vs onSubscribedMessage) which resets per isolate.
-	const state = createMemoryState()
 
 	const chat = new Chat({
 		userName: "amby",
