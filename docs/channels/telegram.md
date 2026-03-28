@@ -2,7 +2,7 @@
 
 This document explains the Telegram channel end to end: where messages enter, how commands and normal text diverge, which runtime owns each piece of state, and how replies get back to the user.
 
-For the attachment-specific storage, classification, sandbox, and delivery path, see [../chat/telegram-attachments.md](../chat/telegram-attachments.md).
+For the generalized attachment model, storage, sandbox, and delivery path, see [../chat/attachments.md](../chat/attachments.md).
 
 ## Scope
 

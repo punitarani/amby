@@ -115,7 +115,7 @@ flowchart LR
 |---|---|
 | Agent orchestration, tools, planning | [AGENT.md](AGENT.md) |
 | Channel abstraction, Telegram integration | [channels/telegram.md](channels/telegram.md) |
-| Chat attachment pipeline | [chat/telegram-attachments.md](chat/telegram-attachments.md) |
+| Chat attachment pipeline | [chat/attachments.md](chat/attachments.md) |
 | Browser and sandbox compute | [BROWSER_AND_COMPUTER.md](BROWSER_AND_COMPUTER.md) |
 | Data model, schema, migrations | [DATA_MODEL.md](DATA_MODEL.md) |
 | Memory, vector search, pgvector | [MEMORY.md](MEMORY.md) |
