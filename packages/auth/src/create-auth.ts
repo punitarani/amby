@@ -18,7 +18,10 @@ export interface CreateAuthOptions {
 // Return type annotated because betterAuth()'s inferred type references internal
 // better-call types that are not portable in workspace package boundaries.
 export const createAuth = ({ db, env, telegramIdentity }: CreateAuthOptions) => {
-	const telegramOidcConfig = createTelegramOidcConfig(env)
+	const telegramOidcConfig = createTelegramOidcConfig({
+		env,
+		telegramIdentity,
+	})
 
 	return betterAuth({
 		database: drizzleAdapter(db, { provider: "pg" }),

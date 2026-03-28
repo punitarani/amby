@@ -1,13 +1,25 @@
 import { and, type Database, eq, schema } from "@amby/db"
 import { Context } from "effect"
 import { TELEGRAM_PROVIDER_ID } from "./constants"
-import { canSafelyUnlinkTelegram, getTelegramLinkConflict } from "./identity-policy"
+import {
+	canSafelyUnlinkTelegram,
+	getTelegramLinkConflict,
+	resolveTelegramSignInDisposition,
+} from "./identity-policy"
 import type { TelegramIdentityProfile, TelegramProvisionInput } from "./types"
 
 type UserInsert = typeof schema.users.$inferInsert
 type AccountInsert = typeof schema.accounts.$inferInsert
 
 type DbExecutor = Pick<Database, "delete" | "insert" | "select" | "update">
+
+export type TelegramSignInState =
+	| { status: "allowed" }
+	| { status: "blocked"; telegramUserId: string; lastUserId: string | null }
+
+type TelegramSignInResult =
+	| { status: "blocked"; telegramUserId: string; lastUserId: string | null }
+	| { status: "signed-in"; userId: string; created: boolean }
 
 export interface TelegramIdentityServiceApi {
 	provisionFromBot(
@@ -16,9 +28,10 @@ export interface TelegramIdentityServiceApi {
 		| { status: "blocked"; telegramUserId: string }
 		| { status: "provisioned"; userId: string; created: boolean }
 	>
+	getSignInState(telegramUserId: string): Promise<TelegramSignInState>
 	signInOrCreate(
 		input: TelegramProvisionInput & { rememberMe?: boolean },
-	): Promise<{ userId: string; created: boolean }>
+	): Promise<TelegramSignInResult>
 	linkToUser(
 		userId: string,
 		input: TelegramProvisionInput,
@@ -126,11 +139,36 @@ const findTelegramAccountByUserId = async (db: DbExecutor, userId: string) => {
 
 const findIdentityBlock = async (db: DbExecutor, telegramUserId: string) => {
 	const rows = await db
-		.select({ telegramUserId: schema.telegramIdentityBlocks.telegramUserId })
+		.select({
+			telegramUserId: schema.telegramIdentityBlocks.telegramUserId,
+			lastUserId: schema.telegramIdentityBlocks.lastUserId,
+		})
 		.from(schema.telegramIdentityBlocks)
 		.where(eq(schema.telegramIdentityBlocks.telegramUserId, telegramUserId))
 		.limit(1)
 	return rows[0] ?? null
+}
+
+const getTelegramSignInState = async (
+	db: DbExecutor,
+	telegramUserId: string,
+	options?: { hasExistingAccount?: boolean },
+): Promise<TelegramSignInState> => {
+	const block = await findIdentityBlock(db, telegramUserId)
+	const disposition = resolveTelegramSignInDisposition({
+		hasExistingAccount: options?.hasExistingAccount ?? false,
+		hasIdentityBlock: Boolean(block),
+	})
+
+	if (disposition === "blocked") {
+		return {
+			status: "blocked",
+			telegramUserId,
+			lastUserId: block?.lastUserId ?? null,
+		}
+	}
+
+	return { status: "allowed" }
 }
 
 const clearIdentityBlock = async (db: DbExecutor, telegramUserId: string) => {
@@ -237,6 +275,10 @@ const createIdentityBlock = async (db: Database, telegramUserId: string, userId:
 }
 
 export const createTelegramIdentityService = (db: Database): TelegramIdentityServiceApi => ({
+	async getSignInState(telegramUserId) {
+		return getTelegramSignInState(db, telegramUserId)
+	},
+
 	async provisionFromBot(input) {
 		const telegramUserId = toTelegramUserId(input.profile)
 		const existingAccount = await findAccountByTelegramUserId(db, telegramUserId)
@@ -306,26 +348,35 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 				setEmailOnEmpty: true,
 			})
 			await updateAccountFromTelegram(db, existingAccount.id, input)
-			return { userId: existingAccount.userId, created: false }
+			return { status: "signed-in", userId: existingAccount.userId, created: false }
+		}
+
+		const signInState = await getTelegramSignInState(db, telegramUserId)
+		if (signInState.status === "blocked") {
+			return signInState
 		}
 
 		try {
 			return await db.transaction(async (tx) => {
 				const executor: DbExecutor = tx
-				await clearIdentityBlock(executor, telegramUserId)
 				const recheck = await findAccountByTelegramUserId(executor, telegramUserId)
 				if (recheck) {
 					await updateUserFromTelegram(executor, recheck.userId, input, {
 						setEmailOnEmpty: true,
 					})
 					await updateAccountFromTelegram(executor, recheck.id, input)
-					return { userId: recheck.userId, created: false }
+					return { status: "signed-in" as const, userId: recheck.userId, created: false }
+				}
+
+				const recheckSignInState = await getTelegramSignInState(executor, telegramUserId)
+				if (recheckSignInState.status === "blocked") {
+					return recheckSignInState
 				}
 
 				const user = createUserFromTelegram(input.profile, { setEmail: true })
 				await tx.insert(schema.users).values(user)
 				await tx.insert(schema.accounts).values(createAccountFromTelegram(user.id, input))
-				return { userId: user.id, created: true }
+				return { status: "signed-in" as const, userId: user.id, created: true }
 			})
 		} catch (error) {
 			const retried = await findAccountByTelegramUserId(db, telegramUserId)
@@ -334,7 +385,12 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 					setEmailOnEmpty: true,
 				})
 				await updateAccountFromTelegram(db, retried.id, input)
-				return { userId: retried.userId, created: false }
+				return { status: "signed-in", userId: retried.userId, created: false }
+			}
+
+			const retriedSignInState = await getTelegramSignInState(db, telegramUserId)
+			if (retriedSignInState.status === "blocked") {
+				return retriedSignInState
 			}
 			throw error
 		}

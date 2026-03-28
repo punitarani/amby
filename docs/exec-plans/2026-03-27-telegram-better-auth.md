@@ -103,6 +103,7 @@ Build an internal Telegram Better Auth plugin in `@amby/auth` so Telegram authen
 - 2026-03-27: Added `apps/mock` browser verification support through `TelegramAuthPanel` and `/api/telegram-auth`, which signs mock Login Widget and Mini App payloads with the configured bot token.
 - 2026-03-27: Updated docs and env defaults so `BETTER_AUTH_URL` points at the API origin root (`http://localhost:3001` in local development).
 - 2026-03-27: Verified targeted tests, typechecks, migration generation, and lint after tightening the client typings for Better Auth fetch responses.
+- 2026-03-27: Addressed review findings by backfilling `accounts.telegram_chat_id` from legacy `accounts.metadata.chatId`, preserving unlink tombstones during widget/Mini App sign-in when no linked Telegram account exists, and making Telegram OIDC consult `TelegramIdentityService.getSignInState(...)` before generic OAuth can create or relink a Telegram account.
 
 ## Surprises / discoveries
 
@@ -111,6 +112,7 @@ Build an internal Telegram Better Auth plugin in `@amby/auth` so Telegram authen
 - `BETTER_AUTH_URL` is currently defaulted to the web origin, but Better Auth’s runtime expects the API origin/root and appends `/api/auth` via `basePath`.
 - Better Auth client action fetches are typed loosely enough that the new Telegram client helpers needed explicit response envelopes to satisfy downstream app typechecking.
 - Telegram Mini App verification is sensitive to the exact HMAC derivation path; the second-stage HMAC must use the raw bytes from the first HMAC, not a hex string.
+- Better Auth’s generic OAuth callback path bypasses Amby-specific unlink protections unless Telegram-specific policy is checked before `handleOAuthUserInfo(...)` runs.
 
 ## Decision log
 
@@ -121,6 +123,8 @@ Build an internal Telegram Better Auth plugin in `@amby/auth` so Telegram authen
 - Reuse Better Auth `genericOAuth` for Telegram OIDC rather than introducing a second custom callback stack.
 - Keep browser explicit relink flows responsible for clearing tombstones; bot traffic remains blocked until the user explicitly relinks.
 - Enforce safe unlink by requiring at least one other linked auth account before Telegram can be removed.
+- Keep Telegram OIDC on Better Auth `genericOAuth`, but gate `getUserInfo(...)` through `TelegramIdentityService.getSignInState(...)` so unlink tombstones still block account recreation.
+- Keep browser sign-in blocked when a Telegram unlink tombstone exists and no linked Telegram account remains; only authenticated link flows clear the tombstone.
 
 ## Retrospective
 
@@ -137,6 +141,9 @@ Build an internal Telegram Better Auth plugin in `@amby/auth` so Telegram authen
 - Telegram OIDC is wired through Better Auth generic OAuth and maps into `providerId="telegram"`.
 - Bot provisioning still resolves one user/account pair and now updates typed Telegram fields through `TelegramIdentityService`.
 - Delivery-target resolution now reads `accounts.telegramChatId` instead of `accounts.metadata.chatId`.
+- Existing Telegram accounts are backfilled into `accounts.telegram_chat_id` during migration so outbound delivery still works immediately after deploy.
+- `POST /api/auth/telegram/signin` and `POST /api/auth/telegram/miniapp/signin` now reject tombstoned Telegram identities instead of silently creating a second user.
+- Telegram OIDC consults `TelegramIdentityService.getSignInState(...)` and refuses blocked identities before the generic OAuth callback can recreate or relink the provider account.
 
 ## Verification results
 
@@ -146,3 +153,6 @@ Build an internal Telegram Better Auth plugin in `@amby/auth` so Telegram authen
 - 2026-03-27: `bun run --filter @amby/api typecheck` passed. The remaining output is informational TS5 `effect(unnecessaryEffectGen)` language-service messages in `apps/api/src/index.ts` and `apps/api/src/worker.ts`.
 - 2026-03-27: `bun run --filter @amby/mock typecheck` passed.
 - 2026-03-27: `bun run lint` passed.
+- 2026-03-27: `bun test packages/auth` passed again with 12 tests after adding regression coverage for tombstoned browser sign-in decisions and blocked Telegram OIDC user info.
+- 2026-03-27: `bun run --filter @amby/auth typecheck` passed.
+- 2026-03-27: `bun run --filter @amby/api typecheck` passed again. The only output remains informational TS5 `effect(unnecessaryEffectGen)` messages in `apps/api/src/index.ts` and `apps/api/src/worker.ts`.

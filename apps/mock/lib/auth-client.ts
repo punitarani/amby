@@ -1,6 +1,6 @@
 "use client"
 
-import { createAmbyAuthClient } from "@amby/auth"
+import { createAmbyAuthClient } from "@amby/auth/client"
 
 export const createMockAuthClient = (backendUrl: string) =>
 	createAmbyAuthClient({

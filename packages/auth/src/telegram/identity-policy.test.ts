@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test"
-import { canSafelyUnlinkTelegram, getTelegramLinkConflict } from "./identity-policy"
+import {
+	canSafelyUnlinkTelegram,
+	getTelegramLinkConflict,
+	resolveTelegramSignInDisposition,
+} from "./identity-policy"
 
 describe("Telegram identity policy", () => {
 	it("blocks unlink when Telegram is the only auth method", () => {
@@ -39,5 +43,32 @@ describe("Telegram identity policy", () => {
 				nextTelegramUserId: "tg-1",
 			}),
 		).toBeNull()
+	})
+
+	it("blocks browser sign-in when Telegram was explicitly unlinked", () => {
+		expect(
+			resolveTelegramSignInDisposition({
+				hasExistingAccount: false,
+				hasIdentityBlock: true,
+			}),
+		).toBe("blocked")
+	})
+
+	it("allows new browser sign-in when no block exists", () => {
+		expect(
+			resolveTelegramSignInDisposition({
+				hasExistingAccount: false,
+				hasIdentityBlock: false,
+			}),
+		).toBe("create-user")
+	})
+
+	it("prefers the linked account when a stale block still exists", () => {
+		expect(
+			resolveTelegramSignInDisposition({
+				hasExistingAccount: true,
+				hasIdentityBlock: true,
+			}),
+		).toBe("existing-account")
 	})
 })

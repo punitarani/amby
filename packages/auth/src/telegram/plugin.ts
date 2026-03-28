@@ -2,7 +2,7 @@ import type { Env } from "@amby/env"
 import { APIError, createAuthEndpoint, sessionMiddleware } from "better-auth/api"
 import { setSessionCookie } from "better-auth/cookies"
 import type { BetterAuthPlugin } from "better-auth/types"
-import { TELEGRAM_PROVIDER_ID } from "./constants"
+import { TELEGRAM_PROVIDER_ID, TELEGRAM_RELINK_REQUIRED_MESSAGE } from "./constants"
 import type { TelegramIdentityServiceApi } from "./identity-service"
 import { telegramMiniAppSignInSchema, telegramWidgetEndpointBodySchema } from "./schemas"
 import {
@@ -88,6 +88,18 @@ const createSessionForUser = async (
 	return user
 }
 
+const unwrapTelegramSignInResult = (
+	result: Awaited<ReturnType<TelegramIdentityServiceApi["signInOrCreate"]>>,
+) => {
+	if (result.status === "blocked") {
+		throw APIError.fromStatus("FORBIDDEN", {
+			message: TELEGRAM_RELINK_REQUIRED_MESSAGE,
+		})
+	}
+
+	return result
+}
+
 export const telegram = ({ env, telegramIdentity }: TelegramPluginOptions) =>
 	({
 		id: "telegram",
@@ -169,10 +181,12 @@ export const telegram = ({ env, telegramIdentity }: TelegramPluginOptions) =>
 						maxAuthAgeSeconds: getMaxAuthAgeSeconds(env),
 					})
 
-					const result = await telegramIdentity.signInOrCreate({
-						source: "widget",
-						profile: parseTelegramWidgetProfile(ctx.body),
-					})
+					const result = unwrapTelegramSignInResult(
+						await telegramIdentity.signInOrCreate({
+							source: "widget",
+							profile: parseTelegramWidgetProfile(ctx.body),
+						}),
+					)
 					const user = await createSessionForUser(ctx, result.userId, ctx.body.rememberMe)
 
 					return ctx.json({
@@ -243,10 +257,12 @@ export const telegram = ({ env, telegramIdentity }: TelegramPluginOptions) =>
 						maxAuthAgeSeconds: getMaxAuthAgeSeconds(env),
 					})
 
-					const result = await telegramIdentity.signInOrCreate({
-						source: "miniapp",
-						profile: parseTelegramMiniAppProfile(payload),
-					})
+					const result = unwrapTelegramSignInResult(
+						await telegramIdentity.signInOrCreate({
+							source: "miniapp",
+							profile: parseTelegramMiniAppProfile(payload),
+						}),
+					)
 					const user = await createSessionForUser(ctx, result.userId)
 
 					return ctx.json({

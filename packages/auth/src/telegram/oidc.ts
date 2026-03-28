@@ -1,6 +1,7 @@
 import type { Env } from "@amby/env"
 import type { GenericOAuthConfig } from "better-auth/plugins/generic-oauth"
 import { TELEGRAM_OIDC_DISCOVERY_URL } from "./constants"
+import type { TelegramIdentityServiceApi } from "./identity-service"
 import { decodeBase64UrlJson } from "./verification"
 
 type TelegramOidcDiscovery = {
@@ -52,6 +53,11 @@ let cachedJwks:
 	| undefined
 
 const textEncoder = new TextEncoder()
+
+export const resetTelegramOidcCachesForTests = () => {
+	cachedDiscovery = undefined
+	cachedJwks = undefined
+}
 
 const getTelegramOidcClientId = (
 	env: Pick<Env, "TELEGRAM_BOT_TOKEN" | "TELEGRAM_OIDC_CLIENT_ID">,
@@ -220,7 +226,7 @@ export const verifyTelegramOidcIdToken = async (idToken: string, options: { clie
 	}
 }
 
-export const createTelegramOidcConfig = (
+export const createTelegramOidcConfig = (options: {
 	env: Pick<
 		Env,
 		| "TELEGRAM_BOT_TOKEN"
@@ -228,18 +234,19 @@ export const createTelegramOidcConfig = (
 		| "TELEGRAM_OIDC_CLIENT_SECRET"
 		| "TELEGRAM_OIDC_REQUEST_PHONE"
 		| "TELEGRAM_OIDC_REQUEST_BOT_ACCESS"
-	>,
-): GenericOAuthConfig | undefined => {
-	const clientId = getTelegramOidcClientId(env)
-	if (!clientId || !env.TELEGRAM_OIDC_CLIENT_SECRET) {
+	>
+	telegramIdentity: Pick<TelegramIdentityServiceApi, "getSignInState">
+}): GenericOAuthConfig | undefined => {
+	const clientId = getTelegramOidcClientId(options.env)
+	if (!clientId || !options.env.TELEGRAM_OIDC_CLIENT_SECRET) {
 		return undefined
 	}
 
 	const scopes = ["openid", "profile"]
-	if (env.TELEGRAM_OIDC_REQUEST_PHONE) {
+	if (options.env.TELEGRAM_OIDC_REQUEST_PHONE) {
 		scopes.push("phone")
 	}
-	if (env.TELEGRAM_OIDC_REQUEST_BOT_ACCESS) {
+	if (options.env.TELEGRAM_OIDC_REQUEST_BOT_ACCESS) {
 		scopes.push("telegram:bot_access")
 	}
 
@@ -247,14 +254,19 @@ export const createTelegramOidcConfig = (
 		providerId: "telegram",
 		discoveryUrl: TELEGRAM_OIDC_DISCOVERY_URL,
 		clientId,
-		clientSecret: env.TELEGRAM_OIDC_CLIENT_SECRET,
+		clientSecret: options.env.TELEGRAM_OIDC_CLIENT_SECRET,
 		scopes,
 		pkce: true,
 		getUserInfo: async (tokens) => {
 			if (!tokens.idToken) {
 				throw new Error("Telegram OIDC did not return an id_token")
 			}
-			return verifyTelegramOidcIdToken(tokens.idToken, { clientId })
+			const profile = await verifyTelegramOidcIdToken(tokens.idToken, { clientId })
+			const signInState = await options.telegramIdentity.getSignInState(profile.id)
+			if (signInState.status === "blocked") {
+				return null
+			}
+			return profile
 		},
 		mapProfileToUser: async (profile) => ({
 			name: typeof profile.name === "string" ? profile.name : undefined,
