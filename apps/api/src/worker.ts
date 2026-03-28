@@ -1,3 +1,4 @@
+import { AttachmentService } from "@amby/attachments"
 import { AuthService, resolveAuthCorsOrigin } from "@amby/auth"
 import { type ChatSdkDeps, getOrCreateChat, type TelegramQueueMessage } from "@amby/channels"
 import { getPostHogClient } from "@amby/channels/posthog"
@@ -139,11 +140,7 @@ app.use("/api/auth/*", async (c, next) =>
 app.on(["GET", "POST"], "/api/auth/*", async (c) => {
 	const runtime = makeRuntimeForConsumer(c.env)
 	try {
-		const auth = await runtime.runPromise(
-			Effect.gen(function* () {
-				return yield* AuthService
-			}),
-		)
+		const auth = await runtime.runPromise(AuthService)
 		return auth.handler(c.req.raw)
 	} finally {
 		await runtime.dispose()
@@ -152,6 +149,31 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
 
 app.get("/", (c) => c.json(getHomeResponse()))
 app.get("/health", (c) => c.json({ status: "ok" }))
+
+app.get("/attachments/:id", async (c) => {
+	const runtime = makeRuntimeForConsumer(c.env)
+	try {
+		const expires = c.req.query("expires") ?? ""
+		const signature = c.req.query("sig") ?? ""
+		const response = await runtime.runPromise(
+			Effect.gen(function* () {
+				const attachments = yield* AttachmentService
+				yield* attachments.verifySignedDownload({
+					attachmentId: c.req.param("id"),
+					expires,
+					signature,
+				})
+				return yield* attachments.getDownloadResponse(c.req.param("id"))
+			}).pipe(Effect.either),
+		)
+		if (Either.isLeft(response)) {
+			return c.json({ error: "Unauthorized" }, 401)
+		}
+		return response.right
+	} finally {
+		await runtime.dispose()
+	}
+})
 
 // White-label connect link — resolves UUID to the underlying Composio auth URL
 app.get("/link/:id", async (c) => {

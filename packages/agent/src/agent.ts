@@ -1,6 +1,13 @@
+import { AttachmentService } from "@amby/attachments"
 import { BrowserService } from "@amby/browser"
 import { createComputerTools, createCuaTools, SandboxService, TaskSupervisor } from "@amby/computer"
-import { type Platform, PluginRegistryService, TaskStore } from "@amby/core"
+import {
+	type ConversationMessagePart,
+	type Platform,
+	PluginRegistryService,
+	type StructuredUserMessage,
+	TaskStore,
+} from "@amby/core"
 import { DbService, schema } from "@amby/db"
 import { EnvService } from "@amby/env"
 import type { ToolSet } from "ai"
@@ -25,6 +32,20 @@ import type { AgentRunResult, StreamPart } from "./types/agent"
 export class ConversationRuntime extends Context.Tag("ConversationRuntime")<
 	ConversationRuntime,
 	{
+		readonly handleStructuredMessage: (
+			conversationId: string,
+			message: StructuredUserMessage,
+			metadata?: Record<string, unknown>,
+			onReply?: ReplyFn,
+			onTextDelta?: (text: string) => void,
+		) => Effect.Effect<AgentRunResult, AgentError>
+		readonly handleStructuredBatch: (
+			conversationId: string,
+			messages: ReadonlyArray<StructuredUserMessage>,
+			metadata?: Record<string, unknown>,
+			onReply?: ReplyFn,
+			onTextDelta?: (text: string) => void,
+		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly handleMessage: (
 			conversationId: string,
 			content: string,
@@ -66,6 +87,7 @@ export const makeConversationRuntimeLive = (userId: string) =>
 			const taskSupervisor = yield* TaskSupervisor
 			const taskStore = yield* TaskStore
 			const pluginRegistry = yield* PluginRegistryService
+			const attachments = yield* AttachmentService
 			const env = yield* EnvService
 			initializeTelemetry({
 				apiKey: env.BRAINTRUST_API_KEY,
@@ -136,25 +158,55 @@ export const makeConversationRuntimeLive = (userId: string) =>
 				synopsisCurrentThreadIfOverflowsAfterSave,
 				browser: browserService,
 				supervisor: taskSupervisor,
+				attachments,
 				schema,
 			})
 
 			const runTurn = (params: {
 				conversationId: string
 				mode: "message" | "batched-message" | "stream-message"
-				requestMessages: ReadonlyArray<{ role: "user"; content: string }>
+				requestMessages: ReadonlyArray<{
+					role: "user"
+					contentText: string
+					parts: ConversationMessagePart[]
+				}>
 				metadata?: Record<string, unknown>
 				onReply?: ReplyFn
 				onTextDelta?: (text: string) => void
 				onPart?: (part: StreamPart) => void
 			}) => withTelemetryFlush(handleTurn(makeEngineConfig(params.conversationId), params))
 
+			const toStructuredMessage = (content: string): StructuredUserMessage => ({
+				contentText: content,
+				parts: [{ type: "text", text: content }],
+			})
+
 			return {
+				handleStructuredMessage: (conversationId, message, metadata, onReply, onTextDelta) =>
+					runTurn({
+						conversationId,
+						mode: "message",
+						requestMessages: [{ role: "user", ...message }],
+						metadata,
+						onReply,
+						onTextDelta,
+					}),
+
+				handleStructuredBatch: (conversationId, messages, metadata, onReply, onTextDelta) =>
+					runTurn({
+						conversationId,
+						mode: "batched-message",
+						requestMessages: messages.map((message) => ({ role: "user" as const, ...message })),
+						metadata,
+						onReply,
+						onTextDelta,
+					}),
+
 				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>
 					runTurn({
 						conversationId,
 						mode: "message",
-						requestMessages: [{ role: "user", content }],
+						requestMessages: [{ role: "user", ...toStructuredMessage(content) }],
 						metadata,
 						onReply,
 						onTextDelta,
@@ -164,7 +216,10 @@ export const makeConversationRuntimeLive = (userId: string) =>
 					runTurn({
 						conversationId,
 						mode: "batched-message",
-						requestMessages: messages.map((content) => ({ role: "user" as const, content })),
+						requestMessages: messages.map((content) => ({
+							role: "user" as const,
+							...toStructuredMessage(content),
+						})),
 						metadata,
 						onReply,
 						onTextDelta,
@@ -174,7 +229,7 @@ export const makeConversationRuntimeLive = (userId: string) =>
 					runTurn({
 						conversationId,
 						mode: "stream-message",
-						requestMessages: [{ role: "user", content }],
+						requestMessages: [{ role: "user", ...toStructuredMessage(content) }],
 						onPart,
 					}),
 

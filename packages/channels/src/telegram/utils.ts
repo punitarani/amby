@@ -1,9 +1,16 @@
+import { getFilenameExtension, summarizeAttachmentCounts } from "@amby/attachments"
 import {
 	TELEGRAM_RELINK_REQUIRED_MESSAGE,
 	TelegramIdentityService,
 	type TelegramProvisionInput,
 } from "@amby/auth"
 import { kickOffSandboxProvisionIfNeeded, sandboxWorkflowId } from "@amby/computer/sandbox-config"
+import type {
+	AttachmentKind,
+	BufferedAttachmentPart,
+	BufferedInboundMessage,
+	BufferedMessagePart,
+} from "@amby/core"
 import { ComputeStore, CoreError } from "@amby/core"
 import { DbService, schema } from "@amby/db"
 import { EnvService, normalizeTelegramBotUsername } from "@amby/env"
@@ -30,10 +37,30 @@ export interface TelegramFrom {
 export interface TelegramMessage {
 	message_id: number
 	text?: string
+	caption?: string
 	chat: { id: number; type: string; first_name?: string; last_name?: string; username?: string }
 	from?: TelegramFrom
 	date: number
 	entities?: unknown[]
+	media_group_id?: string
+	photo?: TelegramPhotoSize[]
+	document?: TelegramDocument
+}
+
+export interface TelegramPhotoSize {
+	file_id: string
+	file_unique_id?: string
+	width: number
+	height: number
+	file_size?: number
+}
+
+export interface TelegramDocument {
+	file_id: string
+	file_unique_id?: string
+	file_name?: string
+	mime_type?: string
+	file_size?: number
 }
 
 export interface TelegramUpdate {
@@ -46,11 +73,7 @@ export interface TelegramQueueMessage {
 	receivedAt: number
 }
 
-export interface BufferedMessage {
-	text: string
-	messageId: number
-	date: number
-}
+export type BufferedMessage = BufferedInboundMessage
 
 export const TELEGRAM_COMMANDS = ["/start", "/stop", "/help"] as const
 
@@ -61,6 +84,148 @@ export type ParsedTelegramCommand = {
 	payload?: string
 	rawText: string
 }
+
+function inferBufferedAttachmentKind(params: {
+	mediaType?: string | null
+	filename?: string | null
+}): AttachmentKind {
+	const mediaType = params.mediaType?.trim().toLowerCase() ?? ""
+	const ext = getFilenameExtension(params.filename)
+	if (mediaType.startsWith("image/")) return "image"
+	if (mediaType === "application/pdf" || ext === "pdf") return "pdf"
+	if (
+		mediaType === "text/plain" ||
+		mediaType === "text/markdown" ||
+		mediaType === "text/csv" ||
+		mediaType === "application/json" ||
+		ext === "txt" ||
+		ext === "md" ||
+		ext === "markdown" ||
+		ext === "csv" ||
+		ext === "json"
+	) {
+		return "text"
+	}
+	return mediaType ? "document" : "binary"
+}
+
+function buildBufferedAttachmentPartFromPhoto(
+	message: TelegramMessage,
+): BufferedAttachmentPart | null {
+	const variants = message.photo ?? []
+	if (variants.length === 0) return null
+	const photo = [...variants].sort((left, right) => {
+		const leftScore = left.file_size ?? left.width * left.height
+		const rightScore = right.file_size ?? right.width * right.height
+		return rightScore - leftScore
+	})[0]
+	if (!photo) return null
+	return {
+		type: "attachment",
+		attachment: {
+			kind: "image",
+			mediaType: "image/jpeg",
+			sizeBytes: photo.file_size ?? null,
+			title: "Telegram photo",
+			metadata: {
+				width: photo.width,
+				height: photo.height,
+			},
+			source: {
+				kind: "telegram",
+				telegramType: "photo",
+				fileId: photo.file_id,
+				fileUniqueId: photo.file_unique_id ?? null,
+				chatId: message.chat.id,
+				sourceMessageId: message.message_id,
+				mediaGroupId: message.media_group_id ?? null,
+				mediaType: "image/jpeg",
+				sizeBytes: photo.file_size ?? null,
+			},
+		},
+	}
+}
+
+function buildBufferedAttachmentPartFromDocument(
+	message: TelegramMessage,
+): BufferedAttachmentPart | null {
+	const document = message.document
+	if (!document) return null
+	const kind = inferBufferedAttachmentKind({
+		mediaType: document.mime_type,
+		filename: document.file_name,
+	})
+	return {
+		type: "attachment",
+		attachment: {
+			kind,
+			mediaType: document.mime_type ?? null,
+			filename: document.file_name ?? null,
+			sizeBytes: document.file_size ?? null,
+			title: document.file_name ?? "Telegram file",
+			source: {
+				kind: "telegram",
+				telegramType: "document",
+				fileId: document.file_id,
+				fileUniqueId: document.file_unique_id ?? null,
+				chatId: message.chat.id,
+				sourceMessageId: message.message_id,
+				mediaGroupId: message.media_group_id ?? null,
+				mediaType: document.mime_type ?? null,
+				filename: document.file_name ?? null,
+				sizeBytes: document.file_size ?? null,
+			},
+		},
+	}
+}
+
+export function buildBufferedTelegramMessage(
+	message: TelegramMessage,
+): BufferedInboundMessage | null {
+	const parts: BufferedMessagePart[] = []
+	const text = (message.text ?? message.caption ?? "").trim()
+	if (text) {
+		parts.push({ type: "text", text })
+	}
+	const photoPart = buildBufferedAttachmentPartFromPhoto(message)
+	if (photoPart) parts.push(photoPart)
+	const documentPart = buildBufferedAttachmentPartFromDocument(message)
+	if (documentPart) parts.push(documentPart)
+	if (parts.length === 0) return null
+
+	const attachmentParts = parts.filter(
+		(part): part is BufferedAttachmentPart => part.type === "attachment",
+	)
+	const textSummary =
+		text || summarizeAttachmentCounts(attachmentParts.map((p) => ({ kind: p.attachment.kind })))
+
+	return {
+		sourceMessageId: message.message_id,
+		date: message.date,
+		textSummary,
+		parts,
+		mediaGroupId: message.media_group_id ?? null,
+		from: message.from ? { ...message.from } : null,
+		rawSource: {
+			platform: "telegram",
+			messageIds: [message.message_id],
+		},
+	}
+}
+
+// --- Utilities ---
+
+export const buildProfileMetadata = (
+	from: TelegramFrom,
+	chatId: number,
+): Record<string, unknown> => ({
+	chatId,
+	username: from.username ?? null,
+	firstName: from.first_name,
+	lastName: from.last_name ?? null,
+	languageCode: from.language_code ?? null,
+	isPremium: from.is_premium ?? false,
+})
 
 const toTelegramProvisionInput = (from: TelegramFrom, chatId: number): TelegramProvisionInput => ({
 	source: "bot",

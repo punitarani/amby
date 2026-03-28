@@ -1,3 +1,4 @@
+export * from "./attachment"
 export * from "./automation"
 export * from "./compute"
 export * from "./conversation"

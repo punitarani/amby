@@ -55,6 +55,7 @@ export interface Env {
 	readonly TELEGRAM_BOT_USERNAME: string
 	readonly TELEGRAM_WEBHOOK_SECRET: string
 	readonly TELEGRAM_API_BASE_URL?: string
+	readonly ATTACHMENTS_SIGNING_SECRET: string
 	readonly TELEGRAM_LOGIN_WIDGET_ENABLED: boolean
 	readonly TELEGRAM_MINI_APP_ENABLED: boolean
 	readonly TELEGRAM_OIDC_CLIENT_ID: string

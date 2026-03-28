@@ -1,6 +1,7 @@
+import { type AttachmentService, collectAssistantReplyParts } from "@amby/attachments"
 import type { BrowserService } from "@amby/browser"
 import type { TaskSupervisor } from "@amby/computer"
-import type { PluginRegistry, TaskStoreService } from "@amby/core"
+import type { ConversationMessagePart, PluginRegistry, TaskStoreService } from "@amby/core"
 import type { Database, DbError } from "@amby/db"
 import { type LanguageModel, stepCountIs, ToolLoopAgent, type ToolSet, tool } from "ai"
 import type { Context } from "effect"
@@ -194,6 +195,8 @@ export interface ConversationEngineConfig {
 	readonly browser: Context.Tag.Service<typeof BrowserService>
 	/** Task supervisor (for execution plan + query). */
 	readonly supervisor: Context.Tag.Service<typeof TaskSupervisor>
+	/** Attachment service for current-turn multimodal resolution and artifact delivery. */
+	readonly attachments: Context.Tag.Service<typeof AttachmentService>
 	/** Schema for message persistence. */
 	readonly schema: typeof import("@amby/db").schema
 }
@@ -201,11 +204,61 @@ export interface ConversationEngineConfig {
 export interface TurnRequest {
 	readonly conversationId: string
 	readonly mode: AgentRunConfig["request"]["mode"]
-	readonly requestMessages: ReadonlyArray<{ role: "user"; content: string }>
+	readonly requestMessages: ReadonlyArray<{
+		role: "user"
+		contentText: string
+		parts: ConversationMessagePart[]
+	}>
 	readonly metadata?: Record<string, unknown>
 	readonly onReply?: ReplyFn
 	readonly onTextDelta?: (text: string) => void
 	readonly onPart?: (part: StreamPart) => void
+}
+
+function summarizeReplyContent(parts: ReadonlyArray<ConversationMessagePart>): string {
+	const text = parts
+		.flatMap((part) => (part.type === "text" ? [part.text.trim()] : []))
+		.filter(Boolean)
+		.join("\n\n")
+		.trim()
+	if (text) return text
+	const attachmentCount = parts.filter((part) => part.type === "attachment").length
+	return attachmentCount > 0
+		? `Shared ${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}.`
+		: ""
+}
+
+function collectReplyArtifacts(params: {
+	execution?: AgentRunResult["execution"]
+	queryResult?: QueryExecutionResult
+}) {
+	const byAttachmentId = new Map<
+		string,
+		{
+			kind: string
+			title?: string
+			attachmentId: string
+			filename?: string
+			mediaType?: string
+			metadata?: Record<string, unknown>
+		}
+	>()
+	const sources = [...(params.execution?.tasks ?? []), ...(params.queryResult?.executions ?? [])]
+	for (const source of sources) {
+		for (const artifact of source.artifacts ?? []) {
+			if (!artifact.attachmentId) continue
+			if (byAttachmentId.has(artifact.attachmentId)) continue
+			byAttachmentId.set(artifact.attachmentId, {
+				kind: artifact.kind,
+				title: artifact.title,
+				attachmentId: artifact.attachmentId,
+				filename: artifact.filename,
+				mediaType: artifact.mediaType,
+				metadata: artifact.metadata,
+			})
+		}
+	}
+	return [...byAttachmentId.values()]
 }
 
 /**
@@ -221,7 +274,22 @@ export function handleTurn(
 	let rootTraceRef: TraceWriter | undefined
 
 	return Effect.gen(function* () {
-		const inboundText = requestMessages.map((m) => m.content).join("\n\n")
+		const inboundText = requestMessages.map((message) => message.contentText).join("\n\n")
+		const currentAttachments = requestMessages.flatMap((message) =>
+			message.parts.flatMap((part) =>
+				part.type === "attachment" && part.attachment.status === "ready"
+					? [
+							{
+								id: part.attachment.id,
+								filename: part.attachment.filename ?? null,
+								title: part.attachment.title ?? null,
+								mediaType: part.attachment.mediaType,
+								kind: part.attachment.kind,
+							},
+						]
+					: [],
+			),
+		)
 		const baseModel = config.getModel()
 		const threadCtx = yield* config.resolveThread(query, conversationId, inboundText, baseModel)
 
@@ -265,7 +333,10 @@ export function handleTurn(
 			threadId: threadCtx.threadId,
 			mode,
 			environment: config.environment,
-			requestMetadata: metadata,
+			requestMetadata: {
+				...(metadata ?? {}),
+				currentAttachments,
+			},
 			modelId: config.defaultModelId,
 			highReasoningModelId: config.highReasoningModelId,
 			routerModelId: config.routerModelId,
@@ -349,6 +420,7 @@ export function handleTurn(
 						query,
 						taskStore: config.taskStore,
 						config: runConfig,
+						attachments: config.attachments,
 						getModel: config.getModel,
 						toolGroups: toolGroups,
 						browser: config.browser,
@@ -430,14 +502,6 @@ export function handleTurn(
 				modelId: config.defaultModelId,
 				agentRole: "conversation",
 			}),
-			experimental_onStepStart: async (event) => {
-				await Runtime.runPromise(rt)(
-					rootTrace.append("model_request", {
-						stepNumber: event.stepNumber,
-						activeTools: event.activeTools,
-					}),
-				)
-			},
 			onStepFinish: async (event) => {
 				await Runtime.runPromise(rt)(
 					rootTrace.append("model_response", {
@@ -448,10 +512,25 @@ export function handleTurn(
 			},
 		})
 
-		const messages = [
-			...prepared.history,
-			...requestMessages.map((m) => ({ role: "user" as const, content: m.content })),
-		]
+		const currentTurnMessages = yield* Effect.forEach(requestMessages, (message) =>
+			config.attachments.resolveModelMessageContent(message.parts).pipe(
+				Effect.mapError(
+					(error) =>
+						new AgentError({
+							message: `Failed to build multimodal model input: ${error.message}`,
+							cause: error,
+						}),
+				),
+				Effect.map((content) => ({
+					role: "user" as const,
+					content,
+				})),
+			),
+		)
+
+		const messages = [...prepared.history, ...currentTurnMessages] as NonNullable<
+			Parameters<typeof agent.generate>[0]["messages"]
+		>
 
 		const result = yield* Effect.tryPromise({
 			try: async () => {
@@ -505,33 +584,93 @@ export function handleTurn(
 		}
 		const userMetadata = metadata ? { ...metadata, ...threadMeta } : threadMeta
 		for (const m of requestMessages) {
-			yield* query((database) =>
+			const insertedRows = yield* query((database) =>
 				database
 					.insert(config.schema.messages)
 					.values({
 						conversationId,
 						role: "user",
-						content: m.content,
+						content: m.contentText,
+						partsJson: m.parts,
 						threadId: threadCtx.threadId,
 						metadata: userMetadata,
 					})
 					.returning({ id: config.schema.messages.id }),
 			)
+			if (insertedRows[0]?.id) {
+				yield* config.attachments
+					.linkMessageAttachments({
+						userId,
+						conversationId,
+						threadId: threadCtx.threadId,
+						messageId: insertedRows[0].id,
+						role: "user",
+						parts: m.parts,
+					})
+					.pipe(
+						Effect.mapError(
+							(error) =>
+								new AgentError({
+									message: `Failed to link inbound attachments: ${error.message}`,
+									cause: error,
+								}),
+						),
+					)
+			}
 		}
 
-		const savedRows = result.text.trim()
+		const replyArtifacts = collectReplyArtifacts({
+			execution: state.execution
+				? {
+						mode: state.execution.mode,
+						rootTraceId: rootTrace.runId,
+						tasks: state.execution.taskResults,
+						backgroundTasks: state.execution.backgroundTasks,
+					}
+				: undefined,
+			queryResult: state.queryResult,
+		})
+		const replyParts = collectAssistantReplyParts({
+			text: result.text,
+			artifacts: replyArtifacts,
+		})
+		const assistantContent = summarizeReplyContent(replyParts)
+
+		const savedRows = assistantContent
 			? yield* query((database) =>
 					database
 						.insert(config.schema.messages)
 						.values({
 							conversationId,
 							role: "assistant",
-							content: result.text,
+							content: assistantContent,
+							partsJson: replyParts.length > 0 ? replyParts : undefined,
 							threadId: threadCtx.threadId,
 						})
 						.returning({ id: config.schema.messages.id }),
 				)
 			: ([] as Array<{ id: string }>)
+
+		if (savedRows[0]?.id && replyParts.length > 0) {
+			yield* config.attachments
+				.linkMessageAttachments({
+					userId,
+					conversationId,
+					threadId: threadCtx.threadId,
+					messageId: savedRows[0].id,
+					role: "assistant",
+					parts: replyParts,
+				})
+				.pipe(
+					Effect.mapError(
+						(error) =>
+							new AgentError({
+								message: `Failed to link assistant attachments: ${error.message}`,
+								cause: error,
+							}),
+					),
+				)
+		}
 
 		yield* rootTrace.linkMessage(savedRows[0]?.id)
 		yield* config.synopsisCurrentThreadIfOverflowsAfterSave(
@@ -562,7 +701,7 @@ export function handleTurn(
 
 		const agentResult: AgentRunResult = {
 			status: state.execution?.status ?? "completed",
-			userResponse: { text: result.text },
+			userResponse: { text: result.text, parts: replyParts },
 			execution,
 			sideEffects: {
 				memoriesSaved: state.execution?.sideEffects.memoriesSaved,

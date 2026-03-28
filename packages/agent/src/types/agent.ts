@@ -1,3 +1,4 @@
+import type { ConversationMessagePart } from "@amby/core"
 import type { ExecutionMode, SpecialistKind, TaskStatus } from "@amby/db"
 import type { RunEnvironment } from "../run-metadata"
 import type { ExecutionTaskResult } from "./execution"
@@ -63,6 +64,7 @@ export type AgentRunResult = {
 	status: "completed" | "partial" | "failed"
 	userResponse: {
 		text: string
+		parts: ConversationMessagePart[]
 		followups?: string[]
 	}
 	execution: {

@@ -21,24 +21,28 @@ erDiagram
     users ||--o{ telegram_identity_blocks : "last linked"
     users ||--o{ conversations : owns
     users ||--o{ tasks : owns
-    users ||--o{ jobs : owns
+    users ||--o{ attachments : owns
     users ||--o{ memories : owns
     users ||--|| user_volumes : owns
 
     %% Conversations
     conversations ||--o{ conversation_threads : contains
     conversations ||--o{ messages : contains
+    conversations ||--o{ attachments : stores
     conversations ||--o{ traces : has
     conversations ||--o{ tasks : references
     conversation_threads ||--o{ messages : scopes
+    conversation_threads ||--o{ attachments : scopes
     conversation_threads ||--o{ traces : scopes
 
     %% Execution
     messages ||--o{ traces : linked
+    messages ||--o{ attachments : links
     traces ||--o{ trace_events : emits
 
     %% Tasks
     tasks ||--o{ task_events : emits
+    tasks ||--o{ attachments : publishes
     tasks ||--o{ tasks : "parent/root"
 
     %% Compute
@@ -76,9 +80,16 @@ Telegram-specific auth fields:
 |---|---|---|
 | `conversations` | Platform-scoped container. One per user + platform + external key. | unique on `(userId, platform, externalConversationKey)` |
 | `conversation_threads` | Internal routing layer (topic threads). Source: `native`, `reply_chain`, `derived`, `manual`. | Exactly one `isDefault=true` per conversation (partial unique index). Unique `externalThreadKey` per conversation when non-null. |
-| `messages` | User-visible transcript only. Role: `user` or `assistant`. | **Not** the execution log. Indexed by `(conversationId, createdAt)`. |
+| `messages` | User-visible transcript only. Role: `user` or `assistant`. `content` stays compact for routing/readability, `partsJson` stores ordered text/attachment refs. | **Not** the execution log. Indexed by `(conversationId, createdAt)`. |
+| `attachments` | Canonical metadata for inbound Telegram files and published task artifacts. Blob bytes live in private object storage. | Optional unique `dedupeKey` for idempotent ingest. Indexed by user/status, message, task, and conversation. |
 
 Platform types: `telegram`.
+
+Attachment status values: `pending`, `downloading`, `ready`, `failed`, `deleted`.
+
+Attachment direction values: `inbound`, `outbound`.
+
+Attachment source values: `telegram`, `task_artifact`, `assistant`.
 
 ### Execution traces
 
@@ -161,6 +172,8 @@ Notable indexes beyond standard FK indexes:
 - `accounts_provider_account_idx` -- canonical provider/account linkage, including Telegram
 - `conversations_platform_key_idx` -- unique composite for conversation identity
 - `threads_default_unique_idx` -- partial unique ensuring one default thread per conversation
+- `attachments_dedupe_key_unique_idx` -- partial unique idempotency key for inbound attachment ingest
+- `attachments_user_status_idx` -- per-user attachment cleanup and quota queries
 - `sandboxes_user_main_idx` -- partial unique ensuring one active main sandbox per user
 - `tasks_status_heartbeat_idx` -- reaper query for stale running tasks
 - `tasks_runtime_status_heartbeat_idx` -- runtime-specific reaper queries

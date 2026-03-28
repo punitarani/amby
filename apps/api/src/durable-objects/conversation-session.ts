@@ -14,7 +14,7 @@ interface SessionState {
 }
 
 interface IngestPayload {
-	text: string
+	message: BufferedMessage
 	chatId: number
 	messageId: number
 	date: number
@@ -41,12 +41,56 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		const stored = await this.ctx.storage.get<SessionState>("state")
 		if (stored) {
 			this.state = stored
+			// Migrate legacy buffer entries (pre-attachment format)
+			this.state.buffer = this.state.buffer.map((entry) => {
+				const raw = entry as unknown as Record<string, unknown>
+				if ("text" in raw && !("parts" in raw)) {
+					return {
+						sourceMessageId: (raw.messageId as number) ?? 0,
+						date: (raw.date as number) ?? 0,
+						textSummary: (raw.text as string) ?? "",
+						parts: raw.text ? [{ type: "text" as const, text: raw.text as string }] : [],
+						mediaGroupId: null,
+						from: null,
+						rawSource: null,
+					} satisfies BufferedMessage
+				}
+				return entry
+			})
 		}
 		this.hydrated = true
 	}
 
 	private async persist(): Promise<void> {
 		await this.ctx.storage.put("state", this.state)
+	}
+
+	private mergeBufferedMessages(
+		existing: BufferedMessage,
+		incoming: BufferedMessage,
+	): BufferedMessage {
+		const existingText = existing.parts.find((part) => part.type === "text")
+		const incomingText = incoming.parts.find((part) => part.type === "text")
+		const textSummary =
+			existingText?.text.trim() || incomingText?.text.trim() || incoming.textSummary
+		const existingRawIds = Array.isArray(existing.rawSource?.messageIds)
+			? existing.rawSource.messageIds
+			: [existing.sourceMessageId]
+		const incomingRawIds = Array.isArray(incoming.rawSource?.messageIds)
+			? incoming.rawSource.messageIds
+			: [incoming.sourceMessageId]
+		return {
+			sourceMessageId: existing.sourceMessageId,
+			date: Math.min(existing.date, incoming.date),
+			textSummary,
+			parts: [...existing.parts, ...incoming.parts],
+			mediaGroupId: existing.mediaGroupId ?? incoming.mediaGroupId ?? null,
+			from: existing.from ?? incoming.from ?? null,
+			rawSource: {
+				platform: "telegram",
+				messageIds: [...existingRawIds, ...incomingRawIds],
+			},
+		}
 	}
 
 	async ingestMessage(payload: IngestPayload): Promise<void> {
@@ -73,11 +117,19 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		await this.ctx.storage.put("pendingFrom", payload.from)
 
 		// Buffer the message
-		this.state.buffer.push({
-			text: payload.text,
-			messageId: payload.messageId,
-			date: payload.date,
-		})
+		const lastBuffered = this.state.buffer.at(-1)
+		if (
+			lastBuffered?.mediaGroupId &&
+			payload.message.mediaGroupId &&
+			lastBuffered.mediaGroupId === payload.message.mediaGroupId
+		) {
+			this.state.buffer[this.state.buffer.length - 1] = this.mergeBufferedMessages(
+				lastBuffered,
+				payload.message,
+			)
+		} else {
+			this.state.buffer.push(payload.message)
+		}
 
 		if (this.state.status === "processing") {
 			// Agent is already running — forward as interrupt to the active workflow
@@ -92,7 +144,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 						async () => {
 							await instance.sendEvent({
 								type: "user-message",
-								payload: { text: payload.text, messageId: payload.messageId },
+								payload: { message: payload.message, messageId: payload.messageId },
 							})
 						},
 					)

@@ -13,6 +13,7 @@
 	},
 	"dependencies": {
 		"@ai-sdk/provider": "^3.0.0",
+		"@amby/attachments": "workspace:*",
 		"@amby/browser": "workspace:*",
 		"@amby/core": "workspace:*",
 		"@amby/computer": "workspace:*",

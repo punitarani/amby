@@ -1,3 +1,4 @@
+import type { ConversationMessagePart } from "@amby/core"
 import { sql } from "drizzle-orm"
 import {
 	boolean,
@@ -88,6 +89,7 @@ export const messages = pgTable(
 		threadId: uuid("thread_id").references(() => conversationThreads.id, { onDelete: "set null" }),
 		role: text("role").$type<"user" | "assistant">().notNull(),
 		content: text("content").notNull(),
+		partsJson: jsonb("parts_json").$type<ConversationMessagePart[]>(),
 		metadata: jsonb("metadata").$type<Record<string, unknown>>(),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},

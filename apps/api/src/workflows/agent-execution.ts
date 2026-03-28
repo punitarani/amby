@@ -1,14 +1,10 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import { ConversationRuntime, makeConversationRuntimeLive } from "@amby/agent"
+import { AttachmentService } from "@amby/attachments"
 import { TELEGRAM_RELINK_REQUIRED_MESSAGE } from "@amby/auth"
-import {
-	type BufferedMessage,
-	resolveTelegramUser,
-	splitTelegramMessage,
-	type TelegramFrom,
-} from "@amby/channels"
+import { type BufferedMessage, resolveTelegramUser, type TelegramFrom } from "@amby/channels"
+import { ReplySender } from "@amby/core"
 import type { WorkerBindings } from "@amby/env/workers"
-import { createTelegramAdapter } from "@chat-adapter/telegram"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
 import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "../queue/runtime"
@@ -45,21 +41,13 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			},
 		})
 
-		const adapter = createTelegramAdapter({
-			botToken: this.env.TELEGRAM_BOT_TOKEN ?? "",
-			apiBaseUrl: this.env.TELEGRAM_API_BASE_URL,
-			mode: "webhook",
-		})
-		const chatIdStr = String(chatId)
+		const replyTarget = { channel: "telegram" as const, chatId }
 
-		const sendTyping = () => adapter.startTyping(chatIdStr).catch(() => {})
+		const sendTyping = (sender: {
+			startTyping(target: { channel: "telegram"; chatId: number }): Promise<void>
+		}) => sender.startTyping(replyTarget).catch(() => {})
 
 		try {
-			// Step 1: Send typing indicator
-			if (!isSubAgent) {
-				await step.do("typing", () => sendTyping())
-			}
-
 			// Step 2: Always resolve user from Telegram identity to ensure the ID is valid
 			// (the DO may cache a stale userId if the DB was reset)
 			if (from) {
@@ -68,7 +56,19 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 					try {
 						const resolved = await runtime.runPromise(resolveTelegramUser(from, chatId))
 						if (resolved.status === "blocked") {
-							await adapter.postMessage(chatIdStr, TELEGRAM_RELINK_REQUIRED_MESSAGE).catch(() => {})
+							await runtime
+								.runPromise(
+									Effect.gen(function* () {
+										const replySender = yield* ReplySender
+										yield* Effect.tryPromise(() =>
+											replySender.postText(
+												{ channel: "telegram", chatId },
+												TELEGRAM_RELINK_REQUIRED_MESSAGE,
+											),
+										)
+									}),
+								)
+								.catch(() => {})
 							return null
 						}
 						return resolved.userId
@@ -89,10 +89,6 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 
 			// Step 3: Run the agent with streaming
 			const finalUserId = userId
-			const messageTexts = messages.map((m) => m.text)
-			const input = parentContext
-				? `${parentContext}\n\nUser: ${messageTexts.join("\n\n")}`
-				: messageTexts.join("\n\n")
 
 			const response = await step.do(
 				"agent-loop",
@@ -101,97 +97,160 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 					timeout: "5 minutes",
 				},
 				async () => {
-					const typingInterval = setInterval(sendTyping, 4000)
-
-					// Streaming state — post first chunk, then edit every 500ms
+					const runtime = makeAgentRuntimeForConsumer(this.env)
+					let typingInterval: ReturnType<typeof setInterval> | null = null
+					let streamInterval: ReturnType<typeof setInterval> | null = null
 					let streamedText = ""
 					let streamMessageId: string | null = null
 					let isEditing = false
 
-					const flushStream = async () => {
-						if (isEditing || !streamedText) return
-						isEditing = true
-						try {
-							if (!streamMessageId) {
-								const posted = await adapter.postMessage(chatIdStr, streamedText)
-								streamMessageId = posted.id
-							} else {
-								await adapter.editMessage(chatIdStr, streamMessageId, streamedText)
-							}
-						} catch {
-							/* ignore edit errors */
-						} finally {
-							isEditing = false
-						}
-					}
-
-					const streamInterval = !isSubAgent ? setInterval(flushStream, 500) : null
-
-					const onTextDelta = !isSubAgent
-						? (delta: string) => {
-								streamedText += delta
-							}
-						: undefined
-
 					try {
-						const runtime = makeAgentRuntimeForConsumer(this.env)
-						try {
-							const sendReply = (text: string) =>
-								adapter.postMessage(chatIdStr, text).then(() => {})
-							const effect = Effect.gen(function* () {
-								const agent = yield* ConversationRuntime
+						const services = await runtime.runPromise(
+							Effect.gen(function* () {
+								return {
+									agent: yield* ConversationRuntime,
+									replySender: yield* ReplySender,
+									attachments: yield* AttachmentService,
+								}
+							}).pipe(Effect.provide(makeConversationRuntimeLive(finalUserId))),
+						)
+
+						if (!isSubAgent) {
+							await sendTyping(services.replySender)
+							typingInterval = setInterval(() => void sendTyping(services.replySender), 4000)
+						}
+
+						const flushStream = async () => {
+							if (isEditing || !streamedText || isSubAgent) return
+							isEditing = true
+							try {
+								// Cap streaming preview at 4096 to avoid Telegram edit failures
+								const displayText =
+									streamedText.length > 4090 ? `${streamedText.slice(0, 4087)}...` : streamedText
+								if (!streamMessageId) {
+									const draft = await services.replySender.postText(replyTarget, displayText)
+									streamMessageId = draft?.id ?? null
+								} else {
+									await services.replySender.editText(
+										replyTarget,
+										{ id: streamMessageId },
+										displayText,
+									)
+								}
+							} catch {
+								/* ignore draft edit errors */
+							} finally {
+								isEditing = false
+							}
+						}
+
+						if (!isSubAgent) {
+							streamInterval = setInterval(() => void flushStream(), 500)
+						}
+
+						const onTextDelta = !isSubAgent
+							? (delta: string) => {
+									streamedText += delta
+								}
+							: undefined
+
+						const result = await runtime.runPromise(
+							Effect.gen(function* () {
 								const convId =
-									conversationId ?? (yield* agent.ensureConversation("telegram", String(chatId)))
+									conversationId ??
+									(yield* services.agent.ensureConversation("telegram", String(chatId)))
 								conversationId = convId
 
-								if (messageTexts.length > 1) {
-									return yield* agent.handleBatchedMessages(
+								let structuredMessages = yield* services.attachments.ingestBufferedMessages({
+									userId: finalUserId,
+									conversationId: convId,
+									messages,
+								})
+
+								if (parentContext?.trim()) {
+									if (structuredMessages[0]) {
+										structuredMessages = [
+											{
+												contentText:
+													`${parentContext}\n\n${structuredMessages[0].contentText}`.trim(),
+												parts: [
+													{ type: "text", text: parentContext },
+													...structuredMessages[0].parts,
+												],
+											},
+											...structuredMessages.slice(1),
+										]
+									} else {
+										structuredMessages = [
+											{
+												contentText: parentContext,
+												parts: [{ type: "text", text: parentContext }],
+											},
+										]
+									}
+								}
+
+								if (structuredMessages.length > 1) {
+									return yield* services.agent.handleStructuredBatch(
 										convId,
-										messageTexts,
+										structuredMessages,
 										{
-											telegram: { batched: true, messageCount: messageTexts.length },
+											telegram: { batched: true, messageCount: structuredMessages.length },
 										},
-										sendReply,
+										(text) => services.replySender.postText(replyTarget, text).then(() => {}),
 										onTextDelta,
 									)
 								}
-								return yield* agent.handleMessage(convId, input, undefined, sendReply, onTextDelta)
-							}).pipe(Effect.provide(makeConversationRuntimeLive(finalUserId)))
 
-							const result = await runtime.runPromise(effect)
-							const finalText = result.userResponse.text
+								return yield* services.agent.handleStructuredMessage(
+									convId,
+									structuredMessages[0] ?? {
+										contentText: "",
+										parts: [],
+									},
+									undefined,
+									(text) => services.replySender.postText(replyTarget, text).then(() => {}),
+									onTextDelta,
+								)
+							}).pipe(Effect.provide(makeConversationRuntimeLive(finalUserId))),
+						)
 
-							// Finalize streamed message
-							if (streamInterval) clearInterval(streamInterval)
-							if (streamMessageId) {
-								if (finalText.trim()) {
-									const [firstChunk, ...moreChunks] = splitTelegramMessage(finalText)
-									if (firstChunk !== undefined) {
-										await adapter
-											.editMessage(chatIdStr, streamMessageId, firstChunk)
-											.catch(() => {})
-										for (const chunk of moreChunks) {
-											await adapter.postMessage(chatIdStr, chunk)
-										}
-									}
-								} else {
-									// Response empty (tool sent replies) — remove streaming message
-									await adapter.deleteMessage(chatIdStr, streamMessageId).catch(() => {})
-								}
-							} else if (!isSubAgent && finalText.trim()) {
-								// No streaming happened — post full response
-								for (const chunk of splitTelegramMessage(finalText)) {
-									await adapter.postMessage(chatIdStr, chunk)
-								}
+						const finalText = result.userResponse.text.trim()
+						const attachmentParts = result.userResponse.parts.filter(
+							(part) => part.type === "attachment",
+						)
+
+						if (streamInterval) clearInterval(streamInterval)
+
+						if (streamMessageId) {
+							if (finalText) {
+								// Delete the streaming preview and post final (handles splitting)
+								await services.replySender
+									.deleteMessage(replyTarget, { id: streamMessageId })
+									.catch(() => {})
+								await services.replySender.postText(replyTarget, finalText)
+							} else {
+								await services.replySender
+									.deleteMessage(replyTarget, { id: streamMessageId })
+									.catch(() => {})
 							}
-
-							return finalText
-						} finally {
-							await runtime.dispose()
+						} else if (!isSubAgent && finalText) {
+							await services.replySender.postText(replyTarget, finalText)
 						}
+
+						if (!isSubAgent && attachmentParts.length > 0) {
+							try {
+								await services.replySender.sendParts(replyTarget, attachmentParts)
+							} catch (err) {
+								console.error("[Workflow] sendParts failed after text delivery:", err)
+							}
+						}
+
+						return finalText
 					} finally {
 						if (streamInterval) clearInterval(streamInterval)
-						clearInterval(typingInterval)
+						if (typingInterval) clearInterval(typingInterval)
+						await runtime.dispose()
 					}
 				},
 			)
@@ -210,9 +269,22 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			// Send error message to user and reset DO state
 			if (!isSubAgent) {
 				await step.do("error-reply", async () => {
-					await adapter
-						.postMessage(chatIdStr, "Sorry, something went wrong. Please try again.")
-						.catch(() => {})
+					const runtime = makeRuntimeForConsumer(this.env)
+					try {
+						await runtime.runPromise(
+							Effect.gen(function* () {
+								const replySender = yield* ReplySender
+								yield* Effect.tryPromise(() =>
+									replySender.postText(
+										{ channel: "telegram", chatId },
+										"Sorry, something went wrong. Please try again.",
+									),
+								)
+							}),
+						)
+					} finally {
+						await runtime.dispose()
+					}
 				})
 			}
 			await this.notifyComplete(step, chatId, isSubAgent, userId, conversationId)

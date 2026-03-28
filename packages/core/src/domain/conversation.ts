@@ -1,3 +1,4 @@
+import type { ConversationMessagePart } from "./attachment"
 import type { Platform } from "./platform"
 
 export type ThreadSource = "native" | "reply_chain" | "derived" | "manual"
@@ -36,7 +37,7 @@ export interface Message {
 	readonly runId?: string
 	readonly role: MessageRole
 	readonly contentText: string
-	readonly partsJson?: unknown
+	readonly partsJson?: ConversationMessagePart[]
 	readonly metadata?: Record<string, unknown>
 	readonly createdAt: Date
 }

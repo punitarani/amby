@@ -1,3 +1,4 @@
+import type { AttachmentService } from "@amby/attachments"
 import type { BrowserService } from "@amby/browser"
 import type { TaskSupervisor } from "@amby/computer"
 import type { TaskStoreService } from "@amby/core"
@@ -118,6 +119,7 @@ async function runTaskWithTrace(params: {
 	query: QueryFn
 	taskStore: TaskStoreService
 	config: AgentRunConfig
+	attachments: import("effect").Context.Tag.Service<typeof AttachmentService>
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
 	browser: import("effect").Context.Tag.Service<typeof BrowserService>
@@ -202,9 +204,11 @@ async function runTaskWithTrace(params: {
 					? await runBackgroundSpecialist({
 							task: params.task,
 							supervisor: params.supervisor,
+							attachments: params.attachments,
 							userId: params.config.request.userId,
 							conversationId: params.config.request.conversationId,
 							threadId: params.config.request.threadId,
+							requestMetadata: params.config.request.metadata,
 							trace,
 						})
 					: await runToolloopSpecialist({
@@ -292,6 +296,7 @@ async function runValidatorIfNeeded(params: {
 	query: QueryFn
 	taskStore: TaskStoreService
 	config: AgentRunConfig
+	attachments: import("effect").Context.Tag.Service<typeof AttachmentService>
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
 	browser: import("effect").Context.Tag.Service<typeof BrowserService>
@@ -340,6 +345,7 @@ async function runValidatorIfNeeded(params: {
 		query: params.query,
 		taskStore: params.taskStore,
 		config: params.config,
+		attachments: params.attachments,
 		getModel: params.getModel,
 		toolGroups: params.toolGroups,
 		browser: params.browser,
@@ -353,6 +359,7 @@ export async function executeRequestPlan(params: {
 	query: QueryFn
 	taskStore: TaskStoreService
 	config: AgentRunConfig
+	attachments: import("effect").Context.Tag.Service<typeof AttachmentService>
 	getModel: (id?: string) => LanguageModel
 	toolGroups: ToolGroups
 	browser: import("effect").Context.Tag.Service<typeof BrowserService>
@@ -430,6 +437,7 @@ export async function executeRequestPlan(params: {
 								query: params.query,
 								taskStore: params.taskStore,
 								config: params.config,
+								attachments: params.attachments,
 								getModel: params.getModel,
 								toolGroups: params.toolGroups,
 								browser: params.browser,
@@ -444,6 +452,7 @@ export async function executeRequestPlan(params: {
 							query: params.query,
 							taskStore: params.taskStore,
 							config: params.config,
+							attachments: params.attachments,
 							getModel: params.getModel,
 							toolGroups: params.toolGroups,
 							browser: params.browser,
@@ -464,6 +473,7 @@ export async function executeRequestPlan(params: {
 		query: params.query,
 		taskStore: params.taskStore,
 		config: params.config,
+		attachments: params.attachments,
 		getModel: params.getModel,
 		toolGroups: params.toolGroups,
 		browser: params.browser,

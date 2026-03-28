@@ -30,6 +30,9 @@ const EnvConfig = Config.all({
 		Config.withDefault(Redacted.make("")),
 	),
 	TELEGRAM_API_BASE_URL: Config.string("TELEGRAM_API_BASE_URL").pipe(Config.option),
+	ATTACHMENTS_SIGNING_SECRET: Config.redacted("ATTACHMENTS_SIGNING_SECRET").pipe(
+		Config.withDefault(Redacted.make("dev-attachments-secret")),
+	),
 	TELEGRAM_LOGIN_WIDGET_ENABLED: Config.boolean("TELEGRAM_LOGIN_WIDGET_ENABLED").pipe(
 		Config.withDefault(true),
 	),
@@ -100,6 +103,7 @@ export const EnvServiceLive = Layer.effect(
 			TELEGRAM_BOT_USERNAME: raw.TELEGRAM_BOT_USERNAME,
 			TELEGRAM_WEBHOOK_SECRET: Redacted.value(raw.TELEGRAM_WEBHOOK_SECRET),
 			TELEGRAM_API_BASE_URL: Option.getOrUndefined(raw.TELEGRAM_API_BASE_URL),
+			ATTACHMENTS_SIGNING_SECRET: Redacted.value(raw.ATTACHMENTS_SIGNING_SECRET),
 			TELEGRAM_LOGIN_WIDGET_ENABLED: raw.TELEGRAM_LOGIN_WIDGET_ENABLED,
 			TELEGRAM_MINI_APP_ENABLED: raw.TELEGRAM_MINI_APP_ENABLED,
 			TELEGRAM_OIDC_CLIENT_ID: raw.TELEGRAM_OIDC_CLIENT_ID,
