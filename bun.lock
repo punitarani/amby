@@ -4,6 +4,8 @@
     "": {
       "name": "amby",
       "dependencies": {
+        "@amby/db": "workspace:*",
+        "@amby/env": "workspace:*",
         "ai": "^6.0.116",
         "effect": "^3.21.0",
         "zod": "^3.24.0",
