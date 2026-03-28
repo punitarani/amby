@@ -74,12 +74,15 @@ jobs:
       - run: bun run build
       - name: Worker dry run
         run: |
+          WORKER_VERSION_MESSAGE=$(cd apps/api && bun run --silent deploy:message) || exit 1
+          test -n "$WORKER_VERSION_MESSAGE"
+          test ${#WORKER_VERSION_MESSAGE} -le 100
           cd apps/api
           rm -rf dist-worker
-          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps
+          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps --message "$WORKER_VERSION_MESSAGE"
           test -f dist-worker/worker.js
           test -f dist-worker/worker.js.map
-          npx wrangler deploy dist-worker/worker.js --no-bundle --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA" --dry-run
+          npx wrangler deploy dist-worker/worker.js --no-bundle --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA" --message "$WORKER_VERSION_MESSAGE" --dry-run
       - name: Validate deploy tooling
         run: |
           # @sentry/cli: local devDep of apps/api — must use scoped name with npx
@@ -191,11 +194,14 @@ jobs:
         id: metadata
         run: |
           COMMIT_SHORT="${GITHUB_SHA:0:7}"
-          COMMIT_MSG=$(git log -1 --pretty=%B | head -n1)
           DEPLOY_TAG="${GITHUB_REF_NAME}-${GITHUB_RUN_NUMBER}-${COMMIT_SHORT}"
-          DEPLOY_MESSAGE="Deploy #${GITHUB_RUN_NUMBER} from ${GITHUB_REF_NAME} by ${GITHUB_ACTOR}: ${COMMIT_MSG}"
-          echo "tag=${DEPLOY_TAG}" >> $GITHUB_OUTPUT
-          echo "message=${DEPLOY_MESSAGE}" >> $GITHUB_OUTPUT
+          DEPLOY_MESSAGE=$(cd apps/api && bun run --silent deploy:message) || exit 1
+          test -n "$DEPLOY_MESSAGE"
+          test ${#DEPLOY_MESSAGE} -le 100
+          {
+            echo "tag=${DEPLOY_TAG}"
+            echo "message=${DEPLOY_MESSAGE}"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: dopplerhq/cli-action@v3
 
@@ -214,7 +220,7 @@ jobs:
         run: |
           cd apps/api
           rm -rf dist-worker
-          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA"
+          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA" --message "${{ steps.metadata.outputs.message }}"
           test -f dist-worker/worker.js
           test -f dist-worker/worker.js.map
         env:
