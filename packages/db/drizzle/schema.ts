@@ -55,190 +55,150 @@ export const computeInstances = pgTable(
 	],
 )
 
-export const computeVolumes = pgTable(
-	"compute_volumes",
+export const tasks = pgTable(
+	"tasks",
 	{
 		id: uuid().defaultRandom().primaryKey().notNull(),
 		userId: text("user_id").notNull(),
-		externalVolumeId: text("external_volume_id").notNull(),
-		status: text().default("creating").notNull(),
-		authConfig: jsonb("auth_config"),
+		provider: text().notNull(),
+		status: text().default("pending").notNull(),
+		prompt: text().notNull(),
+		outputSummary: text("output_summary"),
+		error: text(),
+		exitCode: integer("exit_code"),
+		startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
+		heartbeatAt: timestamp("heartbeat_at", { withTimezone: true, mode: "string" }),
+		completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
 			.defaultNow()
 			.notNull(),
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
 			.defaultNow()
 			.notNull(),
-	},
-	(table) => [
-		foreignKey({
-			columns: [table.userId],
-			foreignColumns: [users.id],
-			name: "compute_volumes_user_id_users_id_fk",
-		}).onDelete("cascade"),
-		unique("compute_volumes_user_id_unique").on(table.userId),
-		unique("compute_volumes_external_volume_id_unique").on(table.externalVolumeId),
-	],
-)
-
-export const conversations = pgTable(
-	"conversations",
-	{
-		id: uuid().defaultRandom().primaryKey().notNull(),
-		userId: text("user_id").notNull(),
-		platform: text().notNull(),
-		workspaceKey: text("workspace_key").default("").notNull(),
-		externalConversationKey: text("external_conversation_key").notNull(),
-		title: text(),
 		metadata: jsonb(),
-		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-			.defaultNow()
-			.notNull(),
-		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-			.defaultNow()
-			.notNull(),
-	},
-	(table) => [
-		uniqueIndex("conversations_platform_key_idx").using(
-			"btree",
-			table.userId.asc().nullsLast().op("text_ops"),
-			table.platform.asc().nullsLast().op("text_ops"),
-			table.workspaceKey.asc().nullsLast().op("text_ops"),
-			table.externalConversationKey.asc().nullsLast().op("text_ops"),
-		),
-		index("conversations_user_idx").using("btree", table.userId.asc().nullsLast().op("text_ops")),
-		foreignKey({
-			columns: [table.userId],
-			foreignColumns: [users.id],
-			name: "conversations_user_id_users_id_fk",
-		}).onDelete("cascade"),
-	],
-)
-
-export const messages = pgTable(
-	"messages",
-	{
-		id: uuid().defaultRandom().primaryKey().notNull(),
-		conversationId: uuid("conversation_id").notNull(),
+		conversationId: uuid("conversation_id"),
+		replyTarget: jsonb("reply_target"),
+		callbackId: uuid("callback_id"),
+		callbackSecretHash: text("callback_secret_hash"),
+		lastEventSeq: integer("last_event_seq").default(0).notNull(),
+		lastEventAt: timestamp("last_event_at", { withTimezone: true, mode: "string" }),
+		lastProbeAt: timestamp("last_probe_at", { withTimezone: true, mode: "string" }),
+		notifiedStatus: text("notified_status"),
+		lastNotificationAt: timestamp("last_notification_at", { withTimezone: true, mode: "string" }),
+		runtime: text().notNull(),
 		threadId: uuid("thread_id"),
-		role: text().notNull(),
-		content: text().notNull(),
-		metadata: jsonb(),
-		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-			.defaultNow()
-			.notNull(),
-	},
-	(table) => [
-		index("messages_conversation_created_idx").using(
-			"btree",
-			table.conversationId.asc().nullsLast().op("timestamptz_ops"),
-			table.createdAt.asc().nullsLast().op("uuid_ops"),
-		),
-		index("messages_thread_idx").using(
-			"btree",
-			table.threadId.asc().nullsLast().op("timestamptz_ops"),
-			table.createdAt.asc().nullsLast().op("timestamptz_ops"),
-		),
-		foreignKey({
-			columns: [table.conversationId],
-			foreignColumns: [conversations.id],
-			name: "messages_conversation_id_conversations_id_fk",
-		}).onDelete("cascade"),
-		foreignKey({
-			columns: [table.threadId],
-			foreignColumns: [conversationThreads.id],
-			name: "messages_thread_id_conversation_threads_id_fk",
-		}).onDelete("set null"),
-	],
-)
-
-export const traces = pgTable(
-	"traces",
-	{
-		id: uuid().defaultRandom().primaryKey().notNull(),
-		conversationId: uuid("conversation_id").notNull(),
-		threadId: uuid("thread_id"),
-		messageId: uuid("message_id"),
-		parentTraceId: uuid("parent_trace_id"),
-		rootTraceId: uuid("root_trace_id"),
-		taskId: uuid("task_id"),
+		traceId: uuid("trace_id"),
+		parentTaskId: uuid("parent_task_id"),
+		rootTaskId: uuid("root_task_id"),
 		specialist: text(),
 		runnerKind: text("runner_kind"),
-		mode: text(),
-		depth: integer(),
-		status: text().default("running").notNull(),
-		startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
-			.defaultNow()
-			.notNull(),
-		completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
-		durationMs: integer("duration_ms"),
-		metadata: jsonb(),
+		input: jsonb(),
+		output: jsonb(),
+		artifacts: jsonb(),
+		confirmationState: text("confirmation_state"),
+		requiresBrowser: boolean("requires_browser").default(false).notNull(),
+		runtimeData: jsonb("runtime_data"),
 	},
 	(table) => [
-		index("traces_conversation_idx").using(
+		index("tasks_callback_id_idx").using(
 			"btree",
-			table.conversationId.asc().nullsLast().op("uuid_ops"),
+			table.callbackId.asc().nullsLast().op("uuid_ops"),
 		),
-		index("traces_message_id_idx").using("btree", table.messageId.asc().nullsLast().op("uuid_ops")),
-		index("traces_mode_idx").using("btree", table.mode.asc().nullsLast().op("text_ops")),
-		index("traces_parent_trace_id_idx").using(
+		index("tasks_parent_task_id_idx").using(
 			"btree",
-			table.parentTraceId.asc().nullsLast().op("uuid_ops"),
+			table.parentTaskId.asc().nullsLast().op("uuid_ops"),
 		),
-		index("traces_root_trace_id_idx").using(
+		index("tasks_root_task_id_idx").using(
 			"btree",
-			table.rootTraceId.asc().nullsLast().op("uuid_ops"),
+			table.rootTaskId.asc().nullsLast().op("uuid_ops"),
 		),
-		index("traces_runner_kind_idx").using(
+		index("tasks_runner_kind_idx").using(
 			"btree",
 			table.runnerKind.asc().nullsLast().op("text_ops"),
 		),
-		index("traces_specialist_idx").using(
+		index("tasks_runtime_status_heartbeat_idx").using(
 			"btree",
-			table.specialist.asc().nullsLast().op("text_ops"),
+			table.runtime.asc().nullsLast().op("timestamptz_ops"),
+			table.status.asc().nullsLast().op("timestamptz_ops"),
+			table.heartbeatAt.asc().nullsLast().op("timestamptz_ops"),
 		),
-		index("traces_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("uuid_ops")),
-		index("traces_thread_idx").using("btree", table.threadId.asc().nullsLast().op("uuid_ops")),
+		index("tasks_specialist_idx").using("btree", table.specialist.asc().nullsLast().op("text_ops")),
+		index("tasks_status_heartbeat_idx").using(
+			"btree",
+			table.status.asc().nullsLast().op("text_ops"),
+			table.heartbeatAt.asc().nullsLast().op("timestamptz_ops"),
+		),
+		index("tasks_thread_idx").using("btree", table.threadId.asc().nullsLast().op("uuid_ops")),
+		index("tasks_trace_id_idx").using("btree", table.traceId.asc().nullsLast().op("uuid_ops")),
+		index("tasks_user_status_idx").using(
+			"btree",
+			table.userId.asc().nullsLast().op("text_ops"),
+			table.status.asc().nullsLast().op("text_ops"),
+		),
 		foreignKey({
 			columns: [table.conversationId],
 			foreignColumns: [conversations.id],
-			name: "traces_conversation_id_conversations_id_fk",
-		}).onDelete("cascade"),
+			name: "tasks_conversation_id_conversations_id_fk",
+		}).onDelete("set null"),
+		foreignKey({
+			columns: [table.parentTaskId],
+			foreignColumns: [table.id],
+			name: "tasks_parent_task_id_fkey",
+		}),
+		foreignKey({
+			columns: [table.rootTaskId],
+			foreignColumns: [table.id],
+			name: "tasks_root_task_id_fkey",
+		}),
 		foreignKey({
 			columns: [table.threadId],
 			foreignColumns: [conversationThreads.id],
-			name: "traces_thread_id_conversation_threads_id_fk",
+			name: "tasks_thread_id_conversation_threads_id_fk",
 		}).onDelete("set null"),
 		foreignKey({
-			columns: [table.messageId],
-			foreignColumns: [messages.id],
-			name: "traces_message_id_messages_id_fk",
-		}).onDelete("set null"),
+			columns: [table.userId],
+			foreignColumns: [users.id],
+			name: "tasks_user_id_users_id_fk",
+		}).onDelete("cascade"),
 	],
 )
 
-export const traceEvents = pgTable(
-	"trace_events",
+export const taskEvents = pgTable(
+	"task_events",
 	{
 		id: uuid().defaultRandom().primaryKey().notNull(),
-		traceId: uuid("trace_id").notNull(),
-		seq: integer().notNull(),
-		kind: text().notNull(),
-		payload: jsonb().notNull(),
+		taskId: uuid("task_id").notNull(),
+		eventId: uuid("event_id").notNull(),
+		source: text().notNull(),
+		seq: integer(),
+		payload: jsonb(),
+		occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
 			.defaultNow()
 			.notNull(),
+		kind: text().notNull(),
 	},
 	(table) => [
-		index("trace_events_trace_seq_idx").using(
+		uniqueIndex("task_events_task_event_id_idx").using(
 			"btree",
-			table.traceId.asc().nullsLast().op("int4_ops"),
+			table.taskId.asc().nullsLast().op("uuid_ops"),
+			table.eventId.asc().nullsLast().op("uuid_ops"),
+		),
+		index("task_events_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("uuid_ops")),
+		index("task_events_task_occurred_idx").using(
+			"btree",
+			table.taskId.asc().nullsLast().op("timestamptz_ops"),
+			table.occurredAt.asc().nullsLast().op("uuid_ops"),
+		),
+		index("task_events_task_seq_idx").using(
+			"btree",
+			table.taskId.asc().nullsLast().op("uuid_ops"),
 			table.seq.asc().nullsLast().op("int4_ops"),
 		),
 		foreignKey({
-			columns: [table.traceId],
-			foreignColumns: [traces.id],
-			name: "trace_events_trace_id_traces_id_fk",
+			columns: [table.taskId],
+			foreignColumns: [tasks.id],
+			name: "task_events_task_id_tasks_id_fk",
 		}).onDelete("cascade"),
 	],
 )
@@ -277,200 +237,46 @@ export const automations = pgTable(
 	],
 )
 
-export const runs = pgTable(
-	"runs",
-	{
-		id: uuid().defaultRandom().primaryKey().notNull(),
-		conversationId: uuid("conversation_id").notNull(),
-		threadId: uuid("thread_id").notNull(),
-		triggerMessageId: uuid("trigger_message_id"),
-		status: text().default("running").notNull(),
-		mode: text().default("direct").notNull(),
-		modelId: text("model_id").notNull(),
-		summary: text(),
-		requestJson: jsonb("request_json"),
-		responseJson: jsonb("response_json"),
-		startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
-			.defaultNow()
-			.notNull(),
-		completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
-	},
-	(table) => [
-		index("runs_conversation_idx").using(
-			"btree",
-			table.conversationId.asc().nullsLast().op("uuid_ops"),
-		),
-		index("runs_started_at_idx").using(
-			"btree",
-			table.startedAt.asc().nullsLast().op("timestamptz_ops"),
-		),
-		index("runs_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
-		index("runs_thread_idx").using("btree", table.threadId.asc().nullsLast().op("uuid_ops")),
-		foreignKey({
-			columns: [table.conversationId],
-			foreignColumns: [conversations.id],
-			name: "runs_conversation_id_conversations_id_fk",
-		}).onDelete("cascade"),
-		foreignKey({
-			columns: [table.threadId],
-			foreignColumns: [conversationThreads.id],
-			name: "runs_thread_id_conversation_threads_id_fk",
-		}).onDelete("cascade"),
-		foreignKey({
-			columns: [table.triggerMessageId],
-			foreignColumns: [messages.id],
-			name: "runs_trigger_message_id_messages_id_fk",
-		}).onDelete("set null"),
-	],
-)
-
-export const tasks = pgTable(
-	"tasks",
+export const conversations = pgTable(
+	"conversations",
 	{
 		id: uuid().defaultRandom().primaryKey().notNull(),
 		userId: text("user_id").notNull(),
-		runtime: text().notNull(),
-		provider: text().notNull(),
-		status: text().default("pending").notNull(),
-		threadId: uuid("thread_id"),
-		traceId: uuid("trace_id"),
-		parentTaskId: uuid("parent_task_id"),
-		rootTaskId: uuid("root_task_id"),
-		specialist: text(),
-		runnerKind: text("runner_kind"),
-		input: jsonb(),
-		output: jsonb(),
-		artifacts: jsonb(),
-		confirmationState: text("confirmation_state"),
-		prompt: text().notNull(),
-		requiresBrowser: boolean("requires_browser").default(false).notNull(),
-		runtimeData: jsonb("runtime_data"),
-		outputSummary: text("output_summary"),
-		error: text(),
-		exitCode: integer("exit_code"),
-		startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
-		heartbeatAt: timestamp("heartbeat_at", { withTimezone: true, mode: "string" }),
-		completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
+		title: text(),
+		metadata: jsonb(),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
 			.defaultNow()
 			.notNull(),
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
 			.defaultNow()
 			.notNull(),
-		metadata: jsonb(),
-		conversationId: uuid("conversation_id"),
-		replyTarget: jsonb("reply_target"),
-		callbackId: uuid("callback_id"),
-		callbackSecretHash: text("callback_secret_hash"),
-		lastEventSeq: integer("last_event_seq").default(0).notNull(),
-		lastEventAt: timestamp("last_event_at", { withTimezone: true, mode: "string" }),
-		lastProbeAt: timestamp("last_probe_at", { withTimezone: true, mode: "string" }),
-		notifiedStatus: text("notified_status"),
-		lastNotificationAt: timestamp("last_notification_at", { withTimezone: true, mode: "string" }),
+		platform: text().notNull(),
+		externalConversationKey: text("external_conversation_key").notNull(),
 	},
 	(table) => [
-		index("tasks_callback_id_idx").using(
-			"btree",
-			table.callbackId.asc().nullsLast().op("uuid_ops"),
-		),
-		index("tasks_parent_task_id_idx").using(
-			"btree",
-			table.parentTaskId.asc().nullsLast().op("uuid_ops"),
-		),
-		index("tasks_root_task_id_idx").using(
-			"btree",
-			table.rootTaskId.asc().nullsLast().op("uuid_ops"),
-		),
-		index("tasks_runner_kind_idx").using(
-			"btree",
-			table.runnerKind.asc().nullsLast().op("text_ops"),
-		),
-		index("tasks_runtime_status_heartbeat_idx").using(
-			"btree",
-			table.runtime.asc().nullsLast().op("timestamptz_ops"),
-			table.status.asc().nullsLast().op("text_ops"),
-			table.heartbeatAt.asc().nullsLast().op("timestamptz_ops"),
-		),
-		index("tasks_specialist_idx").using("btree", table.specialist.asc().nullsLast().op("text_ops")),
-		index("tasks_status_heartbeat_idx").using(
-			"btree",
-			table.status.asc().nullsLast().op("timestamptz_ops"),
-			table.heartbeatAt.asc().nullsLast().op("text_ops"),
-		),
-		index("tasks_thread_idx").using("btree", table.threadId.asc().nullsLast().op("uuid_ops")),
-		index("tasks_trace_id_idx").using("btree", table.traceId.asc().nullsLast().op("uuid_ops")),
-		index("tasks_user_status_idx").using(
+		uniqueIndex("conversations_platform_key_idx").using(
 			"btree",
 			table.userId.asc().nullsLast().op("text_ops"),
-			table.status.asc().nullsLast().op("text_ops"),
+			table.platform.asc().nullsLast().op("text_ops"),
+			table.externalConversationKey.asc().nullsLast().op("text_ops"),
 		),
+		index("conversations_user_idx").using("btree", table.userId.asc().nullsLast().op("text_ops")),
 		foreignKey({
 			columns: [table.userId],
 			foreignColumns: [users.id],
-			name: "tasks_user_id_users_id_fk",
+			name: "conversations_user_id_users_id_fk",
 		}).onDelete("cascade"),
-		foreignKey({
-			columns: [table.threadId],
-			foreignColumns: [conversationThreads.id],
-			name: "tasks_thread_id_conversation_threads_id_fk",
-		}).onDelete("set null"),
-		foreignKey({
-			columns: [table.conversationId],
-			foreignColumns: [conversations.id],
-			name: "tasks_conversation_id_conversations_id_fk",
-		}).onDelete("set null"),
-		foreignKey({
-			columns: [table.parentTaskId],
-			foreignColumns: [table.id],
-			name: "tasks_parent_task_id_fkey",
-		}),
-		foreignKey({
-			columns: [table.rootTaskId],
-			foreignColumns: [table.id],
-			name: "tasks_root_task_id_fkey",
-		}),
 	],
 )
 
-export const taskEvents = pgTable(
-	"task_events",
-	{
-		id: uuid().defaultRandom().primaryKey().notNull(),
-		taskId: uuid("task_id").notNull(),
-		eventId: uuid("event_id").notNull(),
-		source: text().notNull(),
-		kind: text().notNull(),
-		seq: integer(),
-		payload: jsonb(),
-		occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "string" }).notNull(),
-		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-			.defaultNow()
-			.notNull(),
-	},
-	(table) => [
-		uniqueIndex("task_events_task_event_id_idx").using(
-			"btree",
-			table.taskId.asc().nullsLast().op("uuid_ops"),
-			table.eventId.asc().nullsLast().op("uuid_ops"),
-		),
-		index("task_events_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("uuid_ops")),
-		index("task_events_task_occurred_idx").using(
-			"btree",
-			table.taskId.asc().nullsLast().op("timestamptz_ops"),
-			table.occurredAt.asc().nullsLast().op("uuid_ops"),
-		),
-		index("task_events_task_seq_idx").using(
-			"btree",
-			table.taskId.asc().nullsLast().op("uuid_ops"),
-			table.seq.asc().nullsLast().op("int4_ops"),
-		),
-		foreignKey({
-			columns: [table.taskId],
-			foreignColumns: [tasks.id],
-			name: "task_events_task_id_tasks_id_fk",
-		}).onDelete("cascade"),
-	],
-)
+export const verifications = pgTable("verifications", {
+	id: text().primaryKey().notNull(),
+	identifier: text().notNull(),
+	value: text().notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+})
 
 export const accounts = pgTable(
 	"accounts",
@@ -514,6 +320,45 @@ export const accounts = pgTable(
 	],
 )
 
+export const memories = pgTable(
+	"memories",
+	{
+		id: uuid().defaultRandom().primaryKey().notNull(),
+		userId: text("user_id").notNull(),
+		content: text().notNull(),
+		category: text().default("dynamic").notNull(),
+		isActive: boolean("is_active").default(true).notNull(),
+		source: text(),
+		embedding: vector({ dimensions: 1536 }),
+		metadata: jsonb(),
+		version: integer().default(1).notNull(),
+		parentId: uuid("parent_id"),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+			.defaultNow()
+			.notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		index("memories_user_active_idx").using(
+			"btree",
+			table.userId.asc().nullsLast().op("text_ops"),
+			table.isActive.asc().nullsLast().op("text_ops"),
+		),
+		foreignKey({
+			columns: [table.parentId],
+			foreignColumns: [table.id],
+			name: "memories_parent_id_memories_id_fk",
+		}).onDelete("set null"),
+		foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.id],
+			name: "memories_user_id_users_id_fk",
+		}).onDelete("cascade"),
+	],
+)
+
 export const sessions = pgTable(
 	"sessions",
 	{
@@ -537,6 +382,67 @@ export const sessions = pgTable(
 			name: "sessions_user_id_users_id_fk",
 		}).onDelete("cascade"),
 		unique("sessions_token_unique").on(table.token),
+	],
+)
+
+export const users = pgTable(
+	"users",
+	{
+		id: text().primaryKey().notNull(),
+		name: text().notNull(),
+		email: text(),
+		emailVerified: boolean("email_verified").default(false).notNull(),
+		phoneNumber: text("phone_number"),
+		phoneNumberVerified: boolean("phone_number_verified").default(false).notNull(),
+		image: text(),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+			.defaultNow()
+			.notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+			.defaultNow()
+			.notNull(),
+		timezone: text().default("UTC").notNull(),
+	},
+	(table) => [
+		unique("users_email_unique").on(table.email),
+		unique("users_phone_number_unique").on(table.phoneNumber),
+	],
+)
+
+export const messages = pgTable(
+	"messages",
+	{
+		id: uuid().defaultRandom().primaryKey().notNull(),
+		conversationId: uuid("conversation_id").notNull(),
+		role: text().notNull(),
+		content: text().notNull(),
+		metadata: jsonb(),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+			.defaultNow()
+			.notNull(),
+		threadId: uuid("thread_id"),
+	},
+	(table) => [
+		index("messages_conversation_created_idx").using(
+			"btree",
+			table.conversationId.asc().nullsLast().op("timestamptz_ops"),
+			table.createdAt.asc().nullsLast().op("uuid_ops"),
+		),
+		index("messages_thread_idx").using(
+			"btree",
+			table.threadId.asc().nullsLast().op("timestamptz_ops"),
+			table.createdAt.asc().nullsLast().op("timestamptz_ops"),
+		),
+		foreignKey({
+			columns: [table.conversationId],
+			foreignColumns: [conversations.id],
+			name: "messages_conversation_id_conversations_id_fk",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.threadId],
+			foreignColumns: [conversationThreads.id],
+			name: "messages_thread_id_conversation_threads_id_fk",
+		}).onDelete("set null"),
 	],
 )
 
@@ -584,26 +490,14 @@ export const conversationThreads = pgTable(
 	],
 )
 
-export const verifications = pgTable("verifications", {
-	id: text().primaryKey().notNull(),
-	identifier: text().notNull(),
-	value: text().notNull(),
-	expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
-	createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
-	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
-})
-
-export const users = pgTable(
-	"users",
+export const computeVolumes = pgTable(
+	"compute_volumes",
 	{
-		id: text().primaryKey().notNull(),
-		name: text().notNull(),
-		email: text(),
-		emailVerified: boolean("email_verified").default(false).notNull(),
-		phoneNumber: text("phone_number"),
-		phoneNumberVerified: boolean("phone_number_verified").default(false).notNull(),
-		image: text(),
-		timezone: text().default("UTC").notNull(),
+		id: uuid().defaultRandom().primaryKey().notNull(),
+		userId: text("user_id").notNull(),
+		externalVolumeId: text("external_volume_id").notNull(),
+		status: text().default("creating").notNull(),
+		authConfig: jsonb("auth_config"),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
 			.defaultNow()
 			.notNull(),
@@ -612,8 +506,13 @@ export const users = pgTable(
 			.notNull(),
 	},
 	(table) => [
-		unique("users_email_unique").on(table.email),
-		unique("users_phone_number_unique").on(table.phoneNumber),
+		foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.id],
+			name: "compute_volumes_user_id_users_id_fk",
+		}).onDelete("cascade"),
+		unique("compute_volumes_external_volume_id_unique").on(table.externalVolumeId),
+		unique("compute_volumes_user_id_unique").on(table.userId),
 	],
 )
 
@@ -658,45 +557,6 @@ export const integrationAccounts = pgTable(
 	],
 )
 
-export const memories = pgTable(
-	"memories",
-	{
-		id: uuid().defaultRandom().primaryKey().notNull(),
-		userId: text("user_id").notNull(),
-		content: text().notNull(),
-		category: text().default("dynamic").notNull(),
-		isActive: boolean("is_active").default(true).notNull(),
-		source: text(),
-		embedding: vector({ dimensions: 1536 }),
-		metadata: jsonb(),
-		version: integer().default(1).notNull(),
-		parentId: uuid("parent_id"),
-		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
-			.defaultNow()
-			.notNull(),
-		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
-			.defaultNow()
-			.notNull(),
-	},
-	(table) => [
-		index("memories_user_active_idx").using(
-			"btree",
-			table.userId.asc().nullsLast().op("text_ops"),
-			table.isActive.asc().nullsLast().op("text_ops"),
-		),
-		foreignKey({
-			columns: [table.userId],
-			foreignColumns: [users.id],
-			name: "memories_user_id_users_id_fk",
-		}).onDelete("cascade"),
-		foreignKey({
-			columns: [table.parentId],
-			foreignColumns: [table.id],
-			name: "memories_parent_id_memories_id_fk",
-		}).onDelete("set null"),
-	],
-)
-
 export const runEvents = pgTable(
 	"run_events",
 	{
@@ -721,5 +581,74 @@ export const runEvents = pgTable(
 			foreignColumns: [runs.id],
 			name: "run_events_run_id_runs_id_fk",
 		}).onDelete("cascade"),
+	],
+)
+
+export const runs = pgTable(
+	"runs",
+	{
+		id: uuid().defaultRandom().primaryKey().notNull(),
+		conversationId: uuid("conversation_id").notNull(),
+		threadId: uuid("thread_id"),
+		triggerMessageId: uuid("trigger_message_id"),
+		status: text().default("running").notNull(),
+		mode: text().default("direct").notNull(),
+		modelId: text("model_id"),
+		summary: text(),
+		requestJson: jsonb("request_json"),
+		responseJson: jsonb("response_json"),
+		startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
+			.defaultNow()
+			.notNull(),
+		completedAt: timestamp("completed_at", { withTimezone: true, mode: "string" }),
+		messageId: uuid("message_id"),
+		parentRunId: uuid("parent_run_id"),
+		rootRunId: uuid("root_run_id"),
+		taskId: uuid("task_id"),
+		specialist: text(),
+		runnerKind: text("runner_kind"),
+		depth: integer(),
+		durationMs: integer("duration_ms"),
+		metadata: jsonb(),
+	},
+	(table) => [
+		index("runs_conversation_idx").using(
+			"btree",
+			table.conversationId.asc().nullsLast().op("uuid_ops"),
+		),
+		index("runs_message_id_idx").using("btree", table.messageId.asc().nullsLast().op("uuid_ops")),
+		index("runs_parent_run_id_idx").using(
+			"btree",
+			table.parentRunId.asc().nullsLast().op("uuid_ops"),
+		),
+		index("runs_root_run_id_idx").using("btree", table.rootRunId.asc().nullsLast().op("uuid_ops")),
+		index("runs_specialist_idx").using("btree", table.specialist.asc().nullsLast().op("text_ops")),
+		index("runs_started_at_idx").using(
+			"btree",
+			table.startedAt.asc().nullsLast().op("timestamptz_ops"),
+		),
+		index("runs_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+		index("runs_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("uuid_ops")),
+		index("runs_thread_idx").using("btree", table.threadId.asc().nullsLast().op("uuid_ops")),
+		foreignKey({
+			columns: [table.conversationId],
+			foreignColumns: [conversations.id],
+			name: "runs_conversation_id_conversations_id_fk",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.messageId],
+			foreignColumns: [messages.id],
+			name: "runs_message_id_messages_id_fk",
+		}).onDelete("set null"),
+		foreignKey({
+			columns: [table.threadId],
+			foreignColumns: [conversationThreads.id],
+			name: "runs_thread_id_conversation_threads_id_fk",
+		}).onDelete("set null"),
+		foreignKey({
+			columns: [table.triggerMessageId],
+			foreignColumns: [messages.id],
+			name: "runs_trigger_message_id_messages_id_fk",
+		}).onDelete("set null"),
 	],
 )
