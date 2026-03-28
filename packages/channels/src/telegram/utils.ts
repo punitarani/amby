@@ -259,7 +259,7 @@ const startTelegramSession = (
 			)
 		}
 
-		posthog.capture({
+		posthog?.capture({
 			distinctId: userId,
 			event: "bot_started",
 			properties: {
@@ -387,7 +387,7 @@ export const handleCommand = (
 			}
 
 			case "/stop": {
-				posthog.capture({
+				posthog?.capture({
 					distinctId: userId,
 					event: "bot_stopped",
 					properties: { channel: "telegram" },
@@ -397,7 +397,7 @@ export const handleCommand = (
 			}
 
 			case "/help": {
-				posthog.capture({
+				posthog?.capture({
 					distinctId: userId,
 					event: "help_requested",
 					properties: { channel: "telegram" },

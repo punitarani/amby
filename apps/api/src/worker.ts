@@ -1,4 +1,5 @@
 import { type ChatSdkDeps, getOrCreateChat, type TelegramQueueMessage } from "@amby/channels"
+import { getPostHogClient } from "@amby/channels/posthog"
 import type { WorkerBindings } from "@amby/env/workers"
 import {
 	buildSafeComposioRedirectUrl,
@@ -22,7 +23,6 @@ import { ConversationSession as ConversationSessionBase } from "./durable-object
 import { handleScheduledReconciliation } from "./handlers/reconciliation"
 import { handleTaskEventPost } from "./handlers/task-events"
 import { getHomeResponse } from "./home"
-import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
 import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "./queue/runtime"
 import { getSentryOptions, getSentryOptionsOrFallback, setTelegramScope } from "./sentry"
@@ -85,22 +85,24 @@ app.onError(async (err, c) => {
 	if (status >= 500 && posthogKey) {
 		try {
 			const posthog = getPostHogClient(posthogKey, c.env.POSTHOG_HOST ?? "https://us.i.posthog.com")
-			posthog.captureException(err, c.get("posthogDistinctId"), {
-				framework: "hono",
-				runtime: "cloudflare-worker",
-				status,
-				method: c.req.method,
-				path: c.req.path,
-				url: c.req.url,
-				cf_ray: c.req.header("cf-ray") ?? null,
-				content_type: c.req.header("content-type") ?? null,
-				user_agent: c.req.header("user-agent") ?? null,
-			})
-			c.executionCtx.waitUntil(
-				posthog.flush().catch((flushError) => {
-					console.error("[API] Failed to flush PostHog exception:", flushError)
-				}),
-			)
+			if (posthog) {
+				posthog.captureException(err, c.get("posthogDistinctId"), {
+					framework: "hono",
+					runtime: "cloudflare-worker",
+					status,
+					method: c.req.method,
+					path: c.req.path,
+					url: c.req.url,
+					cf_ray: c.req.header("cf-ray") ?? null,
+					content_type: c.req.header("content-type") ?? null,
+					user_agent: c.req.header("user-agent") ?? null,
+				})
+				c.executionCtx.waitUntil(
+					posthog.flush().catch((flushError) => {
+						console.error("[API] Failed to flush PostHog exception:", flushError)
+					}),
+				)
+			}
 		} catch (captureError) {
 			console.error("[API] Failed to capture exception in PostHog:", captureError)
 		}
