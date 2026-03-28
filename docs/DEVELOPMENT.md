@@ -20,6 +20,8 @@ bun run dev                  # 5. Start all apps (api :3001, web :3000)
 
 If using Doppler, run `doppler setup` first and skip the `.env` copy step.
 
+CI/CD enforces the checked-in migration path: `generate` produces SQL, `migrate` applies pending SQL, and `check` validates the migration history. `db:push` remains a local development shortcut and is not used as the correctness gate in CI.
+
 ## Key Commands
 
 | Command | Description |
@@ -35,6 +37,9 @@ If using Doppler, run `doppler setup` first and skip the `.env` copy step.
 | `bun run db:migrate` | Run database migrations |
 | `bun run db:push` | Push schema to database |
 | `bun run db:studio` | Open Drizzle Studio UI |
+| `bun run --cwd packages/db db:generate:check` | Ensure schema changes have a committed Drizzle migration |
+| `bun run --cwd packages/db db:check` | Validate Drizzle migration-history consistency |
+| `bun run --cwd packages/db db:validate` | CI-style migration validation (`generate:check` -> `migrate` -> `check`) |
 | `bun run seed` | Seed database |
 | `bun run mock` | Start mock channel (port 3100) |
 

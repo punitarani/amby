@@ -105,12 +105,42 @@ jobs:
           echo "Worker env key pattern: $ENV_PATTERN"
           echo "Cloudflare sync key pattern: $SYNC_PATTERN"
 
+  db-validate:
+    name: Validate Migrations
+    runs-on: ubuntu-latest
+    needs: [typecheck]
+    # Validate migrations only after typecheck because drizzle-kit generate
+    # executes the TypeScript schema directly.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.0"
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd packages/db db:validate
+
   # --- Production only (push to main) ---
 
   db-migrate:
     name: Run Migrations
     runs-on: ubuntu-latest
-    needs: [format, lint, test, build]
+    needs: [format, lint, test, build, db-validate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: github-actions
     steps:
@@ -121,7 +151,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - uses: dopplerhq/cli-action@v3
       - name: Run migrations
-        run: doppler run -- bash -c 'cd packages/db && bunx drizzle-kit migrate'
+        run: doppler run -- bun run --cwd packages/db db:migrate
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
 
