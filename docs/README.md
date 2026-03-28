@@ -24,6 +24,7 @@ Then read subsystem docs as needed.
 ### Subsystems
 
 - [AGENT.md](./AGENT.md) — agent orchestration, tools, context
+- [auth/telegram.md](./auth/telegram.md) — Telegram auth architecture and flows
 - [CHANNELS.md](./CHANNELS.md) — Telegram integration
 - [PLUGINS_AND_SKILLS.md](./PLUGINS_AND_SKILLS.md) — plugin contract, skill system
 - [BROWSER_AND_COMPUTER.md](./BROWSER_AND_COMPUTER.md) — browser and sandbox execution
