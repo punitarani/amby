@@ -8,6 +8,7 @@ import type {
 import { ReplySender } from "@amby/core"
 import { EnvService } from "@amby/env"
 import { Context, Effect, Layer, Runtime } from "effect"
+import { splitTelegramMessage } from "./utils"
 
 // --- TelegramSender Effect Service ---
 
@@ -25,28 +26,6 @@ type TelegramApiResponse<T> = {
 	ok?: boolean
 	result?: T
 	description?: string
-}
-
-function splitTelegramText(text: string, maxLength = 4096): string[] {
-	if (text.length <= maxLength) return [text]
-	const chunks: string[] = []
-	let remaining = text
-	while (remaining.length > 0) {
-		if (remaining.length <= maxLength) {
-			chunks.push(remaining)
-			break
-		}
-		let splitIndex = remaining.lastIndexOf("\n", maxLength)
-		if (splitIndex < Math.floor(maxLength * 0.5)) {
-			splitIndex = remaining.lastIndexOf(" ", maxLength)
-		}
-		if (splitIndex < Math.floor(maxLength * 0.5)) {
-			splitIndex = maxLength
-		}
-		chunks.push(remaining.slice(0, splitIndex))
-		remaining = remaining.slice(splitIndex).trimStart()
-	}
-	return chunks
 }
 
 function makeTelegramApi(env: { TELEGRAM_BOT_TOKEN: string; TELEGRAM_API_BASE_URL?: string }) {
@@ -108,7 +87,7 @@ function buildTelegramSenderService(env: {
 	const api = makeTelegramApi(env)
 	return {
 		sendMessage: async (chatId: number, text: string) => {
-			for (const chunk of splitTelegramText(text)) {
+			for (const chunk of splitTelegramMessage(text)) {
 				await api.sendMessage(chatId, chunk)
 			}
 		},
@@ -183,26 +162,43 @@ export const TelegramReplySenderLive = Layer.effect(
 				).then(() => undefined),
 			postText: async (target: ReplyTarget, text: string): Promise<ReplyDraftHandle> => {
 				if (target.channel !== "telegram") return { id: crypto.randomUUID() }
-				let lastMessageId: string | null = null
-				for (const chunk of splitTelegramText(text)) {
+				const chunks = splitTelegramMessage(text)
+				const chunkIds: string[] = []
+				for (const chunk of chunks) {
 					const result = await api.sendMessage(target.chatId, chunk)
-					lastMessageId = String(result.message_id)
+					chunkIds.push(String(result.message_id))
 				}
-				return { id: lastMessageId ?? crypto.randomUUID() }
+				const lastId = chunkIds.at(-1) ?? crypto.randomUUID()
+				return { id: lastId, chunkIds: chunkIds.length > 1 ? chunkIds : undefined }
 			},
 			editText: async (target: ReplyTarget, draft: ReplyDraftHandle, text: string) => {
 				if (target.channel !== "telegram") return
+				const allIds = draft.chunkIds ?? [draft.id]
+				if (allIds.length > 1 || text.length > 4096) {
+					// Multi-chunk or oversized: delete all old chunks and post fresh
+					for (const chunkId of allIds) {
+						await api.deleteMessage(target.chatId, chunkId).catch(() => {})
+					}
+					const newChunks = splitTelegramMessage(text)
+					for (const chunk of newChunks) {
+						await api.sendMessage(target.chatId, chunk)
+					}
+					return
+				}
 				await api.editMessageText(target.chatId, draft.id, text)
 			},
 			deleteMessage: async (target: ReplyTarget, draft: ReplyDraftHandle) => {
 				if (target.channel !== "telegram") return
-				await api.deleteMessage(target.chatId, draft.id)
+				const allIds = draft.chunkIds ?? [draft.id]
+				for (const chunkId of allIds) {
+					await api.deleteMessage(target.chatId, chunkId).catch(() => {})
+				}
 			},
 			sendParts: async (target: ReplyTarget, parts: ReadonlyArray<ConversationMessagePart>) => {
 				if (target.channel !== "telegram") return
 				for (const part of parts) {
 					if (part.type === "text") {
-						for (const chunk of splitTelegramText(part.text)) {
+						for (const chunk of splitTelegramMessage(part.text)) {
 							await api.sendMessage(target.chatId, chunk)
 						}
 						continue

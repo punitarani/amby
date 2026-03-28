@@ -277,7 +277,7 @@ export function handleTurn(
 		const inboundText = requestMessages.map((message) => message.contentText).join("\n\n")
 		const currentAttachments = requestMessages.flatMap((message) =>
 			message.parts.flatMap((part) =>
-				part.type === "attachment"
+				part.type === "attachment" && part.attachment.status === "ready"
 					? [
 							{
 								id: part.attachment.id,

@@ -8,6 +8,7 @@ export type ReplyTarget = {
 
 export type ReplyDraftHandle = {
 	readonly id: string
+	readonly chunkIds?: readonly string[]
 }
 
 export interface ReplySenderService {

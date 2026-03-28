@@ -41,6 +41,22 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		const stored = await this.ctx.storage.get<SessionState>("state")
 		if (stored) {
 			this.state = stored
+			// Migrate legacy buffer entries (pre-attachment format)
+			this.state.buffer = this.state.buffer.map((entry) => {
+				const raw = entry as unknown as Record<string, unknown>
+				if ("text" in raw && !("parts" in raw)) {
+					return {
+						sourceMessageId: (raw.messageId as number) ?? 0,
+						date: (raw.date as number) ?? 0,
+						textSummary: (raw.text as string) ?? "",
+						parts: raw.text ? [{ type: "text" as const, text: raw.text as string }] : [],
+						mediaGroupId: null,
+						from: null,
+						rawSource: null,
+					} satisfies BufferedMessage
+				}
+				return entry
+			})
 		}
 		this.hydrated = true
 	}

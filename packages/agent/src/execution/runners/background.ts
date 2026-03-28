@@ -1,18 +1,9 @@
 import type { AttachmentService } from "@amby/attachments"
+import { sanitizeFilename } from "@amby/attachments"
 import type { TaskSupervisor } from "@amby/computer"
 import { Effect } from "effect"
 import type { ExecutionTask, ExecutionTaskResult } from "../../types/execution"
 import type { RunWriter } from "../ledger"
-
-function sanitizeFilename(filename: string): string {
-	const cleaned = filename
-		.trim()
-		.replaceAll(/[^A-Za-z0-9._-]+/g, "-")
-		.replaceAll(/-+/g, "-")
-		.replaceAll(/^\.+/, "")
-		.slice(0, 120)
-	return cleaned || "attachment.bin"
-}
 
 function readCurrentAttachments(metadata?: Record<string, unknown>) {
 	const value = metadata?.currentAttachments

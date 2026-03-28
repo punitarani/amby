@@ -279,7 +279,7 @@ export const handleTaskEventPost = (request: Request) =>
 							Effect.catchAll((error) =>
 								Effect.sync(() => {
 									console.error("[task-events] Failed to publish task artifacts:", error)
-									return []
+									return executionData.artifacts ?? []
 								}),
 							),
 						)

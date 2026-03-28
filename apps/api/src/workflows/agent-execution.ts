@@ -124,14 +124,17 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 							if (isEditing || !streamedText || isSubAgent) return
 							isEditing = true
 							try {
+								// Cap streaming preview at 4096 to avoid Telegram edit failures
+								const displayText =
+									streamedText.length > 4090 ? `${streamedText.slice(0, 4087)}...` : streamedText
 								if (!streamMessageId) {
-									const draft = await services.replySender.postText(replyTarget, streamedText)
+									const draft = await services.replySender.postText(replyTarget, displayText)
 									streamMessageId = draft?.id ?? null
 								} else {
 									await services.replySender.editText(
 										replyTarget,
 										{ id: streamMessageId },
-										streamedText,
+										displayText,
 									)
 								}
 							} catch {
@@ -221,9 +224,11 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 
 						if (streamMessageId) {
 							if (finalText) {
+								// Delete the streaming preview and post final (handles splitting)
 								await services.replySender
-									.editText(replyTarget, { id: streamMessageId }, finalText)
+									.deleteMessage(replyTarget, { id: streamMessageId })
 									.catch(() => {})
+								await services.replySender.postText(replyTarget, finalText)
 							} else {
 								await services.replySender
 									.deleteMessage(replyTarget, { id: streamMessageId })
@@ -234,7 +239,11 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 						}
 
 						if (!isSubAgent && attachmentParts.length > 0) {
-							await services.replySender.sendParts(replyTarget, attachmentParts)
+							try {
+								await services.replySender.sendParts(replyTarget, attachmentParts)
+							} catch (err) {
+								console.error("[Workflow] sendParts failed after text delivery:", err)
+							}
 						}
 
 						return finalText

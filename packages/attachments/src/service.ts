@@ -469,7 +469,7 @@ export const AttachmentServiceLive = Layer.effect(
 
 		const assertUserQuota = (userId: string, sizeBytes?: number | null) =>
 			Effect.gen(function* () {
-				if (!sizeBytes) return
+				if (sizeBytes == null) return
 				const total = yield* attachmentStore.getTotalReadyBytesForUser(userId).pipe(
 					Effect.mapError(
 						(error) =>
@@ -709,24 +709,30 @@ export const AttachmentServiceLive = Layer.effect(
 				}
 			}).pipe(
 				Effect.catchAll((error) =>
-					Effect.succeed({
-						type: "attachment" as const,
-						attachment: {
-							id: crypto.randomUUID(),
-							kind: params.part.attachment.kind,
-							mediaType:
-								params.part.attachment.mediaType ||
-								source.mediaType ||
-								inferMediaTypeFromFilename(params.part.attachment.filename) ||
-								"application/octet-stream",
-							filename: params.part.attachment.filename || source.filename,
-							sizeBytes: params.part.attachment.sizeBytes || source.sizeBytes,
-							title: params.part.attachment.title || params.part.attachment.filename || null,
-							status: "failed" as const,
-							metadata: {
-								error: error.message,
+					Effect.sync(() => {
+						console.error(
+							`[attachments] ingestAttachmentPart failed for conversation=${params.conversationId}:`,
+							error.message,
+						)
+						return {
+							type: "attachment" as const,
+							attachment: {
+								id: crypto.randomUUID(),
+								kind: params.part.attachment.kind,
+								mediaType:
+									params.part.attachment.mediaType ||
+									source.mediaType ||
+									inferMediaTypeFromFilename(params.part.attachment.filename) ||
+									"application/octet-stream",
+								filename: params.part.attachment.filename || source.filename,
+								sizeBytes: params.part.attachment.sizeBytes || source.sizeBytes,
+								title: params.part.attachment.title || params.part.attachment.filename || null,
+								status: "failed" as const,
+								metadata: {
+									error: error.message,
+								},
 							},
-						},
+						}
 					}),
 				),
 			)
@@ -793,7 +799,7 @@ export const AttachmentServiceLive = Layer.effect(
 							sizeBytes: record.sizeBytes,
 						})
 
-						if (policy.directText) {
+						if (policy.directText && policy.directModel) {
 							resolved.push({
 								type: "text",
 								text: `Attached file: ${record.originalFilename || record.id}\n\n${decodeUtf8(body)}`,
@@ -829,13 +835,19 @@ export const AttachmentServiceLive = Layer.effect(
 					return resolved
 				}),
 
-			linkMessageAttachments: ({ conversationId, threadId, messageId, parts }) =>
+			linkMessageAttachments: ({ userId, conversationId, threadId, messageId, parts }) =>
 				Effect.forEach(getAttachmentIds(parts), (attachmentId) =>
-					attachmentStore.updateAttachment(attachmentId, {
-						conversationId,
-						threadId,
-						messageId,
-					}),
+					attachmentStore.getByIdAndUser(attachmentId, userId).pipe(
+						Effect.flatMap((record) =>
+							record
+								? attachmentStore.updateAttachment(attachmentId, {
+										conversationId,
+										threadId,
+										messageId,
+									})
+								: Effect.succeed(null),
+						),
+					),
 				).pipe(
 					Effect.asVoid,
 					Effect.mapError(

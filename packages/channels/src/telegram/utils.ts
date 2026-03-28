@@ -1,3 +1,4 @@
+import { getFilenameExtension, summarizeAttachmentCounts } from "@amby/attachments"
 import {
 	TELEGRAM_RELINK_REQUIRED_MESSAGE,
 	TelegramIdentityService,
@@ -84,14 +85,6 @@ export type ParsedTelegramCommand = {
 	rawText: string
 }
 
-function getFilenameExtension(filename?: string | null): string | null {
-	if (!filename) return null
-	const trimmed = filename.trim()
-	const dotIndex = trimmed.lastIndexOf(".")
-	if (dotIndex <= 0 || dotIndex === trimmed.length - 1) return null
-	return trimmed.slice(dotIndex + 1).toLowerCase()
-}
-
 function inferBufferedAttachmentKind(params: {
 	mediaType?: string | null
 	filename?: string | null
@@ -114,32 +107,6 @@ function inferBufferedAttachmentKind(params: {
 		return "text"
 	}
 	return mediaType ? "document" : "binary"
-}
-
-function summarizeBufferedAttachments(parts: ReadonlyArray<BufferedAttachmentPart>): string {
-	if (parts.length === 0) return ""
-	const counts = new Map<AttachmentKind, number>()
-	for (const part of parts) {
-		counts.set(part.attachment.kind, (counts.get(part.attachment.kind) ?? 0) + 1)
-	}
-	const labels = (
-		[
-			["image", "image"],
-			["pdf", "PDF"],
-			["text", "text document"],
-			["document", "document"],
-			["binary", "file"],
-		] as const
-	)
-		.flatMap(([kind, label]) => {
-			const count = counts.get(kind)
-			return count ? `${count} ${label}${count === 1 ? "" : "s"}` : []
-		})
-		.slice(0, 3)
-	if (labels.length === 0) return "User sent attachments."
-	if (labels.length === 1) return `User sent ${labels[0]}.`
-	if (labels.length === 2) return `User sent ${labels[0]} and ${labels[1]}.`
-	return `User sent ${labels[0]}, ${labels[1]}, and ${labels[2]}.`
 }
 
 function buildBufferedAttachmentPartFromPhoto(
@@ -229,7 +196,8 @@ export function buildBufferedTelegramMessage(
 	const attachmentParts = parts.filter(
 		(part): part is BufferedAttachmentPart => part.type === "attachment",
 	)
-	const textSummary = text || summarizeBufferedAttachments(attachmentParts)
+	const textSummary =
+		text || summarizeAttachmentCounts(attachmentParts.map((p) => ({ kind: p.attachment.kind })))
 
 	return {
 		sourceMessageId: message.message_id,
