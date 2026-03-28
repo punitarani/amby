@@ -52,4 +52,4 @@ Hono, Effect, Sentry, PostHog, @chat-adapter/telegram, plus workspace packages: 
 
 - [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
 - [docs/RUNTIME.md](../../docs/RUNTIME.md)
-- [docs/CHANNELS.md](../../docs/CHANNELS.md)
+- [docs/channels/telegram.md](../../docs/channels/telegram.md)

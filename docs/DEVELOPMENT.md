@@ -67,7 +67,7 @@ Docker Compose runs PostgreSQL on port 54322 with pgvector enabled.
 
 ### Mock Channel
 
-The mock app emulates a Telegram-like chat interface for local testing without a real bot. Start it with `bun run mock` and set `TELEGRAM_API_BASE_URL` to point at it. See [CHANNELS.md](./CHANNELS.md) for details.
+The mock app emulates a Telegram-like chat interface for local testing without a real bot. Start it with `bun run mock` and set `TELEGRAM_API_BASE_URL` to point at it. See [channels/telegram.md](./channels/telegram.md) for details.
 
 ### Bun vs Worker API paths
 
@@ -114,5 +114,5 @@ Update documentation when code changes affect setup, commands, architecture, or 
 ## Further Reading
 
 - [ARCHITECTURE.md](../ARCHITECTURE.md) -- system map and module boundaries
-- [CHANNELS.md](./CHANNELS.md) -- channel integration details
+- [channels/telegram.md](./channels/telegram.md) -- channel integration details
 - [DATA_MODEL.md](./DATA_MODEL.md) -- data model and schema reference
