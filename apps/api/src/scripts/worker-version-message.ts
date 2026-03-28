@@ -34,7 +34,9 @@ function readGitStdout(args: string[]): string | undefined {
 }
 
 function buildShaFallbackMessage(commitSha?: string): string {
-	return commitSha ? `${DEFAULT_WORKER_VERSION_MESSAGE} ${commitSha}` : DEFAULT_WORKER_VERSION_MESSAGE
+	return commitSha
+		? `${DEFAULT_WORKER_VERSION_MESSAGE} ${commitSha}`
+		: DEFAULT_WORKER_VERSION_MESSAGE
 }
 
 export function resolveWorkerVersionMessage(
