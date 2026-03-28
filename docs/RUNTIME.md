@@ -20,12 +20,14 @@ sequenceDiagram
     Note over DO: debounce 3s, buffer messages
     DO->>WF: create(chatId, messages, from)
     WF->>WF: resolve user (findOrCreateUser)
-    WF->>AG: handleMessage / handleBatchedMessages
+    WF->>WF: ingest attachments (AttachmentService)
+    WF->>AG: handleStructuredMessage / handleStructuredBatch
     AG->>AG: resolveThread
-    AG->>AG: prepareConversationContext
+    AG->>AG: resolveModelMessageContent (current turn)
     AG->>AG: handleTurn (ToolLoopAgent)
-    AG-->>WF: AgentRunResult
-    WF->>TG2: send/edit response
+    AG-->>WF: AgentRunResult (text + attachment parts)
+    WF->>TG2: delete streaming draft + post final text
+    WF->>TG2: sendParts (photos, documents, signed links)
     WF->>DO: completeExecution(userId, conversationId)
 ```
 
@@ -46,12 +48,13 @@ Cloudflare Workflow with durable steps and retry:
 
 | Step | What it does |
 |------|-------------|
-| `typing` | Send Telegram typing indicator |
 | `resolve-user` | Map Telegram identity to DB user via `findOrCreateUser` |
-| `agent-loop` | Run AgentService (retries: 3, backoff: exponential, timeout: 5 min) |
+| `agent-loop` | Ingest attachments, run ConversationRuntime with structured messages, stream reply, deliver final parts (retries: 3, backoff: exponential, timeout: 5 min) |
 | `complete` | Notify DO that execution finished |
 
-Streaming: posts first chunk, then edits every 500ms. Long messages are split at the Telegram character limit.
+The `agent-loop` step handles attachment ingest (`AttachmentService.ingestBufferedMessages`), calls `handleStructuredMessage` / `handleStructuredBatch` on the agent, and sends final reply parts through `ReplySender`.
+
+Streaming: posts first chunk, then edits every 500ms. The streaming preview is capped at 4090 characters. On finalization, the streaming draft is deleted and the final response is posted fresh (which splits at Telegram's 4096-character limit when needed). Attachment parts are sent after the text reply via `sendParts`.
 
 ## Thread routing
 

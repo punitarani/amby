@@ -205,11 +205,12 @@ Per attachment, ingest does this:
 1. classify by MIME type, filename, and declared size
 2. compute a dedupe key
 3. reserve or reuse an attachment row
-4. reject over-limit or over-quota input
+4. reject over-limit or over-quota input based on declared size (when available)
 5. download source bytes from the transport when needed
-6. write bytes to blob storage
-7. hash and finalize the row
-8. return an `AttachmentRef` for message parts
+6. enforce the per-file size limit and per-user quota again using the actual downloaded byte count (Telegram may omit `file_size` metadata, so pre-download checks can be skipped — the post-download check is the authoritative enforcement)
+7. write bytes to blob storage
+8. hash and finalize the row
+9. return an `AttachmentRef` for message parts
 
 ## Dedupe and Lifecycle
 
@@ -299,6 +300,8 @@ Current limits:
 
 Everything else is stored but treated as sandbox-first in v1.
 
+`DIRECT_MODEL_FILE_MEDIA_TYPES` in `config.ts` exists as an extension point for future media types that should be sent directly to the model from the final fallback branch of `classifyAttachment`. It is currently empty — images, PDFs, and text-like types are all handled by earlier dedicated branches.
+
 ## Model Input Resolution
 
 Only the current user turn is rehydrated into model parts.
@@ -306,10 +309,10 @@ Only the current user turn is rehydrated into model parts.
 `AttachmentService.resolveModelMessageContent(...)` applies these rules:
 
 - text parts stay text
-- small text-like attachments are decoded to UTF-8 and inlined as text
-- ready images become image model parts
-- ready PDFs become file model parts
-- unsupported or unavailable files become short textual availability notes
+- small text-like attachments that are within the direct text size limit are decoded to UTF-8 and inlined as text (both `directText` and `directModel` must be true — a text file that exceeds `ATTACHMENT_DIRECT_TEXT_LIMIT_BYTES` falls through to the sandbox path)
+- ready images within the direct binary limit become image model parts
+- ready PDFs within the direct binary limit become file model parts
+- unsupported, oversized, or unavailable files become short textual availability notes
 
 Historical thread replay remains text-summary-first in v1.
 
@@ -319,7 +322,7 @@ Unsupported or oversized attachments still become canonical attachments. They ar
 
 When a background specialist needs them:
 
-1. the request metadata carries current attachment refs
+1. the request metadata carries current attachment refs (only `ready` attachments are included — failed or pending attachments are filtered out at the engine level)
 2. the background runner asks `AttachmentService` for signed download URLs
 3. `TaskSupervisor` stages those files into `tasks/{taskId}/inputs/`
 4. Codex receives instructions that point at the staged files
@@ -369,6 +372,8 @@ sequenceDiagram
 
 The sender implementation is channel-specific, but it works from channel-neutral reply parts.
 
+Each attachment part's delivery is error-isolated: if one attachment fails to send (including the signed-URL fallback), the remaining parts still attempt delivery. Errors are logged but do not abort the loop.
+
 ## Current Channel-Specific Reality
 
 Today, the implemented ingest transport is Telegram.
@@ -385,6 +390,12 @@ This split is intentional:
 
 - `docs/chat/attachments.md` explains the durable attachment model
 - `docs/channels/telegram.md` explains how Telegram plugs into that model
+
+## Backward Compatibility
+
+`ConversationSession` migrates legacy buffer entries on hydrate. Existing Durable Objects that stored the pre-attachment `{ text, messageId, date }` shape are transparently converted to the new `BufferedInboundMessage` format the first time they load.
+
+`ReplyDraftHandle` carries optional `chunkIds` for multi-chunk Telegram messages. The streaming preview is capped at 4090 characters to avoid Telegram `editMessageText` failures. On finalization, the streaming draft is always deleted and the final response is posted fresh, which handles splitting naturally.
 
 ## Current Non-Goals
 

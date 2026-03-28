@@ -209,27 +209,33 @@ export const TelegramReplySenderLive = Layer.effect(
 					const filename = attachment.filename || attachment.title || `${attachment.id}.bin`
 
 					try {
-						const { body, record } = await runPromise(
-							attachments.loadAttachmentContent(attachment.id),
-						)
-						if (
-							record.kind === "image" &&
-							(record.sizeBytes ?? body.byteLength) <= 20 * 1024 * 1024
-						) {
-							await api.sendPhoto(target.chatId, body, filename)
-							continue
+						let delivered = false
+						try {
+							const { body, record } = await runPromise(
+								attachments.loadAttachmentContent(attachment.id),
+							)
+							if (
+								record.kind === "image" &&
+								(record.sizeBytes ?? body.byteLength) <= 20 * 1024 * 1024
+							) {
+								await api.sendPhoto(target.chatId, body, filename)
+								delivered = true
+							} else if ((record.sizeBytes ?? body.byteLength) <= 20 * 1024 * 1024) {
+								await api.sendDocument(target.chatId, body, filename)
+								delivered = true
+							}
+						} catch {
+							// Fall through to signed-link delivery.
 						}
-						if ((record.sizeBytes ?? body.byteLength) <= 20 * 1024 * 1024) {
-							await api.sendDocument(target.chatId, body, filename)
-							continue
-						}
-					} catch {
-						// Fall through to signed-link delivery.
-					}
 
-					const url = await runPromise(attachments.buildSignedDownloadUrl(attachment.id))
-					const label = attachment.title || attachment.filename || "attachment"
-					await api.sendMessage(target.chatId, `Download ${label}: ${url}`)
+						if (!delivered) {
+							const url = await runPromise(attachments.buildSignedDownloadUrl(attachment.id))
+							const label = attachment.title || attachment.filename || "attachment"
+							await api.sendMessage(target.chatId, `Download ${label}: ${url}`)
+						}
+					} catch (err) {
+						console.error(`[sender] Failed to deliver attachment ${attachment.id}:`, err)
+					}
 				}
 			},
 		}

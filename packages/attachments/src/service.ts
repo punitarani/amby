@@ -654,6 +654,41 @@ export const AttachmentServiceLive = Layer.effect(
 					})
 
 					const updatedSize = downloaded.byteLength
+
+					// Post-download size enforcement — catches files where Telegram omitted file_size
+					if (updatedSize > ATTACHMENT_UPLOAD_LIMIT_BYTES) {
+						yield* attachmentStore
+							.updateAttachment(reserved.id, {
+								status: "failed",
+								metadata: {
+									...(reserved.metadata ?? {}),
+									error: `File exceeds the ${Math.floor(ATTACHMENT_UPLOAD_LIMIT_BYTES / (1024 * 1024))} MB upload limit (actual: ${updatedSize} bytes).`,
+								},
+							})
+							.pipe(
+								Effect.mapError(
+									(error) =>
+										new CoreError({
+											message: `Failed to mark oversized attachment ${reserved.id}`,
+											cause: error,
+										}),
+								),
+							)
+						return {
+							type: "attachment" as const,
+							attachment: toAttachmentRef({
+								...reserved,
+								status: "failed" as AttachmentStatus,
+								sizeBytes: updatedSize,
+								metadata: {
+									...(reserved.metadata ?? {}),
+									error: `File exceeds the ${Math.floor(ATTACHMENT_UPLOAD_LIMIT_BYTES / (1024 * 1024))} MB upload limit.`,
+								},
+							}),
+						}
+					}
+					yield* assertUserQuota(params.userId, updatedSize)
+
 					const previewText =
 						policy.directText && updatedSize <= 2048
 							? decodeUtf8(downloaded).slice(0, 512)

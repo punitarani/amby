@@ -5,7 +5,10 @@ export const ATTACHMENT_USER_QUOTA_BYTES = 1024 * 1024 * 1024
 export const ATTACHMENT_DOWNLOAD_TTL_MS = 15 * 60 * 1000
 
 export const DIRECT_MODEL_IMAGE_PREFIX = "image/"
-export const DIRECT_MODEL_FILE_MEDIA_TYPES = new Set(["application/pdf"])
+// Media types that reach the final fallback branch in classifyAttachment
+// and should still be sent directly to the model. Images, PDFs, and text-like
+// types are handled by earlier branches, so only list types that fall through.
+export const DIRECT_MODEL_FILE_MEDIA_TYPES = new Set<string>([])
 export const TEXT_LIKE_MEDIA_TYPES = new Set([
 	"text/plain",
 	"text/markdown",

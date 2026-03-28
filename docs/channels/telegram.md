@@ -252,7 +252,11 @@ There are three main outbound styles:
 - workflow replies via `ReplySender`
 - streamed workflow edits via the reply sender draft handle
 
-Long final text responses are split with `splitTelegramMessage(...)` to fit Telegram's message size limit. Images go through `sendPhoto`, documents go through `sendDocument`, and unsupported outbound files fall back to signed attachment URLs.
+Long final text responses are split with `splitTelegramMessage(...)` to fit Telegram's 4096-character message limit. Images go through `sendPhoto`, documents go through `sendDocument`, and unsupported outbound files fall back to signed attachment URLs.
+
+Streaming behavior: during text streaming, the preview is capped at 4090 characters (with `...` truncation) so a single Telegram message is used. On finalization, the streaming draft is always deleted and the complete response is posted fresh via `postText`, which splits naturally into multiple messages when needed. `ReplyDraftHandle` tracks `chunkIds` so that `deleteMessage` can clean up all chunks of a multi-message reply.
+
+Each attachment part in `sendParts` is error-isolated: if delivery fails for one part (including the signed-URL fallback), the remaining parts still attempt delivery.
 
 ## Local Bun path
 
