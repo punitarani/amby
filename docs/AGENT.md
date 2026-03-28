@@ -174,7 +174,7 @@ Tool calls and results are recorded in traces, not flattened into `messages`.
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — full system map
 - [BROWSER_AND_COMPUTER.md](./BROWSER_AND_COMPUTER.md) — browser and sandbox execution
 - [MEMORY.md](./MEMORY.md) — memory system
-- [CHANNELS.md](./CHANNELS.md) — Telegram integration
+- [channels/telegram.md](./channels/telegram.md) — Telegram integration
 - [PLUGINS_AND_SKILLS.md](./PLUGINS_AND_SKILLS.md) — plugin and skill system
 - [RUNTIME.md](./RUNTIME.md) — runtime flows and workflows
 
