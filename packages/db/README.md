@@ -42,9 +42,14 @@ import * as schema from "@amby/db/schema"
 | Script | Purpose |
 |--------|---------|
 | `db:generate` | Generate a new migration from schema changes |
+| `db:generate:check` | Fail when schema changes exist without a committed migration |
+| `db:check` | Validate Drizzle migration-history consistency |
 | `db:migrate` | Apply pending migrations |
+| `db:validate` | CI-style validation: generate check, migrate, then check |
 | `db:push` | Push schema directly (dev only) |
 | `db:studio` | Open Drizzle Studio GUI |
+
+CI uses the checked-in migration flow only: `generate` produces SQL, `migrate` applies it to a fresh database, and `check` validates the migration history. `db:push` remains a local-only shortcut for fast iteration.
 
 ## Links
 
