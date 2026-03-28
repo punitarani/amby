@@ -69,6 +69,11 @@ Docker Compose runs PostgreSQL on port 54322 with pgvector enabled.
 
 The mock app emulates a Telegram-like chat interface for local testing without a real bot. Start it with `bun run mock` and set `TELEGRAM_API_BASE_URL` to point at it. See [CHANNELS.md](./CHANNELS.md) for details.
 
+### Bun vs Worker API paths
+
+- `bun run api:dev` uses the Bun entrypoint in `apps/api/src/index.ts` and keeps Chat SDK state in memory.
+- `bun run api:dev:worker` uses the Cloudflare Worker entrypoint in `apps/api/src/worker.ts` and exercises the Durable Object-backed Chat SDK state path used in production.
+
 ## Testing
 
 **Framework:** Bun's native test runner (`bun:test`).

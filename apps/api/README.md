@@ -7,6 +7,7 @@ Core backend service — Telegram bot, agent orchestration, and HTTP API.
 - Receive and process Telegram webhook events
 - Orchestrate agent execution, sandbox provisioning, and volume provisioning workflows
 - Manage per-chat conversation state via Durable Objects
+- Persist Chat SDK transport state in the Worker runtime via a dedicated Durable Object
 - Expose HTTP endpoints (health, link redirects, Composio OAuth, webhook)
 - Queue-based async task processing
 
@@ -22,14 +23,14 @@ Core backend service — Telegram bot, agent orchestration, and HTTP API.
 |------|---------|
 | `src/index.ts` | Local Bun entrypoint |
 | `src/worker.ts` | Cloudflare Workers entrypoint |
-| `src/bot.ts` | Telegram bot setup and message handlers |
 | `src/workflows/agent-execution.ts` | Agent execution workflow |
 | `src/workflows/sandbox-provision.ts` | Sandbox provisioning workflow |
 | `src/workflows/volume-provision.ts` | Volume provisioning workflow |
 | `src/durable-objects/conversation-session.ts` | Per-chat session state |
+| `src/durable-objects/chat-state.ts` | Chat SDK state DO and Worker-facing state exports |
+| `src/chat-state/` | Worker-only Chat SDK state adapter |
 | `src/queue/` | Queue consumer |
 | `src/handlers/` | Event handlers (task-events, reconciliation) |
-| `src/telegram/` | Telegram utilities |
 
 ## Running
 

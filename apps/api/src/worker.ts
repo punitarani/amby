@@ -12,7 +12,12 @@ import * as Sentry from "@sentry/cloudflare"
 import { Effect, Either } from "effect"
 import { Hono } from "hono"
 import { HTTPException } from "hono/http-exception"
+import {
+	type ChatStateNamespaceLike,
+	createCloudflareChatState,
+} from "./chat-state/cloudflare-chat-state"
 import { handleExpiredConnectedAccount } from "./composio/expired-account"
+import { ChatStateDO as ChatStateDOBase } from "./durable-objects/chat-state"
 import { ConversationSession as ConversationSessionBase } from "./durable-objects/conversation-session"
 import { handleScheduledReconciliation } from "./handlers/reconciliation"
 import { handleTaskEventPost } from "./handlers/task-events"
@@ -30,6 +35,10 @@ export const ConversationSession = Sentry.instrumentDurableObjectWithSentry(
 	getSentryOptionsOrFallback,
 	ConversationSessionBase,
 )
+export const ChatStateDO = Sentry.instrumentDurableObjectWithSentry(
+	getSentryOptionsOrFallback,
+	ChatStateDOBase,
+)
 export const AgentExecutionWorkflow = Sentry.instrumentWorkflowWithSentry(
 	getSentryOptionsOrFallback,
 	AgentExecutionWorkflowBase,
@@ -43,7 +52,11 @@ export const VolumeProvisionWorkflow = Sentry.instrumentWorkflowWithSentry(
 	VolumeProvisionWorkflowBase,
 )
 
-type Env = { Bindings: WorkerBindings; Variables: { posthogDistinctId?: string } }
+type ApiBindings = WorkerBindings & {
+	CHAT_STATE: ChatStateNamespaceLike
+}
+
+type Env = { Bindings: ApiBindings; Variables: { posthogDistinctId?: string } }
 
 const app = new Hono<Env>()
 
@@ -136,7 +149,11 @@ const chatSdkDeps: ChatSdkDeps = {
 
 // Webhook handler — Chat SDK handles secret verification, parsing, and routing via waitUntil
 app.post("/telegram/webhook", async (c) => {
-	const { chat } = getOrCreateChat(c.env, chatSdkDeps)
+	const { chat } = getOrCreateChat(
+		c.env,
+		chatSdkDeps,
+		createCloudflareChatState({ namespace: c.env.CHAT_STATE }),
+	)
 	return chat.webhooks.telegram(c.req.raw, {
 		waitUntil: (task) => c.executionCtx.waitUntil(task),
 	})
@@ -211,17 +228,17 @@ app.post("/composio/webhook", async (c) => {
 	}
 })
 
-const worker: ExportedHandler<WorkerBindings, TelegramQueueMessage> = {
+const worker: ExportedHandler<ApiBindings, TelegramQueueMessage> = {
 	fetch: app.fetch,
 
-	async queue(batch: MessageBatch<TelegramQueueMessage>, env: WorkerBindings) {
+	async queue(batch: MessageBatch<TelegramQueueMessage>, env: ApiBindings) {
 		await handleQueueBatch(batch, env)
 	},
 
-	async scheduled(_controller: ScheduledController, env: WorkerBindings, _ctx: ExecutionContext) {
+	async scheduled(_controller: ScheduledController, env: ApiBindings, _ctx: ExecutionContext) {
 		await handleScheduledReconciliation(env)
 	},
 }
 
 // `withSentry` wraps the full `ExportedHandler` (fetch + queue + scheduled); cron is preserved.
-export default Sentry.withSentry<WorkerBindings, TelegramQueueMessage>(getSentryOptions, worker)
+export default Sentry.withSentry<ApiBindings, TelegramQueueMessage>(getSentryOptions, worker)

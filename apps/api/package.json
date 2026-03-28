@@ -4,7 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"test": "echo 'No tests — tests moved to @amby/channels'",
+		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
 		"dev": "bun run --hot src/index.ts",

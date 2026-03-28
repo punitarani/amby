@@ -74,7 +74,9 @@ The `findOrCreateUser` function in `apps/api/src/telegram/utils.ts` handles upse
 | `TELEGRAM_WEBHOOK_SECRET` | Verifies inbound webhook requests |
 | `TELEGRAM_API_BASE_URL` | Override Bot API URL (used for mock channel) |
 
-The bot initializes in `apps/api/src/index.ts` via `@chat-adapter/telegram` in `"auto"` mode: polling in dev, webhook when deployed.
+The local Bun bot initializes in `apps/api/src/index.ts` via `@chat-adapter/telegram` in `"auto"` mode and keeps the in-memory Chat SDK state adapter for Bun-only development.
+
+The Cloudflare Worker path in `apps/api/src/worker.ts` uses a dedicated `ChatStateDO` Durable Object for Chat SDK subscriptions, locks, dedupe keys, and message history. The higher-level per-chat debounce/workflow state remains in the separate `ConversationSession` Durable Object.
 
 Bot commands (`/start`, `/stop`, `/help`) are registered via `setMyCommands` at startup.
 
