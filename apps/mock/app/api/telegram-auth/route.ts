@@ -40,6 +40,10 @@ const signMiniAppInitData = async (initDataEntries: Record<string, string>, botT
 }
 
 export async function POST(request: Request) {
+	if (process.env.NODE_ENV === "production") {
+		return NextResponse.json({ error: "Not available in production" }, { status: 403 })
+	}
+
 	const { user } = (await request.json()) as { user?: MockUserConfig }
 	if (!user) {
 		return NextResponse.json({ error: "Missing mock user config" }, { status: 400 })

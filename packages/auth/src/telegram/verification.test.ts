@@ -1,31 +1,11 @@
 import { describe, expect, it } from "bun:test"
+import { hmacSha256Bytes, sha256Bytes, toHex } from "./crypto"
 import {
 	parseTelegramMiniAppProfile,
 	parseTelegramWidgetProfile,
 	verifyTelegramMiniAppInitData,
 	verifyTelegramWidgetAuth,
 } from "./verification"
-
-const textEncoder = new TextEncoder()
-
-const toHex = (bytes: Uint8Array) =>
-	[...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
-
-const hmacSha256Bytes = async (keyData: string | Uint8Array, message: string) => {
-	const rawKey = typeof keyData === "string" ? textEncoder.encode(keyData) : keyData
-	const key = await crypto.subtle.importKey(
-		"raw",
-		Uint8Array.from(rawKey).buffer,
-		{ name: "HMAC", hash: "SHA-256" },
-		false,
-		["sign"],
-	)
-	const signature = await crypto.subtle.sign("HMAC", key, textEncoder.encode(message))
-	return new Uint8Array(signature)
-}
-
-const sha256Bytes = async (value: string) =>
-	new Uint8Array(await crypto.subtle.digest("SHA-256", textEncoder.encode(value)))
 
 const signWidgetAuthData = async (authData: Record<string, string>, botToken: string) => {
 	const dataCheckString = Object.entries(authData)

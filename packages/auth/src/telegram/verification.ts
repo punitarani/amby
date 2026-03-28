@@ -1,48 +1,15 @@
+import {
+	base64UrlToString,
+	hmacSha256Bytes,
+	hmacSha256Hex,
+	sha256Bytes,
+	stableCompare,
+} from "./crypto"
 import type {
 	TelegramIdentityProfile,
 	TelegramMiniAppPayload,
 	TelegramWidgetAuthData,
 } from "./types"
-
-const textEncoder = new TextEncoder()
-const textDecoder = new TextDecoder()
-
-const stableCompare = (left: string, right: string) => {
-	if (left.length !== right.length) {
-		return false
-	}
-
-	let mismatch = 0
-	for (let index = 0; index < left.length; index += 1) {
-		mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index)
-	}
-	return mismatch === 0
-}
-
-const toHex = (bytes: Uint8Array) =>
-	[...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
-
-const hmacSha256Bytes = async (keyData: string | Uint8Array, message: string) => {
-	const rawKey = typeof keyData === "string" ? textEncoder.encode(keyData) : keyData
-	const normalizedKey = Uint8Array.from(rawKey)
-	const cryptoKey = await crypto.subtle.importKey(
-		"raw",
-		normalizedKey.buffer,
-		{ name: "HMAC", hash: "SHA-256" },
-		false,
-		["sign"],
-	)
-	const signature = await crypto.subtle.sign("HMAC", cryptoKey, textEncoder.encode(message))
-	return new Uint8Array(signature)
-}
-
-const sha256Bytes = async (value: string) => {
-	const digest = await crypto.subtle.digest("SHA-256", textEncoder.encode(value))
-	return new Uint8Array(digest)
-}
-
-const hmacSha256Hex = async (keyData: string | Uint8Array, message: string) =>
-	toHex(await hmacSha256Bytes(keyData, message))
 
 const parseUnixTimestamp = (value: string) => {
 	const parsed = Number.parseInt(value, 10)
@@ -66,13 +33,6 @@ const toWidgetCheckString = (authData: TelegramWidgetAuthData) =>
 		.sort(([left], [right]) => left.localeCompare(right))
 		.map(([key, value]) => `${key}=${value}`)
 		.join("\n")
-
-const base64UrlToString = (value: string) => {
-	const normalized = value.replace(/-/g, "+").replace(/_/g, "/")
-	const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=")
-	const binary = atob(padded)
-	return textDecoder.decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)))
-}
 
 const parseMiniAppData = (initData: string) => {
 	const params = new URLSearchParams(initData)

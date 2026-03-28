@@ -1,5 +1,4 @@
 export * from "./auth-service"
-export * from "./client"
 export * from "./create-auth"
 export * from "./telegram/constants"
 export * from "./telegram/identity-service"

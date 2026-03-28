@@ -256,7 +256,7 @@ const createAccountFromTelegram = (
 	metadata: buildAccountMetadata(input),
 })
 
-const createIdentityBlock = async (db: Database, telegramUserId: string, userId: string) => {
+const createIdentityBlock = async (db: DbExecutor, telegramUserId: string, userId: string) => {
 	await db
 		.insert(schema.telegramIdentityBlocks)
 		.values({
@@ -283,8 +283,10 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 		const telegramUserId = toTelegramUserId(input.profile)
 		const existingAccount = await findAccountByTelegramUserId(db, telegramUserId)
 		if (existingAccount) {
-			await updateUserFromTelegram(db, existingAccount.userId, input)
-			await updateAccountFromTelegram(db, existingAccount.id, input)
+			await Promise.all([
+				updateUserFromTelegram(db, existingAccount.userId, input),
+				updateAccountFromTelegram(db, existingAccount.id, input),
+			])
 			return {
 				status: "provisioned",
 				userId: existingAccount.userId,
@@ -305,8 +307,10 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 				const executor: DbExecutor = tx
 				const recheck = await findAccountByTelegramUserId(executor, telegramUserId)
 				if (recheck) {
-					await updateUserFromTelegram(executor, recheck.userId, input)
-					await updateAccountFromTelegram(executor, recheck.id, input)
+					await Promise.all([
+						updateUserFromTelegram(executor, recheck.userId, input),
+						updateAccountFromTelegram(executor, recheck.id, input),
+					])
 					return {
 						status: "provisioned" as const,
 						userId: recheck.userId,
@@ -327,8 +331,10 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 		} catch (error) {
 			const retried = await findAccountByTelegramUserId(db, telegramUserId)
 			if (retried) {
-				await updateUserFromTelegram(db, retried.userId, input)
-				await updateAccountFromTelegram(db, retried.id, input)
+				await Promise.all([
+					updateUserFromTelegram(db, retried.userId, input),
+					updateAccountFromTelegram(db, retried.id, input),
+				])
 				return {
 					status: "provisioned",
 					userId: retried.userId,
@@ -343,11 +349,15 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 		const telegramUserId = toTelegramUserId(input.profile)
 		const existingAccount = await findAccountByTelegramUserId(db, telegramUserId)
 		if (existingAccount) {
-			await clearIdentityBlock(db, telegramUserId)
-			await updateUserFromTelegram(db, existingAccount.userId, input, {
-				setEmailOnEmpty: true,
-			})
-			await updateAccountFromTelegram(db, existingAccount.id, input)
+			// An active linked account takes precedence over a stale identity block (tombstone).
+			// Browser sign-in to an already-linked account clears the block as a side effect.
+			await Promise.all([
+				clearIdentityBlock(db, telegramUserId),
+				updateUserFromTelegram(db, existingAccount.userId, input, {
+					setEmailOnEmpty: true,
+				}),
+				updateAccountFromTelegram(db, existingAccount.id, input),
+			])
 			return { status: "signed-in", userId: existingAccount.userId, created: false }
 		}
 
@@ -361,10 +371,12 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 				const executor: DbExecutor = tx
 				const recheck = await findAccountByTelegramUserId(executor, telegramUserId)
 				if (recheck) {
-					await updateUserFromTelegram(executor, recheck.userId, input, {
-						setEmailOnEmpty: true,
-					})
-					await updateAccountFromTelegram(executor, recheck.id, input)
+					await Promise.all([
+						updateUserFromTelegram(executor, recheck.userId, input, {
+							setEmailOnEmpty: true,
+						}),
+						updateAccountFromTelegram(executor, recheck.id, input),
+					])
 					return { status: "signed-in" as const, userId: recheck.userId, created: false }
 				}
 
@@ -381,10 +393,12 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 		} catch (error) {
 			const retried = await findAccountByTelegramUserId(db, telegramUserId)
 			if (retried) {
-				await updateUserFromTelegram(db, retried.userId, input, {
-					setEmailOnEmpty: true,
-				})
-				await updateAccountFromTelegram(db, retried.id, input)
+				await Promise.all([
+					updateUserFromTelegram(db, retried.userId, input, {
+						setEmailOnEmpty: true,
+					}),
+					updateAccountFromTelegram(db, retried.id, input),
+				])
 				return { status: "signed-in", userId: retried.userId, created: false }
 			}
 
@@ -403,11 +417,13 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 			if (existingAccount.userId !== userId) {
 				throw new Error("Telegram account is already linked to another user")
 			}
-			await clearIdentityBlock(db, telegramUserId)
-			await updateUserFromTelegram(db, userId, input, {
-				setEmailOnEmpty: true,
-			})
-			await updateAccountFromTelegram(db, existingAccount.id, input)
+			await Promise.all([
+				clearIdentityBlock(db, telegramUserId),
+				updateUserFromTelegram(db, userId, input, {
+					setEmailOnEmpty: true,
+				}),
+				updateAccountFromTelegram(db, existingAccount.id, input),
+			])
 			return { userId, linked: false }
 		}
 
@@ -446,13 +462,15 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 			.select({ id: schema.accounts.id })
 			.from(schema.accounts)
 			.where(eq(schema.accounts.userId, userId))
+			.limit(2)
 		if (!canSafelyUnlinkTelegram(accountCountRows.length)) {
 			throw new Error("Telegram cannot be unlinked because it is the only auth method")
 		}
 
 		await db.transaction(async (tx) => {
-			await tx.delete(schema.accounts).where(eq(schema.accounts.id, account.id))
-			await tx
+			const executor: DbExecutor = tx
+			await executor.delete(schema.accounts).where(eq(schema.accounts.id, account.id))
+			await executor
 				.update(schema.users)
 				.set({
 					telegramUsername: null,
@@ -460,7 +478,7 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 					updatedAt: new Date(),
 				})
 				.where(eq(schema.users.id, userId))
-			await createIdentityBlock(tx as unknown as Database, account.accountId, userId)
+			await createIdentityBlock(executor, account.accountId, userId)
 		})
 
 		return { telegramUserId: account.accountId }

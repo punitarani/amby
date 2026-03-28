@@ -18,8 +18,6 @@ import { Effect } from "effect"
 import { getPostHogClient } from "../posthog"
 import { TelegramSender } from "./sender"
 
-// --- Types ---
-
 export interface TelegramFrom {
 	id: number
 	first_name: string
@@ -63,8 +61,6 @@ export type ParsedTelegramCommand = {
 	payload?: string
 	rawText: string
 }
-
-// --- Utilities ---
 
 const toTelegramProvisionInput = (from: TelegramFrom, chatId: number): TelegramProvisionInput => ({
 	source: "bot",
@@ -249,10 +245,6 @@ export const parseTelegramCommand = (
 	}
 }
 
-/**
- * Handle simple stateless commands (/start, /stop, /help) inline.
- * Returns an Effect that sends the appropriate response via the Telegram Bot API.
- */
 export const handleCommand = (
 	command: ParsedTelegramCommand,
 	from: TelegramFrom,
@@ -315,7 +307,6 @@ export const handleCommand = (
 		}
 	})
 
-/** Split a long message into chunks that fit within Telegram's 4096-char limit. */
 export const splitTelegramMessage = (text: string, maxLength = 4096): string[] => {
 	if (text.length <= maxLength) return [text]
 

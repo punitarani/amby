@@ -25,3 +25,14 @@ export const getAuthTrustedOrigins = (
 	}
 	return [...origins]
 }
+
+export const resolveAuthCorsOrigin = (
+	origin: string | undefined,
+	env: Pick<Env, "APP_URL" | "API_URL" | "BETTER_AUTH_URL" | "NODE_ENV">,
+) => {
+	const allowedOrigins = new Set(getAuthTrustedOrigins(env))
+	if (!origin) {
+		return env.APP_URL || ""
+	}
+	return allowedOrigins.has(origin) ? origin : ""
+}

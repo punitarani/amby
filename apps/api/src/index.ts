@@ -1,5 +1,5 @@
 import { ModelServiceLive } from "@amby/agent"
-import { AuthLive, AuthService, getAuthTrustedOrigins } from "@amby/auth"
+import { AuthLive, AuthService, resolveAuthCorsOrigin } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { createAmbyBot, TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
@@ -46,25 +46,17 @@ const runtime = ManagedRuntime.make(SharedLive)
 
 const app = new Hono()
 
-const resolveAuthCorsOrigin = (origin?: string | null) => {
-	const allowedOrigins = new Set(
-		getAuthTrustedOrigins({
-			NODE_ENV: process.env.NODE_ENV ?? "development",
-			APP_URL: process.env.APP_URL ?? "http://localhost:3000",
-			API_URL: process.env.API_URL ?? "http://localhost:3001",
-			BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:3001",
-		}),
-	)
-	if (!origin) {
-		return process.env.APP_URL ?? "http://localhost:3000"
-	}
-	return allowedOrigins.has(origin) ? origin : ""
+const localAuthEnv = {
+	NODE_ENV: process.env.NODE_ENV ?? "development",
+	APP_URL: process.env.APP_URL ?? "http://localhost:3000",
+	API_URL: process.env.API_URL ?? "http://localhost:3001",
+	BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:3001",
 }
 
 app.use(
 	"/api/auth/*",
 	cors({
-		origin: resolveAuthCorsOrigin,
+		origin: (origin) => resolveAuthCorsOrigin(origin, localAuthEnv),
 		allowMethods: ["GET", "POST", "OPTIONS"],
 		allowHeaders: ["Content-Type", "Authorization"],
 		exposeHeaders: ["Set-Cookie"],

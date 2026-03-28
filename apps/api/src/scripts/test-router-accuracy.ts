@@ -20,7 +20,7 @@ import {
 	makeModelServiceLive,
 	ROUTER_MODEL_ID,
 } from "@amby/agent"
-import { AuthServiceLive } from "@amby/auth"
+import { AuthLive } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import {
@@ -371,7 +371,7 @@ const ServicesLive = Layer.mergeAll(
 	AutomationServiceLive,
 	TaskSupervisorLive,
 	makeModelServiceLive(modelArg),
-	AuthServiceLive,
+	AuthLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
 ).pipe(Layer.provideMerge(InfraLive))

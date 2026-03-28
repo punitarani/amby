@@ -2,7 +2,11 @@ import type { Env } from "@amby/env"
 import { APIError, createAuthEndpoint, sessionMiddleware } from "better-auth/api"
 import { setSessionCookie } from "better-auth/cookies"
 import type { BetterAuthPlugin } from "better-auth/types"
-import { TELEGRAM_PROVIDER_ID, TELEGRAM_RELINK_REQUIRED_MESSAGE } from "./constants"
+import {
+	getTelegramBotId,
+	TELEGRAM_PROVIDER_ID,
+	TELEGRAM_RELINK_REQUIRED_MESSAGE,
+} from "./constants"
 import type { TelegramIdentityServiceApi } from "./identity-service"
 import { telegramMiniAppSignInSchema, telegramWidgetEndpointBodySchema } from "./schemas"
 import {
@@ -39,6 +43,11 @@ const assertTelegramConfigured = (
 	}
 }
 
+/**
+ * Origin-based CSRF protection as a defense-in-depth layer.
+ * When Origin is absent (e.g., same-origin POST), the Telegram
+ * cryptographic signature on the payload still protects the endpoint.
+ */
 const assertTrustedOrigin = (ctx: {
 	headers?: Headers
 	context: {
@@ -70,8 +79,10 @@ const createSessionForUser = async (
 	userId: string,
 	rememberMe?: boolean,
 ) => {
-	const session = await ctx.context.internalAdapter.createSession(userId, rememberMe === false)
-	const user = await ctx.context.internalAdapter.findUserById(userId)
+	const [session, user] = await Promise.all([
+		ctx.context.internalAdapter.createSession(userId, rememberMe === false),
+		ctx.context.internalAdapter.findUserById(userId),
+	])
 	if (!user) {
 		throw APIError.fromStatus("BAD_REQUEST", {
 			message: "Unable to load Better Auth user after Telegram sign-in",
@@ -155,7 +166,7 @@ export const telegram = ({ env, telegramIdentity }: TelegramPluginOptions) =>
 							Boolean(env.TELEGRAM_BOT_TOKEN) && env.TELEGRAM_LOGIN_WIDGET_ENABLED,
 						miniAppEnabled: Boolean(env.TELEGRAM_BOT_TOKEN) && env.TELEGRAM_MINI_APP_ENABLED,
 						oidcEnabled: Boolean(
-							(env.TELEGRAM_OIDC_CLIENT_ID || env.TELEGRAM_BOT_TOKEN.split(":")[0] || "") &&
+							(env.TELEGRAM_OIDC_CLIENT_ID || getTelegramBotId(env.TELEGRAM_BOT_TOKEN) || "") &&
 								env.TELEGRAM_OIDC_CLIENT_SECRET,
 						),
 						providerId: TELEGRAM_PROVIDER_ID,

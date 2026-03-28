@@ -5,3 +5,8 @@ export const TELEGRAM_RELINK_REQUIRED_MESSAGE =
 
 export const TELEGRAM_OIDC_DISCOVERY_URL =
 	"https://oauth.telegram.org/.well-known/openid-configuration"
+
+export const getTelegramBotId = (botToken: string): string | undefined => {
+	const id = botToken.split(":")[0]?.trim()
+	return id || undefined
+}

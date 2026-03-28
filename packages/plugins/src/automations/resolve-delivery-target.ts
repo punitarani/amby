@@ -1,6 +1,9 @@
 import type { Database } from "@amby/db"
 import { and, eq, schema } from "@amby/db"
 
+// Canonical source: @amby/auth/src/telegram/constants.ts — duplicated here to avoid circular dep
+const TELEGRAM_PROVIDER_ID = "telegram"
+
 /**
  * Resolve the delivery target for an automation from the conversation context.
  *
@@ -28,7 +31,9 @@ export async function resolveDeliveryTarget(
 	const accRows = await db
 		.select({ telegramChatId: schema.accounts.telegramChatId })
 		.from(schema.accounts)
-		.where(and(eq(schema.accounts.userId, userId), eq(schema.accounts.providerId, "telegram")))
+		.where(
+			and(eq(schema.accounts.userId, userId), eq(schema.accounts.providerId, TELEGRAM_PROVIDER_ID)),
+		)
 		.limit(1)
 
 	const chatId = accRows[0]?.telegramChatId ? Number.parseInt(accRows[0].telegramChatId, 10) : NaN

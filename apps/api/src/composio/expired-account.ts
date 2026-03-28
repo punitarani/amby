@@ -1,3 +1,4 @@
+import { TELEGRAM_PROVIDER_ID } from "@amby/auth"
 import { TelegramSender } from "@amby/channels"
 import { getTelegramChatId } from "@amby/computer"
 import { and, DbService, eq, inArray, schema } from "@amby/db"
@@ -57,7 +58,7 @@ export const handleExpiredConnectedAccount = (connectedAccountId: string) =>
 							.from(schema.accounts)
 							.where(
 								and(
-									eq(schema.accounts.providerId, "telegram"),
+									eq(schema.accounts.providerId, TELEGRAM_PROVIDER_ID),
 									inArray(schema.accounts.userId, userIds),
 								),
 							),

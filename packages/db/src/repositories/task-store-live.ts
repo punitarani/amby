@@ -6,6 +6,9 @@ import type { DbError } from "../errors"
 import * as schema from "../schema"
 import { DbService } from "../service"
 
+// Canonical source: @amby/auth/src/telegram/constants.ts — duplicated here to avoid circular dep
+const TELEGRAM_PROVIDER_ID = "telegram"
+
 export const TaskStoreLive = Layer.effect(
 	TaskStore,
 	Effect.gen(function* () {
@@ -331,7 +334,10 @@ export const TaskStoreLive = Layer.effect(
 						.select({ telegramChatId: schema.accounts.telegramChatId })
 						.from(schema.accounts)
 						.where(
-							and(eq(schema.accounts.userId, userId), eq(schema.accounts.providerId, "telegram")),
+							and(
+								eq(schema.accounts.userId, userId),
+								eq(schema.accounts.providerId, TELEGRAM_PROVIDER_ID),
+							),
 						)
 						.limit(1)
 					const raw = rows[0]?.telegramChatId

@@ -1,6 +1,7 @@
 import type { Env } from "@amby/env"
 import type { GenericOAuthConfig } from "better-auth/plugins/generic-oauth"
-import { TELEGRAM_OIDC_DISCOVERY_URL } from "./constants"
+import { getTelegramBotId, TELEGRAM_OIDC_DISCOVERY_URL } from "./constants"
+import { base64UrlToUint8Array } from "./crypto"
 import type { TelegramIdentityServiceApi } from "./identity-service"
 import { decodeBase64UrlJson } from "./verification"
 
@@ -65,8 +66,7 @@ const getTelegramOidcClientId = (
 	if (env.TELEGRAM_OIDC_CLIENT_ID) {
 		return env.TELEGRAM_OIDC_CLIENT_ID
 	}
-	const fallback = env.TELEGRAM_BOT_TOKEN.split(":")[0]?.trim()
-	return fallback || undefined
+	return getTelegramBotId(env.TELEGRAM_BOT_TOKEN)
 }
 
 const getDiscovery = async (): Promise<TelegramOidcDiscovery> => {
@@ -104,17 +104,8 @@ const getJwks = async (jwksUrl: string): Promise<JsonWebKeySet> => {
 	return jwks
 }
 
-const toUint8Array = (value: string) => textEncoder.encode(value)
-
-const base64UrlToUint8Array = (value: string) => {
-	const normalized = value.replace(/-/g, "+").replace(/_/g, "/")
-	const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=")
-	const binary = atob(padded)
-	return Uint8Array.from(binary, (char) => char.charCodeAt(0))
-}
-
 const verifyJwtSignature = async (
-	idToken: string,
+	segments: { header: string; payload: string; signature: string },
 	header: TelegramOidcJwtHeader,
 	jwks: JsonWebKeySet,
 ) => {
@@ -125,11 +116,6 @@ const verifyJwtSignature = async (
 	const jwk = jwks.keys.find((key) => key.kid === header.kid)
 	if (!jwk) {
 		throw new Error("Telegram OIDC signing key not found")
-	}
-
-	const [encodedHeader, encodedPayload, encodedSignature] = idToken.split(".")
-	if (!encodedHeader || !encodedPayload || !encodedSignature) {
-		throw new Error("Invalid Telegram OIDC id_token format")
 	}
 
 	const cryptoKey = await crypto.subtle.importKey(
@@ -146,8 +132,8 @@ const verifyJwtSignature = async (
 	const verified = await crypto.subtle.verify(
 		"RSASSA-PKCS1-v1_5",
 		cryptoKey,
-		base64UrlToUint8Array(encodedSignature),
-		toUint8Array(`${encodedHeader}.${encodedPayload}`),
+		base64UrlToUint8Array(segments.signature),
+		textEncoder.encode(`${segments.header}.${segments.payload}`),
 	)
 
 	if (!verified) {
@@ -180,8 +166,8 @@ const validateClaims = (
 
 export const verifyTelegramOidcIdToken = async (idToken: string, options: { clientId: string }) => {
 	const discovery = await getDiscovery()
-	const [encodedHeader, encodedPayload] = idToken.split(".")
-	if (!encodedHeader || !encodedPayload) {
+	const [encodedHeader, encodedPayload, encodedSignature] = idToken.split(".")
+	if (!encodedHeader || !encodedPayload || !encodedSignature) {
 		throw new Error("Invalid Telegram OIDC id_token")
 	}
 
@@ -189,7 +175,11 @@ export const verifyTelegramOidcIdToken = async (idToken: string, options: { clie
 	const claims = decodeBase64UrlJson<TelegramOidcClaims>(encodedPayload)
 	const jwks = await getJwks(discovery.jwks_uri)
 
-	await verifyJwtSignature(idToken, header, jwks)
+	await verifyJwtSignature(
+		{ header: encodedHeader, payload: encodedPayload, signature: encodedSignature },
+		header,
+		jwks,
+	)
 	validateClaims(claims, {
 		issuer: discovery.issuer,
 		clientId: options.clientId,

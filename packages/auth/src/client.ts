@@ -70,6 +70,7 @@ type TelegramAuthClientActions = {
 }
 
 const TELEGRAM_WIDGET_SCRIPT_ID = "amby-telegram-widget-script"
+let previousWidgetCallbackName: string | undefined
 
 const getWidgetScriptSrc = () => "https://telegram.org/js/telegram-widget.js?22"
 
@@ -119,7 +120,11 @@ const renderWidget = async (
 
 	container.innerHTML = ""
 
+	if (previousWidgetCallbackName && browserGlobals.window) {
+		delete (browserGlobals.window as Record<string, unknown>)[previousWidgetCallbackName]
+	}
 	const callbackName = `__ambyTelegramAuth_${crypto.randomUUID().replaceAll("-", "")}`
+	previousWidgetCallbackName = callbackName
 	if (onAuth) {
 		;(browserGlobals.window as Record<string, unknown>)[callbackName] = async (
 			authData: TelegramWidgetAuthData,
