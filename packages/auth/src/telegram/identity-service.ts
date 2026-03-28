@@ -443,6 +443,12 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 
 		await db.transaction(async (tx) => {
 			const executor: DbExecutor = tx
+			// Recheck for a concurrent insert of the same Telegram account inside the
+			// transaction so a race produces a clean error instead of a raw constraint violation.
+			const raceCheck = await findAccountByTelegramUserId(executor, telegramUserId)
+			if (raceCheck) {
+				throw new Error("Telegram account is already linked to another user")
+			}
 			await clearIdentityBlock(executor, telegramUserId)
 			await updateUserFromTelegram(executor, userId, input, {
 				setEmailOnEmpty: true,
@@ -458,17 +464,18 @@ export const createTelegramIdentityService = (db: Database): TelegramIdentitySer
 			throw new Error("Telegram is not linked to this user")
 		}
 
-		const accountCountRows = await db
-			.select({ id: schema.accounts.id })
-			.from(schema.accounts)
-			.where(eq(schema.accounts.userId, userId))
-			.limit(2)
-		if (!canSafelyUnlinkTelegram(accountCountRows.length)) {
-			throw new Error("Telegram cannot be unlinked because it is the only auth method")
-		}
-
 		await db.transaction(async (tx) => {
 			const executor: DbExecutor = tx
+			// Account count check inside the transaction to prevent a TOCTOU race where
+			// a concurrent unlink of another auth method could leave the user with zero methods.
+			const accountCountRows = await executor
+				.select({ id: schema.accounts.id })
+				.from(schema.accounts)
+				.where(eq(schema.accounts.userId, userId))
+				.limit(2)
+			if (!canSafelyUnlinkTelegram(accountCountRows.length)) {
+				throw new Error("Telegram cannot be unlinked because it is the only auth method")
+			}
 			await executor.delete(schema.accounts).where(eq(schema.accounts.id, account.id))
 			await executor
 				.update(schema.users)

@@ -1,6 +1,10 @@
 import type { Env } from "@amby/env"
 import type { GenericOAuthConfig } from "better-auth/plugins/generic-oauth"
-import { getTelegramBotId, TELEGRAM_OIDC_DISCOVERY_URL } from "./constants"
+import {
+	getTelegramBotId,
+	TELEGRAM_OIDC_DISCOVERY_URL,
+	TELEGRAM_SYNTHETIC_EMAIL_DOMAIN,
+} from "./constants"
 import { base64UrlToUint8Array } from "./crypto"
 import type { TelegramIdentityServiceApi } from "./identity-service"
 import { decodeBase64UrlJson } from "./verification"
@@ -197,7 +201,8 @@ export const verifyTelegramOidcIdToken = async (idToken: string, options: { clie
 	}
 
 	const email =
-		claims.email?.trim().toLowerCase() || `telegram-${telegramUserId}@telegram.hiamby.invalid`
+		claims.email?.trim().toLowerCase() ||
+		`telegram-${telegramUserId}@${TELEGRAM_SYNTHETIC_EMAIL_DOMAIN}`
 
 	return {
 		id: telegramUserId,

@@ -118,6 +118,9 @@ app.use("/api/auth/*", async (c, next) =>
 	})(c, next),
 )
 
+// Per-request runtime is intentional for Cloudflare Workers: each isolate is short-lived
+// and env bindings are per-request, so a long-lived singleton would hold stale bindings.
+// The local Node runtime in apps/api/src/index.ts correctly uses a shared ManagedRuntime.
 app.on(["GET", "POST"], "/api/auth/*", async (c) => {
 	const runtime = makeRuntimeForConsumer(c.env)
 	try {
