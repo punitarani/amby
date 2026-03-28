@@ -37,7 +37,6 @@ import { collectTaskExecutionData, previewTaskOutput } from "./task-execution-da
 import { isTerminal } from "./task-state"
 import { isSandboxTask, mergeRuntimeData, readSandboxRuntimeData } from "./task-store"
 import { appendTaskTraceTerminalEvent } from "./task-trace"
-import { getTelegramChatId } from "./telegram-chat-id"
 
 const CODEX_AUTH_FILE = `${CODEX_HOME}/auth.json`
 const CODEX_AUTH_LOG = `${CODEX_HOME}/login.out`
@@ -882,7 +881,7 @@ export const TaskSupervisorLive = Layer.scoped(
 							),
 						)
 						if (platform === "telegram") {
-							const accountMetadata = yield* taskStore.getTelegramAccountMetadata(userId).pipe(
+							const telegramChatId = yield* taskStore.getTelegramChatId(userId).pipe(
 								Effect.mapError(
 									(error) =>
 										new SandboxError({
@@ -891,8 +890,9 @@ export const TaskSupervisorLive = Layer.scoped(
 										}),
 								),
 							)
-							const chatId = getTelegramChatId(accountMetadata)
-							if (chatId !== undefined) replyTarget = { channel: "telegram" as const, chatId }
+							if (telegramChatId !== null) {
+								replyTarget = { channel: "telegram" as const, chatId: telegramChatId }
+							}
 						}
 					}
 

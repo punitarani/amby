@@ -497,7 +497,7 @@ export const AttachmentServiceLive = Layer.effect(
 							}),
 					),
 				)
-				if (!record || !record.r2Key || record.status !== "ready") {
+				if (!record?.r2Key || record.status !== "ready") {
 					return yield* new CoreError({
 						message: `Attachment ${attachmentId} is not available for download.`,
 					})

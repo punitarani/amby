@@ -74,12 +74,15 @@ jobs:
       - run: bun run build
       - name: Worker dry run
         run: |
+          WORKER_VERSION_MESSAGE=$(cd apps/api && bun run --silent deploy:message) || exit 1
+          test -n "$WORKER_VERSION_MESSAGE"
+          test ${#WORKER_VERSION_MESSAGE} -le 100
           cd apps/api
           rm -rf dist-worker
-          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps
+          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps --message "$WORKER_VERSION_MESSAGE"
           test -f dist-worker/worker.js
           test -f dist-worker/worker.js.map
-          npx wrangler deploy dist-worker/worker.js --no-bundle --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA" --dry-run
+          npx wrangler deploy dist-worker/worker.js --no-bundle --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA" --message "$WORKER_VERSION_MESSAGE" --dry-run
       - name: Validate deploy tooling
         run: |
           # @sentry/cli: local devDep of apps/api — must use scoped name with npx
@@ -102,12 +105,42 @@ jobs:
           echo "Worker env key pattern: $ENV_PATTERN"
           echo "Cloudflare sync key pattern: $SYNC_PATTERN"
 
+  db-validate:
+    name: Validate Migrations
+    runs-on: ubuntu-latest
+    needs: [typecheck]
+    # Validate migrations only after typecheck because drizzle-kit generate
+    # executes the TypeScript schema directly.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.0"
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd packages/db db:validate
+
   # --- Production only (push to main) ---
 
   db-migrate:
     name: Run Migrations
     runs-on: ubuntu-latest
-    needs: [format, lint, test, build]
+    needs: [format, lint, test, build, db-validate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: github-actions
     steps:
@@ -118,7 +151,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - uses: dopplerhq/cli-action@v3
       - name: Run migrations
-        run: doppler run -- bash -c 'cd packages/db && bunx drizzle-kit migrate'
+        run: doppler run -- bun run --cwd packages/db db:migrate
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
 
@@ -191,11 +224,14 @@ jobs:
         id: metadata
         run: |
           COMMIT_SHORT="${GITHUB_SHA:0:7}"
-          COMMIT_MSG=$(git log -1 --pretty=%B | head -n1)
           DEPLOY_TAG="${GITHUB_REF_NAME}-${GITHUB_RUN_NUMBER}-${COMMIT_SHORT}"
-          DEPLOY_MESSAGE="Deploy #${GITHUB_RUN_NUMBER} from ${GITHUB_REF_NAME} by ${GITHUB_ACTOR}: ${COMMIT_MSG}"
-          echo "tag=${DEPLOY_TAG}" >> $GITHUB_OUTPUT
-          echo "message=${DEPLOY_MESSAGE}" >> $GITHUB_OUTPUT
+          DEPLOY_MESSAGE=$(cd apps/api && bun run --silent deploy:message) || exit 1
+          test -n "$DEPLOY_MESSAGE"
+          test ${#DEPLOY_MESSAGE} -le 100
+          {
+            echo "tag=${DEPLOY_TAG}"
+            echo "message=${DEPLOY_MESSAGE}"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: dopplerhq/cli-action@v3
 
@@ -214,7 +250,7 @@ jobs:
         run: |
           cd apps/api
           rm -rf dist-worker
-          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA"
+          npx wrangler deploy --dry-run --outdir dist-worker --upload-source-maps --var SENTRY_RELEASE:"$GITHUB_SHA" --message "${{ steps.metadata.outputs.message }}"
           test -f dist-worker/worker.js
           test -f dist-worker/worker.js.map
         env:

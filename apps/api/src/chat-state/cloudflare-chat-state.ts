@@ -1,4 +1,4 @@
-import type { Lock, StateAdapter } from "chat"
+import type { Lock, QueueEntry, StateAdapter } from "chat"
 
 function tryParseJson<T>(raw: string): { ok: true; value: T } | { ok: false } {
 	try {
@@ -6,6 +6,17 @@ function tryParseJson<T>(raw: string): { ok: true; value: T } | { ok: false } {
 	} catch {
 		return { ok: false }
 	}
+}
+
+function isQueueEntry(value: unknown): value is QueueEntry {
+	if (typeof value !== "object" || value === null) return false
+	const candidate = value as Record<string, unknown>
+	return (
+		typeof candidate.enqueuedAt === "number" &&
+		typeof candidate.expiresAt === "number" &&
+		typeof candidate.message === "object" &&
+		candidate.message !== null
+	)
 }
 
 export interface ChatStateStub {
@@ -26,6 +37,9 @@ export interface ChatStateStub {
 		options?: { maxLength?: number; ttlMs?: number },
 	): Promise<void> | void
 	listGet(key: string): Promise<string[]> | string[]
+	enqueue(threadId: string, entry: string, maxSize: number): Promise<number> | number
+	dequeue(threadId: string): Promise<string | null> | string | null
+	queueDepth(threadId: string): Promise<number> | number
 }
 
 interface DurableObjectIdLike {
@@ -137,6 +151,21 @@ export class CloudflareChatStateAdapter implements StateAdapter {
 			}
 		}
 		return parsedValues
+	}
+
+	async enqueue(threadId: string, entry: QueueEntry, maxSize: number) {
+		return await this.stub().enqueue(threadId, JSON.stringify(entry), maxSize)
+	}
+
+	async dequeue(threadId: string): Promise<QueueEntry | null> {
+		const raw = await this.stub().dequeue(threadId)
+		if (raw === null) return null
+		const parsed = tryParseJson<unknown>(raw)
+		return parsed.ok && isQueueEntry(parsed.value) ? parsed.value : null
+	}
+
+	async queueDepth(threadId: string) {
+		return await this.stub().queueDepth(threadId)
 	}
 }
 

@@ -14,6 +14,7 @@ export {
 	handleCommand,
 	type ParsedTelegramCommand,
 	parseTelegramCommand,
+	resolveTelegramUser,
 	splitTelegramMessage,
 	TELEGRAM_COMMANDS,
 	type TelegramCommandName,

@@ -13,6 +13,7 @@
 		"lint:fix": "bunx @biomejs/biome check --fix ."
 	},
 	"dependencies": {
+		"@amby/auth": "workspace:*",
 		"lucide-react": "^0.577.0",
 		"next": "16",
 		"react": "19",

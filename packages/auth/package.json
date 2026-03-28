@@ -4,9 +4,11 @@
 	"private": true,
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./client": "./src/client.ts"
 	},
 	"scripts": {
+		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun"
 	},
@@ -14,7 +16,8 @@
 		"@amby/db": "workspace:*",
 		"@amby/env": "workspace:*",
 		"@better-auth/api-key": "^1.5.5",
-		"better-auth": "^1.5.5"
+		"better-auth": "^1.5.5",
+		"zod": "^3.25.76"
 	},
 	"peerDependencies": {
 		"effect": "^3.21.0"

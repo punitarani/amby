@@ -2,9 +2,16 @@ import { PostHog } from "posthog-node"
 
 let _client: PostHog | null = null
 
-export const getPostHogClient = (apiKey: string, host: string): PostHog => {
+const normalizePostHogApiKey = (apiKey: string) => apiKey.trim()
+
+export const getPostHogClient = (apiKey: string, host: string): PostHog | null => {
+	const normalizedApiKey = normalizePostHogApiKey(apiKey)
+	if (!normalizedApiKey) {
+		return null
+	}
+
 	if (!_client) {
-		_client = new PostHog(apiKey, { host })
+		_client = new PostHog(normalizedApiKey, { host })
 	}
 	return _client
 }

@@ -6,6 +6,9 @@ import type { DbError } from "../errors"
 import * as schema from "../schema"
 import { DbService } from "../service"
 
+// Canonical source: @amby/auth/src/telegram/constants.ts — duplicated here to avoid circular dep
+const TELEGRAM_PROVIDER_ID = "telegram"
+
 export const TaskStoreLive = Layer.effect(
 	TaskStore,
 	Effect.gen(function* () {
@@ -325,16 +328,24 @@ export const TaskStoreLive = Layer.effect(
 					return rows[0]?.platform ?? null
 				}),
 
-			getTelegramAccountMetadata: (userId) =>
+			getTelegramChatId: (userId) =>
 				query(async (d) => {
 					const rows = await d
-						.select({ metadata: schema.accounts.metadata })
+						.select({ telegramChatId: schema.accounts.telegramChatId })
 						.from(schema.accounts)
 						.where(
-							and(eq(schema.accounts.userId, userId), eq(schema.accounts.providerId, "telegram")),
+							and(
+								eq(schema.accounts.userId, userId),
+								eq(schema.accounts.providerId, TELEGRAM_PROVIDER_ID),
+							),
 						)
 						.limit(1)
-					return (rows[0]?.metadata as Record<string, unknown> | undefined) ?? null
+					const raw = rows[0]?.telegramChatId
+					if (!raw) {
+						return null
+					}
+					const parsed = Number.parseInt(raw, 10)
+					return Number.isFinite(parsed) ? parsed : null
 				}),
 		}
 

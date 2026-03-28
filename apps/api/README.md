@@ -38,7 +38,10 @@ Core backend service — Telegram bot, agent orchestration, and HTTP API.
 bun run --filter @amby/api dev        # local Bun server on :3001
 bun run --filter @amby/api dev:worker  # local Wrangler dev server
 bun run --filter @amby/api typecheck
+bun run --filter @amby/api deploy      # production Worker deploy
 ```
+
+Deploys derive the Worker version message from `WORKER_VERSION_MESSAGE` when it is set; otherwise they use the latest git commit subject. The message is normalized to Cloudflare's 100-character limit before `wrangler deploy` runs.
 
 ## Endpoints
 

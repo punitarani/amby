@@ -127,14 +127,6 @@ export async function runToolloopSpecialist(params: {
 		}),
 		stopWhen: stepCountIs(definition.maxSteps(params.config)),
 		experimental_telemetry: telemetry,
-		experimental_onStepStart: async (event) => {
-			await Effect.runPromise(
-				params.trace.append("model_request", {
-					stepNumber: event.stepNumber,
-					activeTools: event.activeTools,
-				}),
-			)
-		},
 		onStepFinish: async (stepResult) => {
 			await Effect.runPromise(
 				params.trace.append("model_response", {

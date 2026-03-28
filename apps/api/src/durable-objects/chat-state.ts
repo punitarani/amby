@@ -10,6 +10,11 @@ interface CacheRow {
 	value: string
 }
 
+interface QueueRow {
+	id: number
+	value: string
+}
+
 function generateToken() {
 	return crypto.randomUUID()
 }
@@ -46,6 +51,23 @@ function parseStringList(raw: string): string[] {
 	}
 }
 
+function readQueueRow(row: Record<string, unknown> | undefined): QueueRow | null {
+	if (!row) return null
+	const id = row.id
+	const value = row.value
+	if (typeof id !== "number" || typeof value !== "string") return null
+	return { id, value }
+}
+
+function readQueueExpiry(raw: string) {
+	try {
+		const parsed = JSON.parse(raw) as { expiresAt?: unknown }
+		return typeof parsed.expiresAt === "number" ? parsed.expiresAt : null
+	} catch {
+		return null
+	}
+}
+
 export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 	private readonly sql: DurableObjectStorage["sql"]
 
@@ -68,30 +90,48 @@ export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 			.exec("SELECT COALESCE(MAX(version), 0) as version FROM _schema_version")
 			.one() as { version: number }
 
-		if (row.version >= 1) return
+		if (row.version < 1) {
+			this.sql.exec(`
+				CREATE TABLE subscriptions (
+					thread_id TEXT PRIMARY KEY
+				);
 
-		this.sql.exec(`
-			CREATE TABLE subscriptions (
-				thread_id TEXT PRIMARY KEY
-			);
+				CREATE TABLE locks (
+					thread_id TEXT PRIMARY KEY,
+					token TEXT NOT NULL,
+					expires_at INTEGER NOT NULL
+				);
 
-			CREATE TABLE locks (
-				thread_id TEXT PRIMARY KEY,
-				token TEXT NOT NULL,
-				expires_at INTEGER NOT NULL
-			);
+				CREATE TABLE cache (
+					key TEXT PRIMARY KEY,
+					value TEXT NOT NULL,
+					expires_at INTEGER
+				);
 
-			CREATE TABLE cache (
-				key TEXT PRIMARY KEY,
-				value TEXT NOT NULL,
-				expires_at INTEGER
-			);
+				CREATE INDEX idx_locks_expires ON locks(expires_at);
+				CREATE INDEX idx_cache_expires ON cache(expires_at) WHERE expires_at IS NOT NULL;
 
-			CREATE INDEX idx_locks_expires ON locks(expires_at);
-			CREATE INDEX idx_cache_expires ON cache(expires_at) WHERE expires_at IS NOT NULL;
+				INSERT INTO _schema_version (version) VALUES (1);
+			`)
+		}
 
-			INSERT INTO _schema_version (version) VALUES (1);
-		`)
+		if (row.version < 2) {
+			this.sql.exec(`
+				CREATE TABLE IF NOT EXISTS queue_entries (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					thread_id TEXT NOT NULL,
+					value TEXT NOT NULL,
+					expires_at INTEGER NOT NULL
+				);
+
+				CREATE INDEX IF NOT EXISTS idx_queue_entries_thread_id_id
+					ON queue_entries(thread_id, id);
+				CREATE INDEX IF NOT EXISTS idx_queue_entries_expires
+					ON queue_entries(expires_at);
+
+				INSERT INTO _schema_version (version) VALUES (2);
+			`)
+		}
 	}
 
 	subscribe(threadId: string) {
@@ -274,12 +314,90 @@ export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 		return parseStringList(raw)
 	}
 
+	enqueue(threadId: string, value: string, maxSize: number) {
+		const depth = this.ctx.storage.transactionSync(() => {
+			const now = Date.now()
+			const boundedMaxSize = Math.max(1, maxSize)
+			this.sql.exec(
+				"DELETE FROM queue_entries WHERE thread_id = ? AND expires_at <= ?",
+				threadId,
+				now,
+			)
+			const expiresAt = readQueueExpiry(value) ?? now + 90_000
+			this.sql.exec(
+				"INSERT INTO queue_entries (thread_id, value, expires_at) VALUES (?, ?, ?)",
+				threadId,
+				value,
+				expiresAt,
+			)
+			const countRow = this.sql
+				.exec("SELECT COUNT(*) as count FROM queue_entries WHERE thread_id = ?", threadId)
+				.one() as { count: number }
+			if (countRow.count > boundedMaxSize) {
+				this.sql.exec(
+					`DELETE FROM queue_entries
+						WHERE id IN (
+							SELECT id FROM queue_entries
+							WHERE thread_id = ?
+							ORDER BY id ASC
+							LIMIT ?
+						)`,
+					threadId,
+					countRow.count - boundedMaxSize,
+				)
+				return boundedMaxSize
+			}
+			return countRow.count
+		})
+
+		this.scheduleCleanupIfNeeded()
+		return depth
+	}
+
+	dequeue(threadId: string) {
+		return this.ctx.storage.transactionSync(() => {
+			const now = Date.now()
+			this.sql.exec(
+				"DELETE FROM queue_entries WHERE thread_id = ? AND expires_at <= ?",
+				threadId,
+				now,
+			)
+			const row = readQueueRow(
+				this.sql
+					.exec(
+						"SELECT id, value FROM queue_entries WHERE thread_id = ? ORDER BY id ASC LIMIT 1",
+						threadId,
+					)
+					.toArray()[0],
+			)
+			if (!row) return null
+			this.sql.exec("DELETE FROM queue_entries WHERE id = ?", row.id)
+			return row.value
+		})
+	}
+
+	queueDepth(threadId: string) {
+		return this.ctx.storage.transactionSync(() => {
+			const now = Date.now()
+			this.sql.exec(
+				"DELETE FROM queue_entries WHERE thread_id = ? AND expires_at <= ?",
+				threadId,
+				now,
+			)
+			const row = this.sql
+				.exec("SELECT COUNT(*) as count FROM queue_entries WHERE thread_id = ?", threadId)
+				.one() as { count: number }
+			return row.count
+		})
+	}
+
 	async alarm(): Promise<void> {
 		try {
 			const now = Date.now()
 			this.ctx.storage.transactionSync(() => {
 				this.sql.exec("DELETE FROM locks WHERE expires_at <= ?", now)
 				this.sql.exec("DELETE FROM cache WHERE expires_at IS NOT NULL AND expires_at <= ?", now)
+				this.sql.exec("DELETE FROM queue_entries WHERE expires_at <= ?", now)
 			})
 			const next = this.nextExpiry()
 			if (next !== null) {
@@ -300,7 +418,10 @@ export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 						SELECT expires_at FROM locks WHERE expires_at > ?
 						UNION ALL
 						SELECT expires_at FROM cache WHERE expires_at IS NOT NULL AND expires_at > ?
+						UNION ALL
+						SELECT expires_at FROM queue_entries WHERE expires_at > ?
 					)`,
+					now,
 					now,
 					now,
 				)

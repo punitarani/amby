@@ -89,8 +89,22 @@
 		{
 			"idx": 12,
 			"version": "7",
-			"when": 1774682513509,
-			"tag": "0012_lovely_prowler",
+			"when": 1774679463005,
+			"tag": "0012_align_migrated_schema",
+			"breakpoints": true
+		},
+		{
+			"idx": 13,
+			"version": "7",
+			"when": 1774600327261,
+			"tag": "0013_dear_big_bertha",
+			"breakpoints": true
+		},
+		{
+			"idx": 14,
+			"version": "7",
+			"when": 1774720388762,
+			"tag": "0014_lush_aaron_stack",
 			"breakpoints": true
 		}
 	]

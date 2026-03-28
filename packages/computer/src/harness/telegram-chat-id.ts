@@ -4,6 +4,15 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 		: undefined
 
 export const getTelegramChatId = (metadata: unknown): number | undefined => {
+	if (typeof metadata === "number" && Number.isFinite(metadata)) {
+		return metadata
+	}
+
+	if (typeof metadata === "string") {
+		const parsed = Number.parseInt(metadata, 10)
+		return Number.isFinite(parsed) ? parsed : undefined
+	}
+
 	const object = asRecord(metadata)
 	if (!object) return undefined
 

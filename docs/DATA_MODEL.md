@@ -18,6 +18,7 @@ erDiagram
     %% Users & Auth
     users ||--o{ sessions : has
     users ||--o{ accounts : has
+    users ||--o{ telegram_identity_blocks : "last linked"
     users ||--o{ conversations : owns
     users ||--o{ tasks : owns
     users ||--o{ attachments : owns
@@ -60,10 +61,18 @@ erDiagram
 
 | Table | Purpose | Key constraints |
 |---|---|---|
-| `users` | Identity root. PK is `text` (external ID). | `email` unique, `phone_number` unique |
+| `users` | Identity root. PK is `text`. Stores shared profile data across auth providers. | `email` unique, `phone_number` unique |
 | `sessions` | Auth sessions with token + expiry. | `token` unique, cascade on user delete |
-| `accounts` | OAuth provider links (Google, etc). | unique on `(providerId, accountId)` |
+| `accounts` | OAuth/provider links, including canonical Telegram linkage. | unique on `(providerId, accountId)` |
+| `telegram_identity_blocks` | Safe-unlink tombstones that block silent bot reprovision after Telegram is removed. | PK on `telegramUserId`, optional FK to `users.id` via `lastUserId` |
 | `verifications` | Email/phone verification codes. | TTL via `expiresAt` |
+
+Telegram-specific auth fields:
+
+- `users.telegram_username` stores the latest Telegram username seen from widget, Mini App, OIDC, or bot flows.
+- `users.telegram_phone_number` stores the latest Telegram phone number from OIDC when the phone scope is enabled.
+- `accounts.telegram_chat_id` stores the typed Telegram delivery target used by automations and outbound notifications.
+- Canonical Telegram identity always lives in `accounts(provider_id="telegram", account_id=<telegram user id>)`.
 
 ### Conversations
 
@@ -160,6 +169,7 @@ Events are never updated or deleted in normal operation. State is reconstructed 
 
 Notable indexes beyond standard FK indexes:
 
+- `accounts_provider_account_idx` -- canonical provider/account linkage, including Telegram
 - `conversations_platform_key_idx` -- unique composite for conversation identity
 - `threads_default_unique_idx` -- partial unique ensuring one default thread per conversation
 - `attachments_dedupe_key_unique_idx` -- partial unique idempotency key for inbound attachment ingest
@@ -169,6 +179,7 @@ Notable indexes beyond standard FK indexes:
 - `tasks_runtime_status_heartbeat_idx` -- runtime-specific reaper queries
 - `task_events_task_event_id_idx` -- idempotent event insertion
 - `memories_user_active_idx` -- active memory retrieval
+- `telegram_identity_blocks_last_user_idx` -- reverse lookup for support/debugging around safe unlink
 
 ## Related docs
 

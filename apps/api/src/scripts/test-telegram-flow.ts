@@ -10,7 +10,7 @@
 
 import { ConversationRuntime, ModelServiceLive, makeConversationRuntimeLive } from "@amby/agent"
 import { makeAttachmentServicesLocal } from "@amby/attachments/local"
-import { AuthServiceLive } from "@amby/auth"
+import { AuthLive, TELEGRAM_PROVIDER_ID } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import {
@@ -58,7 +58,7 @@ const ServicesLive = Layer.mergeAll(
 	AutomationServiceLive,
 	TaskSupervisorLive,
 	ModelServiceLive,
-	AuthServiceLive,
+	AuthLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
 ).pipe(Layer.provideMerge(InfraLive), Layer.provideMerge(AttachmentLive))
@@ -123,7 +123,7 @@ async function main() {
 						.from(schema.accounts)
 						.where(
 							and(
-								eq(schema.accounts.providerId, "telegram"),
+								eq(schema.accounts.providerId, TELEGRAM_PROVIDER_ID),
 								eq(schema.accounts.accountId, String(SIMULATED_FROM.id)),
 							),
 						)
@@ -149,7 +149,8 @@ async function main() {
 							id: crypto.randomUUID(),
 							userId: newUserId,
 							accountId: String(SIMULATED_FROM.id),
-							providerId: "telegram",
+							providerId: TELEGRAM_PROVIDER_ID,
+							telegramChatId: String(SIMULATED_CHAT_ID),
 							metadata,
 						})
 					}),

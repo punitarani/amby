@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import type { QueueEntry } from "chat"
 import {
 	type ChatStateNamespaceLike,
 	type ChatStateStub,
@@ -43,6 +44,15 @@ function makeStub(overrides: Partial<ChatStateStub> = {}): ChatStateStub {
 		listGet() {
 			return []
 		},
+		enqueue() {
+			return 0
+		},
+		dequeue() {
+			return null
+		},
+		queueDepth() {
+			return 0
+		},
 		...overrides,
 	}
 }
@@ -52,6 +62,7 @@ function makeFakeNamespace() {
 	const subscriptions = new Set<string>()
 	const locks = new Map<string, { expiresAt: number; token: string }>()
 	const cache = new Map<string, { expiresAt: number | null; value: string }>()
+	const queues = new Map<string, Array<{ expiresAt: number; value: string }>>()
 
 	const readCache = (key: string) => {
 		const row = cache.get(key)
@@ -61,6 +72,18 @@ function makeFakeNamespace() {
 			return null
 		}
 		return row
+	}
+
+	const purgeQueue = (threadId: string) => {
+		const queue = queues.get(threadId)
+		if (!queue) return []
+		const nextQueue = queue.filter((entry) => entry.expiresAt > now)
+		if (nextQueue.length === 0) {
+			queues.delete(threadId)
+			return []
+		}
+		queues.set(threadId, nextQueue)
+		return nextQueue
 	}
 
 	const stub: ChatStateStub = {
@@ -147,6 +170,41 @@ function makeFakeNamespace() {
 				return []
 			}
 		},
+		enqueue(threadId, entry, maxSize) {
+			const queue = purgeQueue(threadId)
+			let expiresAt = now + 90_000
+			try {
+				const parsed = JSON.parse(entry) as { expiresAt?: unknown }
+				if (typeof parsed.expiresAt === "number") {
+					expiresAt = parsed.expiresAt
+				}
+			} catch {
+				expiresAt = now + 90_000
+			}
+			queue.push({ expiresAt, value: entry })
+			const boundedMaxSize = Math.max(1, maxSize)
+			if (queue.length > boundedMaxSize) {
+				queue.splice(0, queue.length - boundedMaxSize)
+			}
+			queues.set(threadId, queue)
+			return queue.length
+		},
+		dequeue(threadId) {
+			const queue = purgeQueue(threadId)
+			const entry = queue.shift()
+			if (!entry) {
+				return null
+			}
+			if (queue.length === 0) {
+				queues.delete(threadId)
+			} else {
+				queues.set(threadId, queue)
+			}
+			return entry.value
+		},
+		queueDepth(threadId) {
+			return purgeQueue(threadId).length
+		},
 	}
 
 	return {
@@ -158,6 +216,13 @@ function makeFakeNamespace() {
 }
 
 describe("createCloudflareChatState", () => {
+	const makeQueueEntry = (id: number, expiresAt: number): QueueEntry =>
+		({
+			enqueuedAt: id * 10,
+			expiresAt,
+			message: { id: `msg-${id}` } as QueueEntry["message"],
+		}) as QueueEntry
+
 	it("tracks subscriptions through the adapter contract", async () => {
 		const fake = makeFakeNamespace()
 		const state = createCloudflareChatState({ namespace: fake.namespace })
@@ -220,6 +285,22 @@ describe("createCloudflareChatState", () => {
 
 		fake.advanceBy(60)
 		expect(await state.getList("msg-history:thread-1")).toEqual([])
+	})
+
+	it("queues entries with trim and expiry behavior", async () => {
+		const fake = makeFakeNamespace()
+		const state = createCloudflareChatState({ namespace: fake.namespace })
+
+		await state.connect()
+		expect(await state.enqueue("thread-1", makeQueueEntry(1, 1_050), 2)).toBe(1)
+		expect(await state.enqueue("thread-1", makeQueueEntry(2, 1_060), 2)).toBe(2)
+		expect(await state.enqueue("thread-1", makeQueueEntry(3, 1_070), 2)).toBe(2)
+		expect(await state.queueDepth("thread-1")).toBe(2)
+		expect(await state.dequeue("thread-1")).toEqual(makeQueueEntry(2, 1_060))
+
+		fake.advanceBy(80)
+		expect(await state.dequeue("thread-1")).toBeNull()
+		expect(await state.queueDepth("thread-1")).toBe(0)
 	})
 
 	it("treats malformed cached JSON as missing", async () => {

@@ -1,6 +1,6 @@
 import { ModelServiceLive } from "@amby/agent"
 import { makeAttachmentServicesFromBindings } from "@amby/attachments/workers"
-import { AuthServiceLive } from "@amby/auth"
+import { AuthLive } from "@amby/auth"
 import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
 import { TelegramReplySenderLive, TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
@@ -43,7 +43,7 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 		MemoryServiceLive,
 		AutomationServiceLive,
 		ModelServiceLive,
-		AuthServiceLive,
+		AuthLive,
 		TelegramSenderLite,
 		TelegramReplySenderLive,
 		ConnectorsServiceLive,

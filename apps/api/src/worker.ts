@@ -1,5 +1,7 @@
 import { AttachmentService } from "@amby/attachments"
+import { AuthService, resolveAuthCorsOrigin } from "@amby/auth"
 import { type ChatSdkDeps, getOrCreateChat, type TelegramQueueMessage } from "@amby/channels"
+import { getPostHogClient } from "@amby/channels/posthog"
 import type { WorkerBindings } from "@amby/env/workers"
 import {
 	buildSafeComposioRedirectUrl,
@@ -12,6 +14,7 @@ import {
 import * as Sentry from "@sentry/cloudflare"
 import { Effect, Either } from "effect"
 import { Hono } from "hono"
+import { cors } from "hono/cors"
 import { HTTPException } from "hono/http-exception"
 import {
 	type ChatStateNamespaceLike,
@@ -23,7 +26,6 @@ import { ConversationSession as ConversationSessionBase } from "./durable-object
 import { handleScheduledReconciliation } from "./handlers/reconciliation"
 import { handleTaskEventPost } from "./handlers/task-events"
 import { getHomeResponse } from "./home"
-import { getPostHogClient } from "./posthog"
 import { handleQueueBatch } from "./queue/consumer"
 import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "./queue/runtime"
 import { getSentryOptions, getSentryOptionsOrFallback, setTelegramScope } from "./sentry"
@@ -86,22 +88,24 @@ app.onError(async (err, c) => {
 	if (status >= 500 && posthogKey) {
 		try {
 			const posthog = getPostHogClient(posthogKey, c.env.POSTHOG_HOST ?? "https://us.i.posthog.com")
-			posthog.captureException(err, c.get("posthogDistinctId"), {
-				framework: "hono",
-				runtime: "cloudflare-worker",
-				status,
-				method: c.req.method,
-				path: c.req.path,
-				url: c.req.url,
-				cf_ray: c.req.header("cf-ray") ?? null,
-				content_type: c.req.header("content-type") ?? null,
-				user_agent: c.req.header("user-agent") ?? null,
-			})
-			c.executionCtx.waitUntil(
-				posthog.flush().catch((flushError) => {
-					console.error("[API] Failed to flush PostHog exception:", flushError)
-				}),
-			)
+			if (posthog) {
+				posthog.captureException(err, c.get("posthogDistinctId"), {
+					framework: "hono",
+					runtime: "cloudflare-worker",
+					status,
+					method: c.req.method,
+					path: c.req.path,
+					url: c.req.url,
+					cf_ray: c.req.header("cf-ray") ?? null,
+					content_type: c.req.header("content-type") ?? null,
+					user_agent: c.req.header("user-agent") ?? null,
+				})
+				c.executionCtx.waitUntil(
+					posthog.flush().catch((flushError) => {
+						console.error("[API] Failed to flush PostHog exception:", flushError)
+					}),
+				)
+			}
 		} catch (captureError) {
 			console.error("[API] Failed to capture exception in PostHog:", captureError)
 		}
@@ -112,6 +116,35 @@ app.onError(async (err, c) => {
 	}
 
 	return c.json({ error: "Internal Server Error" }, 500)
+})
+
+app.use("/api/auth/*", async (c, next) =>
+	cors({
+		origin: (origin) =>
+			resolveAuthCorsOrigin(origin, {
+				NODE_ENV: c.env.NODE_ENV ?? "production",
+				APP_URL: c.env.APP_URL ?? "https://hiamby.com",
+				API_URL: c.env.API_URL ?? "https://api.hiamby.com",
+				BETTER_AUTH_URL: c.env.BETTER_AUTH_URL ?? c.env.API_URL ?? "https://api.hiamby.com",
+			}),
+		allowMethods: ["GET", "POST", "OPTIONS"],
+		allowHeaders: ["Content-Type", "Authorization"],
+		exposeHeaders: ["Set-Cookie"],
+		credentials: true,
+	})(c, next),
+)
+
+// Per-request runtime is intentional for Cloudflare Workers: each isolate is short-lived
+// and env bindings are per-request, so a long-lived singleton would hold stale bindings.
+// The local Node runtime in apps/api/src/index.ts correctly uses a shared ManagedRuntime.
+app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+	const runtime = makeRuntimeForConsumer(c.env)
+	try {
+		const auth = await runtime.runPromise(AuthService)
+		return auth.handler(c.req.raw)
+	} finally {
+		await runtime.dispose()
+	}
 })
 
 app.get("/", (c) => c.json(getHomeResponse()))

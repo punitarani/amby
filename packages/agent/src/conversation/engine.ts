@@ -502,14 +502,6 @@ export function handleTurn(
 				modelId: config.defaultModelId,
 				agentRole: "conversation",
 			}),
-			experimental_onStepStart: async (event) => {
-				await Runtime.runPromise(rt)(
-					rootTrace.append("model_request", {
-						stepNumber: event.stepNumber,
-						activeTools: event.activeTools,
-					}),
-				)
-			},
 			onStepFinish: async (event) => {
 				await Runtime.runPromise(rt)(
 					rootTrace.append("model_response", {

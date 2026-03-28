@@ -6,6 +6,43 @@
 -- DESTRUCTIVE: traces and trace_events are replaced by the extended runs and
 -- run_events tables. Historical execution spans will be lost. Back up these
 -- tables first if you need to preserve them.
+--
+-- COMPAT: `runs` and `run_events` existed before this migration via manual
+-- schema push, but the creation SQL was never checked in. Fresh databases need
+-- these bootstrap definitions so the rest of this migration can reach the
+-- final schema entirely through the checked-in Drizzle chain.
+CREATE TABLE IF NOT EXISTS "runs" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"conversation_id" uuid NOT NULL,
+	"thread_id" uuid NOT NULL,
+	"trigger_message_id" uuid,
+	"status" text DEFAULT 'running' NOT NULL,
+	"mode" text DEFAULT 'direct' NOT NULL,
+	"model_id" text NOT NULL,
+	"summary" text,
+	"request_json" jsonb,
+	"response_json" jsonb,
+	"started_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"completed_at" timestamp with time zone,
+	CONSTRAINT "runs_conversation_id_conversations_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversations"("id") ON DELETE cascade ON UPDATE no action,
+	CONSTRAINT "runs_thread_id_conversation_threads_id_fk" FOREIGN KEY ("thread_id") REFERENCES "public"."conversation_threads"("id") ON DELETE no action ON UPDATE no action,
+	CONSTRAINT "runs_trigger_message_id_messages_id_fk" FOREIGN KEY ("trigger_message_id") REFERENCES "public"."messages"("id") ON DELETE set null ON UPDATE no action
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "runs_conversation_idx" ON "runs" USING btree ("conversation_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "runs_thread_idx" ON "runs" USING btree ("thread_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "runs_status_idx" ON "runs" USING btree ("status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "runs_started_at_idx" ON "runs" USING btree ("started_at");--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "run_events" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"run_id" uuid NOT NULL,
+	"seq" integer NOT NULL,
+	"kind" text NOT NULL,
+	"payload" jsonb NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "run_events_run_id_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."runs"("id") ON DELETE cascade ON UPDATE no action
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "run_events_run_seq_idx" ON "run_events" USING btree ("run_id","seq");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "run_events_kind_idx" ON "run_events" USING btree ("kind");--> statement-breakpoint
 ALTER TABLE "connector_auth_requests" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "connector_preferences" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "trace_events" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
