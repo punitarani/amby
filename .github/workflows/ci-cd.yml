@@ -105,9 +105,9 @@ jobs:
   db-validate:
     name: Validate Migrations
     runs-on: ubuntu-latest
-    # Intentionally independent from typecheck/build for faster feedback.
-    # The overall PR gate still includes those jobs separately, and production
-    # migration/app deploy remain blocked on both build and db-validate.
+    needs: [typecheck]
+    # Validate migrations only after typecheck because drizzle-kit generate
+    # executes the TypeScript schema directly.
     services:
       postgres:
         image: pgvector/pgvector:pg17
