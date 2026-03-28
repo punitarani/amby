@@ -11,6 +11,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(scriptDir, "..")
 const drizzleDir = resolve(packageRoot, "drizzle")
 const configPath = resolve(packageRoot, "drizzle.config.ts")
+const DRIZZLE_GENERATE_TIMEOUT_MS = 60_000
 
 const collectFiles = async (
 	root: string,
@@ -95,8 +96,23 @@ const main = async () => {
 				cwd: packageRoot,
 				encoding: "utf8",
 				env: process.env,
+				killSignal: "SIGKILL",
+				timeout: DRIZZLE_GENERATE_TIMEOUT_MS,
 			},
 		)
+
+		if (result.error) {
+			process.stderr.write(result.stdout)
+			process.stderr.write(result.stderr)
+
+			if (result.error.code === "ETIMEDOUT") {
+				throw new Error(
+					`drizzle-kit generate timed out after ${DRIZZLE_GENERATE_TIMEOUT_MS}ms while verifying migrations`,
+				)
+			}
+
+			throw result.error
+		}
 
 		if (result.status !== 0) {
 			process.stderr.write(result.stdout)
