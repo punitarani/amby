@@ -74,7 +74,8 @@ jobs:
       - run: bun run build
       - name: Worker dry run
         run: |
-          WORKER_VERSION_MESSAGE=$(cd apps/api && bun run --silent deploy:message)
+          WORKER_VERSION_MESSAGE=$(cd apps/api && bun run --silent deploy:message) || exit 1
+          test -n "$WORKER_VERSION_MESSAGE"
           test ${#WORKER_VERSION_MESSAGE} -le 100
           cd apps/api
           rm -rf dist-worker
@@ -194,7 +195,8 @@ jobs:
         run: |
           COMMIT_SHORT="${GITHUB_SHA:0:7}"
           DEPLOY_TAG="${GITHUB_REF_NAME}-${GITHUB_RUN_NUMBER}-${COMMIT_SHORT}"
-          DEPLOY_MESSAGE=$(cd apps/api && bun run --silent deploy:message)
+          DEPLOY_MESSAGE=$(cd apps/api && bun run --silent deploy:message) || exit 1
+          test -n "$DEPLOY_MESSAGE"
           test ${#DEPLOY_MESSAGE} -le 100
           {
             echo "tag=${DEPLOY_TAG}"
