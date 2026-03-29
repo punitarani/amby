@@ -391,11 +391,9 @@ This split is intentional:
 - `docs/chat/attachments.md` explains the durable attachment model
 - `docs/channels/telegram.md` explains how Telegram plugs into that model
 
-## Backward Compatibility
+## Delivery Notes
 
-`ConversationSession` migrates legacy buffer entries on hydrate. Existing Durable Objects that stored the pre-attachment `{ text, messageId, date }` shape are transparently converted to the new `BufferedInboundMessage` format the first time they load.
-
-`ReplyDraftHandle` carries optional `chunkIds` for multi-chunk Telegram messages. The streaming preview is capped at 4090 characters to avoid Telegram `editMessageText` failures. On finalization, the streaming draft is always deleted and the final response is posted fresh, which handles splitting naturally.
+`ReplyDraftHandle` carries optional `chunkIds` for multi-chunk Telegram messages. The streaming preview is capped at 4090 characters to avoid Telegram `editMessageText` failures. On finalization, the workflow either edits the draft in place for text output or deletes it when the turn ends up attachment-only, which keeps Telegram delivery inside platform limits without leaving stale preview messages behind.
 
 ## Current Non-Goals
 

@@ -74,7 +74,7 @@ graph BT
 - **Effect.js service tags for DI** — packages expose services as Effect layers; apps compose them at the edge
 - **Parse at the boundary** — Telegram webhooks, API responses, LLM tool output are all parsed into typed domain objects at entry
 - **Compute persistence is volume-based** — Daytona sandboxes are disposable; user state lives on persistent volumes
-- **Durable execution** — long-running work uses Cloudflare Workflows, Durable Objects, and Queues; not transient LLM calls
+- **Durable execution** — long-running work uses Cloudflare Workflows and Durable Objects; not transient LLM calls
 - **Plugins are the extension boundary** — integrations (Composio), browser tools, computer tools, and automations are registered via `PluginRegistry` in `@amby/plugins`
 - **Conversation turns are structured** — `messages.content` stays compact for routing and human readability, while `messages.partsJson` stores ordered text and attachment refs
 
@@ -93,8 +93,9 @@ What must **not** cross boundaries:
 ```mermaid
 flowchart LR
     TG[Telegram] --> WH[Webhook Handler]
-    WH --> Q[Queue]
-    Q --> DO[Durable Object]
+    WH --> SDK[Chat SDK]
+    SDK --> State[ChatStateDO]
+    SDK --> DO[ConversationSession DO]
     DO --> WF[Workflow]
     WF --> Attach["@amby/attachments"]
     Attach --> Agent["@amby/agent"]
@@ -103,10 +104,10 @@ flowchart LR
 ```
 
 1. Telegram webhook hits Cloudflare Worker
-2. Queue decouples inbound delivery from processing
-3. Durable Object buffers and debounces per-chat structured messages
-4. Workflow resolves users, ingests attachments into private storage, and runs the agent durably
-5. Agent consumes compact routing text plus current-turn attachment parts
+2. Chat SDK updates transport state in `ChatStateDO` and routes commands or normal input
+3. `ConversationSession` buffers and debounces per-chat structured messages
+4. `AgentExecutionWorkflow` resolves users, ingests attachments into private storage, and runs the agent durably
+5. The agent consumes compact routing text plus current-turn attachment parts
 6. Replies go back through a channel sender that can emit text, photos, documents, or signed download links
 
 ## Deeper Docs
@@ -120,5 +121,5 @@ flowchart LR
 | Data model, schema, migrations | [DATA_MODEL.md](DATA_MODEL.md) |
 | Memory, vector search, pgvector | [MEMORY.md](MEMORY.md) |
 | Plugins and skills | [PLUGINS_AND_SKILLS.md](PLUGINS_AND_SKILLS.md) |
-| Runtime flows, workflows, queues | [RUNTIME.md](RUNTIME.md) |
+| Runtime flows and workflow ownership | [RUNTIME.md](RUNTIME.md) |
 | Development setup and commands | [DEVELOPMENT.md](DEVELOPMENT.md) |

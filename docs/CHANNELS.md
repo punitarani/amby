@@ -34,21 +34,22 @@ sequenceDiagram
         SDK->>Auth: resolveTelegramUser(from, chatId)
         Auth-->>SDK: userId or blocked
         SDK->>API: inline command reply
-    else normal text
-        SDK->>Sess: ingestMessage(text, chatId, from)
+    else normal text or attachments
+        SDK->>Sess: ingestMessage(bufferedMessage, chatId, from)
         Sess->>Sess: adaptive debounce + active-turn state
         Sess->>WF: create(messages, executionToken)
         WF->>Auth: resolveTelegramUser(from, chatId)
         Auth-->>WF: userId or blocked
-        WF->>Agent: ensureConversation + handleMessage / handleBatchedMessages
+        WF->>WF: AttachmentService.ingestBufferedMessages(...)
+        WF->>Agent: handleStructuredMessage / handleStructuredBatch
         Agent-->>WF: final response
         WF->>Sess: claimFirstOutbound(executionToken)
-        WF->>API: send/edit/delete response
+        WF->>API: send/edit/delete text + attachment delivery
         WF->>Sess: completeExecution(executionToken, outcome)
     end
 ```
 
-Key point: normal Telegram text does not resolve identity in the Chat SDK hot path. It goes straight to `ConversationSession`, and identity resolution happens inside the workflow.
+Key point: normal Telegram input does not resolve identity in the Chat SDK hot path. Structured buffered messages go straight to `ConversationSession`, and identity resolution happens inside the workflow.
 
 ## Telegram outbound flow
 

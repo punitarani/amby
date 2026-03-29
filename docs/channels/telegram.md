@@ -20,7 +20,6 @@ Telegram is a transport boundary. It is responsible for:
 - accepting Telegram updates
 - verifying and parsing them through `@chat-adapter/telegram`
 - deciding whether a message is a simple command or normal user input
-- mapping Telegram identity to an Amby user
 - buffering per-chat input for the durable workflow path
 - delivering replies back through the Telegram Bot API
 
@@ -30,6 +29,11 @@ Telegram is not responsible for:
 - execution planning
 - browser or sandbox work
 - business logic outside the channel boundary
+
+Identity resolution is split by path:
+
+- commands resolve identity inline through `handleCommand(...)`
+- normal turns resolve identity once inside `AgentExecutionWorkflow`
 
 ## Entry points
 
@@ -135,7 +139,7 @@ flowchart LR
 
 Keeping them separate matters because they solve different problems.
 
-### 4. Command vs normal text split
+### 4. Command vs normal input split
 
 `routeIncomingMessage(...)` extracts:
 
@@ -280,7 +284,7 @@ sequenceDiagram
     Bot->>Bot: parseTelegramCommand(...)
     alt command
         Bot->>TGA: inline command reply
-    else normal text
+    else normal text only
         Bot->>Agent: resolveTelegramUser + ensureConversation + handleMessage
         Agent-->>Bot: response
         Bot->>TGA: post reply
@@ -294,6 +298,7 @@ Differences from the Worker path:
 - does not use `ChatStateDO`
 - does not use `ConversationSession`
 - does not use `AgentExecutionWorkflow`
+- does not ingest or deliver structured attachments; attachment handling is Worker-only today
 
 This path is for local development convenience, not production durability.
 
