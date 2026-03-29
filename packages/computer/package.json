@@ -16,6 +16,7 @@
 	"dependencies": {
 		"@amby/core": "workspace:*",
 		"@amby/env": "workspace:*",
+		"@amby/vault": "workspace:*",
 		"@daytonaio/sdk": "^0.153.0"
 	},
 	"peerDependencies": {

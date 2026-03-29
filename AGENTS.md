@@ -382,7 +382,32 @@ The model should never need raw secret values in visible context.
 
 ***
 
-## 16. Garbage collection is a first-class workflow
+## 16. Environment variable checklist
+
+When adding a new environment variable, update **all** of these files:
+
+1. `packages/env/src/shared.ts` — add to the `Env` interface (source of truth)
+2. `packages/env/src/local.ts` — add to `EnvConfig` (with `Config.redacted()` for secrets) and the `EnvServiceLive` return object
+3. `packages/env/src/workers.ts` — add to `WorkerBindings` interface and `makeEnvServiceFromBindings` mapping
+4. `scripts/worker-env-keys.txt` — add the key name (used by `generate-dev-vars.sh` to create `apps/api/.dev.vars`)
+5. `.env.example` — add with a sensible default or empty value
+6. `apps/api/wrangler.toml` — add to `[secrets].required` (for secrets) or `[vars]` (for non-secret config with defaults)
+
+### Rules
+
+* Secrets use `Config.redacted()` in local.ts and go in `[secrets].required` in wrangler.toml.
+* Non-secret config with production defaults goes in `[vars]` in wrangler.toml.
+* All env vars must have defaults in local/workers so the app starts without every var set.
+* Worker-only vars (Cloudflare bindings like `HYPERDRIVE`, `BROWSER`, `AI`, DOs, queues, workflows) go in `WorkerBindings` only — not in the `Env` interface or `worker-env-keys.txt`.
+
+### Hard rule
+
+Every `Env` interface field must appear in local.ts, workers.ts, worker-env-keys.txt, and .env.example.
+Missing any of these causes silent failures in development or deployment.
+
+***
+
+## 17. Garbage collection is a first-class workflow
 
 Agent repos accumulate bad patterns quickly unless cleanup is continuous.
 
@@ -405,7 +430,7 @@ Pay codebase debt continuously in small PRs.
 
 ***
 
-## 17. What agents must not do
+## 18. What agents must not do
 
 Agents must not:
 
@@ -421,7 +446,7 @@ Agents must not:
 
 ***
 
-## 18. Default implementation workflow
+## 19. Default implementation workflow
 
 1. Read root `AGENTS.md`, nearest local `AGENTS.md`, and `ARCHITECTURE.md`.
 2. Read existing code before proposing new abstractions.
@@ -438,7 +463,7 @@ Agents must not:
 
 ***
 
-## 19. Quality bar for completion
+## 20. Quality bar for completion
 
 A task is done only when all of the following are true:
 
@@ -453,7 +478,7 @@ A task is done only when all of the following are true:
 
 ***
 
-## 20. Style of thought
+## 21. Style of thought
 
 Be conservative with interfaces and aggressive with clarity.
 

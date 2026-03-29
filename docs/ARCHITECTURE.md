@@ -16,9 +16,13 @@ graph BT
     auth --> env
     browser["@amby/browser"] --> core
     browser --> env
+    vault["@amby/vault"] --> core
+    vault --> db
+    vault --> env
     computer["@amby/computer"] --> core
     computer --> db
     computer --> env
+    computer --> vault
     plugins["@amby/plugins"] --> core
     plugins --> db
     plugins --> env
@@ -57,11 +61,12 @@ graph BT
 | **2. Infrastructure** | `env`, `db` | Environment config, platform abstractions, persistence gateway |
 | **3. Attachment boundary** | `attachments` | Attachment ingest policy, blob storage, signing, model-part loading, artifact publication |
 | **4. Auth** | `auth` | Session management, API keys (BetterAuth) |
-| **5. Capabilities** | `browser`, `computer` | Web automation (Stagehand), sandbox compute (Daytona) |
-| **6. Channel adapters** | `channels` | Transport parsing, sender implementations, Telegram boundary logic |
-| **7. Composition** | `plugins`, `skills` | Built-in plugins (integrations, automations, browser-tools, computer-tools, memory), skill discovery |
-| **8. Orchestration** | `agent` | Conversation engine, context building, execution planning, tool dispatch |
-| **9. Runtime** | `apps/api`, `apps/web`, `apps/mock` | Cloudflare Workers API, Next.js marketing site, mock Telegram for dev |
+| **5. Secret management** | `vault` | Envelope encryption, versioned secret storage, Codex credential codecs |
+| **6. Capabilities** | `browser`, `computer` | Web automation (Stagehand), sandbox compute (Daytona) |
+| **7. Channel adapters** | `channels` | Transport parsing, sender implementations, Telegram boundary logic |
+| **8. Composition** | `plugins`, `skills` | Built-in plugins (integrations, automations, browser-tools, computer-tools, memory), skill discovery |
+| **9. Orchestration** | `agent` | Conversation engine, context building, execution planning, tool dispatch |
+| **10. Runtime** | `apps/api`, `apps/web`, `apps/mock` | Cloudflare Workers API, Next.js marketing site, mock Telegram for dev |
 
 **Direction rule:** layers depend only on layers above them (lower number). No upward dependencies.
 
@@ -72,6 +77,7 @@ graph BT
 - **`db` is the single persistence gateway** — all database access goes through `@amby/db`; no package owns its own connection
 - **`attachments` is the single file boundary** — attachment policy, blob I/O, signed URLs, model-part resolution, and task artifact publication live in `@amby/attachments`
 - **Effect.js service tags for DI** — packages expose services as Effect layers; apps compose them at the edge
+- **`vault` is the single secret-management boundary** — all retrievable agent credentials are stored through `@amby/vault` with envelope encryption; no plaintext secrets in trace/event/log surfaces
 - **Parse at the boundary** — Telegram webhooks, API responses, LLM tool output are all parsed into typed domain objects at entry
 - **Compute persistence is volume-based** — Daytona sandboxes are disposable; user state lives on persistent volumes
 - **Durable execution** — long-running work uses Cloudflare Workflows and Durable Objects; not transient LLM calls

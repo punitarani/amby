@@ -35,6 +35,7 @@ APP_URL = "https://hiamby.com"
 DAYTONA_API_URL = "https://app.daytona.io/api"
 DAYTONA_TARGET = "us"
 SENTRY_ENVIRONMENT = "production"
+VAULT_KEK_VERSION = "1"
 
 # Required secrets — deploy will fail if any are missing
 [secrets]
@@ -55,6 +56,7 @@ required = [
   "BRAINTRUST_API_KEY",
   "BRAINTRUST_PROJECT_ID",
   "SENTRY_DSN",
+  "VAULT_KEK",
 ]
 
 # Observability

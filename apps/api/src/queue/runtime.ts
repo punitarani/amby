@@ -5,16 +5,19 @@ import { makeBrowserServiceFromBindings } from "@amby/browser/workers"
 import { TelegramReplySenderLive, TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import {
+	CodexAuthStoreLive,
 	ComputeStoreLive,
 	makeDbServiceFromHyperdrive,
 	TaskStoreLive,
 	TraceStoreLive,
+	VaultStoreLive,
 } from "@amby/db"
 import { makeEnvServiceFromBindings, type WorkerBindings } from "@amby/env/workers"
 import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
 import { MemoryServiceLive } from "@amby/plugins/memory"
 import { PluginRegistryLive } from "@amby/plugins/registry"
+import { CodexVaultServiceLive, VaultServiceLive } from "@amby/vault"
 import * as Sentry from "@sentry/cloudflare"
 import { Layer, ManagedRuntime } from "effect"
 
@@ -27,15 +30,24 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 	}
 
 	const DbLive = makeDbServiceFromHyperdrive(connectionString)
-	const StoreLive = Layer.mergeAll(TaskStoreLive, TraceStoreLive, ComputeStoreLive).pipe(
-		Layer.provideMerge(DbLive),
-	)
+	const StoreLive = Layer.mergeAll(
+		TaskStoreLive,
+		TraceStoreLive,
+		ComputeStoreLive,
+		VaultStoreLive,
+		CodexAuthStoreLive,
+	).pipe(Layer.provideMerge(DbLive))
 
 	const InfraLive = Layer.mergeAll(SandboxServiceLive).pipe(
 		Layer.provideMerge(StoreLive),
 		Layer.provideMerge(makeEnvServiceFromBindings(bindings)),
 	)
 	const AttachmentLive = makeAttachmentServicesFromBindings(bindings).pipe(
+		Layer.provideMerge(InfraLive),
+	)
+
+	const VaultLive = CodexVaultServiceLive.pipe(
+		Layer.provideMerge(VaultServiceLive),
 		Layer.provideMerge(InfraLive),
 	)
 
@@ -53,7 +65,7 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 				Sentry.logger[level](`[BrowserService] ${entry.message}`, entry)
 			},
 		}),
-	).pipe(Layer.provideMerge(InfraLive), Layer.provideMerge(AttachmentLive))
+	).pipe(Layer.provideMerge(VaultLive), Layer.provideMerge(AttachmentLive))
 
 	return PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 }
