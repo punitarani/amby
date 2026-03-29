@@ -104,8 +104,8 @@ export interface Env {
 	readonly POSTHOG_HOST: string
 
 	// Workflows
-	readonly SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>
-	readonly VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
+	readonly AMBY_SANDBOX_PROVISION?: WorkflowBinding<{ userId: string }>
+	readonly AMBY_VOLUME_PROVISION?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
 }
 
 export const DEFAULT_TELEGRAM_BOT_USERNAME = "my_amby_bot"

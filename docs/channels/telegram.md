@@ -39,7 +39,7 @@ Telegram logic is not responsible for:
 
 | Runtime | File | When it is used | Core difference |
 |---|---|---|---|
-| Cloudflare Worker | `apps/api/src/worker.ts` | production-style runtime and `wrangler dev` | uses `ChatStateDO`, `ConversationSession`, and `AgentExecutionWorkflow` |
+| Cloudflare Worker | `apps/api/src/worker.ts` | production-style runtime and `wrangler dev` | uses `AmbyChatState`, `AmbyConversation`, and `AmbyAgentExecution` |
 | Bun | `apps/api/src/index.ts` | local Bun-only development | uses `createAmbyBot()` and in-memory Chat SDK state |
 
 ## Production Worker flow
@@ -49,9 +49,9 @@ sequenceDiagram
     participant TG as Telegram
     participant WH as worker.ts POST /telegram/webhook
     participant SDK as Chat SDK gateway
-    participant State as ChatStateDO
-    participant Sess as ConversationSession DO
-    participant WF as AgentExecutionWorkflow
+    participant State as AmbyChatState
+    participant Sess as "AmbyConversation DO"
+    participant WF as AmbyAgentExecution
     participant Attach as "@amby/attachments"
     participant Agent as ConversationRuntime
     participant Send as ReplySender
@@ -89,7 +89,7 @@ sequenceDiagram
 That route does three things:
 
 1. creates or reuses the Worker Chat SDK singleton via `getOrCreateChat(...)`
-2. injects the Worker-only Chat SDK state adapter backed by `ChatStateDO`
+2. injects the Worker-only Chat SDK state adapter backed by `AmbyChatState`
 3. hands the raw request to `chat.webhooks.telegram(...)`
 
 At this point the raw HTTP request leaves Hono and enters the Chat SDK plus `@chat-adapter/telegram`.
@@ -106,31 +106,31 @@ Important responsibilities here:
 - ignore messages authored by the bot itself
 - route accepted messages into `routeIncomingMessage(...)`
 
-The Worker path uses a dedicated `ChatStateDO` through `createCloudflareChatState(...)`.
+The Worker path uses a dedicated `AmbyChatState` through `createCloudflareChatState(...)`.
 
 ### 3. Chat SDK state ownership
 
-`ChatStateDO` is not the business workflow state. It only stores Chat SDK transport state.
+`AmbyChatState` is not the business workflow state. It only stores Chat SDK transport state.
 
 ```mermaid
 flowchart LR
     Update[Telegram update] --> Chat[Chat SDK]
-    Chat --> State[ChatStateDO]
+    Chat --> State[AmbyChatState]
     Chat --> Route[routeIncomingMessage]
     Route --> Command[handleCommand]
-    Route --> Session[ConversationSession DO]
-    Session --> Workflow[AgentExecutionWorkflow]
+    Route --> Session["AmbyConversation DO"]
+    Session --> Workflow[AmbyAgentExecution]
     Workflow --> Runtime[ConversationRuntime]
 ```
 
-`ChatStateDO` owns:
+`AmbyChatState` owns:
 
 - thread subscriptions
 - thread locks
 - small cached values and dedupe keys
 - Chat SDK list/history storage
 
-`ConversationSession` owns:
+`AmbyConversation` owns:
 
 - the per-chat message buffer
 - debounce timing
@@ -171,7 +171,7 @@ Commands do not go through the buffering Durable Object or the agent workflow.
 
 #### Normal message path
 
-If the message is not a command and can be normalized into a `BufferedInboundMessage`, `routeIncomingMessage(...)` forwards it to `ConversationSession.ingestMessage(...)` using one Durable Object instance per Telegram chat id.
+If the message is not a command and can be normalized into a `BufferedInboundMessage`, `routeIncomingMessage(...)` forwards it to `AmbyConversation.ingestMessage(...)` using one Durable Object instance per Telegram chat id.
 
 For v1 this includes:
 
@@ -209,7 +209,7 @@ Key behavior:
 
 ### 6. Durable workflow execution
 
-When the debounce alarm fires, `ConversationSession` starts `AgentExecutionWorkflow`.
+When the debounce alarm fires, `AmbyConversation` starts `AmbyAgentExecution`.
 
 `apps/api/src/workflows/agent-execution.ts` then:
 
@@ -221,7 +221,7 @@ When the debounce alarm fires, `ConversationSession` starts `AgentExecutionWorkf
 6. streams interim output by posting once and then editing every 500ms
 7. sends final reply parts through `ReplySender`, using native Telegram photo/document delivery when possible
 8. falls back to signed Amby download links for unsupported outbound files
-9. tells `ConversationSession` that execution finished
+9. tells `AmbyConversation` that execution finished
 
 The workflow is where Telegram delivery, attachment ingest, and agent execution meet.
 
@@ -286,9 +286,9 @@ Differences from the Worker path:
 
 - uses `createAmbyBot()` in `packages/channels/src/telegram/bot.ts`
 - keeps Chat SDK state in memory with `createMemoryState()`
-- does not use `ChatStateDO`
-- does not use `ConversationSession`
-- does not use `AgentExecutionWorkflow`
+- does not use `AmbyChatState`
+- does not use `AmbyConversation`
+- does not use `AmbyAgentExecution`
 
 This path is for local development convenience, not for production durability.
 

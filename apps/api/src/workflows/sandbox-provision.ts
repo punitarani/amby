@@ -28,13 +28,13 @@ export interface SandboxProvisionParams {
 	userId: string
 }
 
-export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
+export class AmbySandboxProvision extends WorkflowEntrypoint<
 	WorkerBindings,
 	SandboxProvisionParams
 > {
 	async run(event: WorkflowEvent<SandboxProvisionParams>, step: WorkflowStep) {
 		const { userId } = event.payload
-		const scope = setWorkerScope("workflow.sandbox_provision", {
+		const scope = setWorkerScope("workflow.amby_sandbox_provision", {
 			workflow_instance_id: event.instanceId,
 			user_id: userId,
 		})
@@ -132,9 +132,9 @@ export class SandboxProvisionWorkflow extends WorkflowEntrypoint<
 
 		if (volumeRow.status !== "ready") {
 			await upsertMainSandbox(null, "volume_creating", volumeRow.id)
-			const volumeWorkflow = env.VOLUME_WORKFLOW
+			const volumeWorkflow = env.AMBY_VOLUME_PROVISION
 			if (!volumeWorkflow) {
-				throw new Error("VOLUME_WORKFLOW binding is not configured.")
+				throw new Error("AMBY_VOLUME_PROVISION binding is not configured.")
 			}
 
 			await step.do("start-volume-workflow", async () => {

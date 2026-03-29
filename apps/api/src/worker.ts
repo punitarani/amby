@@ -21,42 +21,22 @@ import {
 	createCloudflareChatState,
 } from "./chat-state/cloudflare-chat-state"
 import { handleExpiredConnectedAccount } from "./composio/expired-account"
-import { ChatStateDO as ChatStateDOBase } from "./durable-objects/chat-state"
-import { ConversationSession as ConversationSessionBase } from "./durable-objects/conversation-session"
+import { AmbyChatState } from "./durable-objects/chat-state"
+import { AmbyConversation } from "./durable-objects/conversation-session"
 import { handleScheduledReconciliation } from "./handlers/reconciliation"
 import { handleTaskEventPost } from "./handlers/task-events"
 import { getHomeResponse } from "./home"
 import { handleQueueBatch } from "./queue/consumer"
 import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "./queue/runtime"
-import { getSentryOptions, getSentryOptionsOrFallback, setTelegramScope } from "./sentry"
-import { AgentExecutionWorkflow as AgentExecutionWorkflowBase } from "./workflows/agent-execution"
-import { SandboxProvisionWorkflow as SandboxProvisionWorkflowBase } from "./workflows/sandbox-provision"
-import { VolumeProvisionWorkflow as VolumeProvisionWorkflowBase } from "./workflows/volume-provision"
+import { getSentryOptions, setTelegramScope } from "./sentry"
+import { AmbyAgentExecution } from "./workflows/agent-execution"
+import { AmbySandboxProvision } from "./workflows/sandbox-provision"
+import { AmbyVolumeProvision } from "./workflows/volume-provision"
 
-// Re-export instrumented Durable Object and Workflow classes so Cloudflare can discover them
-export const ConversationSession = Sentry.instrumentDurableObjectWithSentry(
-	getSentryOptionsOrFallback,
-	ConversationSessionBase,
-)
-export const ChatStateDO = Sentry.instrumentDurableObjectWithSentry(
-	getSentryOptionsOrFallback,
-	ChatStateDOBase,
-)
-export const AgentExecutionWorkflow = Sentry.instrumentWorkflowWithSentry(
-	getSentryOptionsOrFallback,
-	AgentExecutionWorkflowBase,
-)
-export const SandboxProvisionWorkflow = Sentry.instrumentWorkflowWithSentry(
-	getSentryOptionsOrFallback,
-	SandboxProvisionWorkflowBase,
-)
-export const VolumeProvisionWorkflow = Sentry.instrumentWorkflowWithSentry(
-	getSentryOptionsOrFallback,
-	VolumeProvisionWorkflowBase,
-)
+export { AmbyConversation, AmbyChatState, AmbyAgentExecution, AmbySandboxProvision, AmbyVolumeProvision }
 
 type ApiBindings = WorkerBindings & {
-	CHAT_STATE: ChatStateNamespaceLike
+	AMBY_CHAT_STATE: ChatStateNamespaceLike
 }
 
 type Env = { Bindings: ApiBindings; Variables: { posthogDistinctId?: string } }
@@ -213,7 +193,7 @@ function getOrCreateWorkerChatState(env: ApiBindings) {
 	// Intentionally route all Chat SDK transport state through one unsharded DO instance for now.
 	// Shard by adapter name once webhook throughput or lock contention justifies it.
 	// connect() is not called here — the Chat SDK calls state.connect() during init.
-	workerChatState = createCloudflareChatState({ namespace: env.CHAT_STATE })
+	workerChatState = createCloudflareChatState({ namespace: env.AMBY_CHAT_STATE })
 	return workerChatState
 }
 

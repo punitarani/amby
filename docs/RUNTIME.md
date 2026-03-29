@@ -9,8 +9,8 @@ sequenceDiagram
     participant TG as Telegram
     participant WH as Webhook (Hono)
     participant Q as Queue
-    participant DO as ConversationSession DO
-    participant WF as AgentExecutionWorkflow
+    participant DO as "AmbyConversation DO"
+    participant WF as AmbyAgentExecution
     participant AG as AgentService
     participant TG2 as Telegram
 
@@ -31,7 +31,7 @@ sequenceDiagram
     WF->>DO: completeExecution(userId, conversationId)
 ```
 
-## Durable Object: ConversationSession
+## Durable Object: AmbyConversation
 
 One instance per Telegram chat. Provides:
 
@@ -42,7 +42,7 @@ One instance per Telegram chat. Provides:
 
 States: `idle` -> `debouncing` -> `processing` -> `idle`
 
-## AgentExecutionWorkflow
+## AmbyAgentExecution
 
 Cloudflare Workflow with durable steps and retry:
 
@@ -186,13 +186,13 @@ Two additional Cloudflare Workflows handle compute provisioning:
 
 | Workflow | Responsibility |
 |----------|---------------|
-| `SandboxProvisionWorkflow` | Ensure user has a valid main sandbox on correct volume |
-| `VolumeProvisionWorkflow` | Ensure per-user persistent volume exists and is ready |
+| `AmbySandboxProvision` | Ensure user has a valid main sandbox on correct volume |
+| `AmbyVolumeProvision` | Ensure per-user persistent volume exists and is ready |
 
 ```mermaid
 flowchart LR
-    AgentWF[AgentExecutionWorkflow] -->|needs sandbox| SandboxWF[SandboxProvisionWorkflow]
-    SandboxWF -->|needs volume| VolumeWF[VolumeProvisionWorkflow]
+    AgentWF[AmbyAgentExecution] -->|needs sandbox| SandboxWF[AmbySandboxProvision]
+    SandboxWF -->|needs volume| VolumeWF[AmbyVolumeProvision]
 ```
 
 Stale/invalid sandboxes and unusable volumes are replaced automatically.

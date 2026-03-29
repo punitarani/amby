@@ -95,7 +95,7 @@ async function routeIncomingMessage(
 		try {
 			await runtime.runPromise(
 				handleCommand(parsedCommand, from, chatId, {
-					sandboxWorkflow: env.SANDBOX_WORKFLOW,
+					sandboxWorkflow: env.AMBY_SANDBOX_PROVISION,
 				}).pipe(
 					Effect.catchAllCause((cause) =>
 						Effect.sync(() => {
@@ -126,10 +126,10 @@ async function routeIncomingMessage(
 		await identityRuntime.dispose()
 	}
 
-	// Text messages: route to ConversationSession DO for debouncing
-	const doBinding = env.CONVERSATION_SESSION
+	// Text messages: route to the amby_Conversation DO for debouncing.
+	const doBinding = env.AMBY_CONVERSATION
 	if (!doBinding) {
-		console.error("[ChatSDK] CONVERSATION_SESSION binding not available")
+		console.error("[ChatSDK] AMBY_CONVERSATION binding not available")
 		return
 	}
 

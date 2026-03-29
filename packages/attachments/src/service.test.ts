@@ -52,8 +52,8 @@ const TEST_ENV: Env = {
 	BRAINTRUST_PROJECT_ID: "",
 	POSTHOG_KEY: "",
 	POSTHOG_HOST: "",
-	SANDBOX_WORKFLOW: undefined,
-	VOLUME_WORKFLOW: undefined,
+	AMBY_SANDBOX_PROVISION: undefined,
+	AMBY_VOLUME_PROVISION: undefined,
 }
 
 function unexpectedCall<A>(label: string) {

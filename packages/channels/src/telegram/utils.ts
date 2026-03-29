@@ -285,7 +285,7 @@ const startTelegramSession = (
 	userId: string,
 	from: TelegramFrom,
 	chatId: number,
-	options?: { sandboxWorkflow?: WorkerBindings["SANDBOX_WORKFLOW"] },
+	options?: { sandboxWorkflow?: WorkerBindings["AMBY_SANDBOX_PROVISION"] },
 ) =>
 	Effect.gen(function* () {
 		const env = yield* EnvService
@@ -414,7 +414,7 @@ export const handleCommand = (
 	command: ParsedTelegramCommand,
 	from: TelegramFrom,
 	chatId: number,
-	options?: { sandboxWorkflow?: WorkerBindings["SANDBOX_WORKFLOW"] },
+	options?: { sandboxWorkflow?: WorkerBindings["AMBY_SANDBOX_PROVISION"] },
 ) =>
 	Effect.gen(function* () {
 		const sender = yield* TelegramSender

@@ -41,8 +41,8 @@ The attachment pipeline is split across a few clear boundaries.
 
 ```mermaid
 flowchart LR
-    CH["Channel adapter"] --> DO["ConversationSession DO"]
-    DO --> WF["AgentExecutionWorkflow"]
+    CH["Channel adapter"] --> DO["AmbyConversation DO"]
+    DO --> WF["AmbyAgentExecution"]
     WF --> ATT["@amby/attachments"]
     ATT --> DB["Postgres"]
     ATT --> BLOB["R2 or local blob store"]
@@ -59,11 +59,11 @@ Responsibilities:
   - parse raw transport payloads
   - build `BufferedInboundMessage`
   - preserve transport-specific source metadata
-- `ConversationSession`:
+- `AmbyConversation`:
   - debounce bursts of input
   - merge media groups when the channel provides them
   - hand buffered messages to the workflow
-- `AgentExecutionWorkflow`:
+- `AmbyAgentExecution`:
   - resolve the user and conversation
   - call attachment ingest at workflow time
   - pass structured current-turn input to the agent
@@ -142,8 +142,8 @@ The `attachments` table stores canonical metadata:
 ```mermaid
 sequenceDiagram
     participant CH as Channel adapter
-    participant DO as ConversationSession
-    participant WF as AgentExecutionWorkflow
+    participant DO as AmbyConversation
+    participant WF as AmbyAgentExecution
     participant ATT as "@amby/attachments"
     participant DB as Postgres
     participant BLOB as R2 or local store
@@ -187,7 +187,7 @@ The current implementation uses Telegram-specific source metadata, but the buffe
 
 Attachment bytes are downloaded and stored only after user and conversation resolution.
 
-That happens inside `AgentExecutionWorkflow` by calling:
+That happens inside `AmbyAgentExecution` by calling:
 
 ```ts
 AttachmentService.ingestBufferedMessages(...)
@@ -349,7 +349,7 @@ Replies are also part-based.
 ```mermaid
 sequenceDiagram
     participant AG as ConversationRuntime
-    participant WF as AgentExecutionWorkflow
+    participant WF as AmbyAgentExecution
     participant SEND as ReplySender
     participant ATT as "@amby/attachments"
     participant CH as Channel transport
@@ -393,7 +393,7 @@ This split is intentional:
 
 ## Backward Compatibility
 
-`ConversationSession` migrates legacy buffer entries on hydrate. Existing Durable Objects that stored the pre-attachment `{ text, messageId, date }` shape are transparently converted to the new `BufferedInboundMessage` format the first time they load.
+`AmbyConversation` migrates legacy buffer entries on hydrate. Existing Durable Objects that stored the pre-attachment `{ text, messageId, date }` shape are transparently converted to the new `BufferedInboundMessage` format the first time they load.
 
 `ReplyDraftHandle` carries optional `chunkIds` for multi-chunk Telegram messages. The streaming preview is capped at 4090 characters to avoid Telegram `editMessageText` failures. On finalization, the streaming draft is always deleted and the final response is posted fresh, which handles splitting naturally.
 

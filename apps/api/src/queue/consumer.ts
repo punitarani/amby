@@ -60,7 +60,7 @@ export async function handleQueueBatch(
 						try {
 							await runtime.runPromise(
 								handleCommand(parsedCommand, from, chatId, {
-									sandboxWorkflow: env.SANDBOX_WORKFLOW,
+									sandboxWorkflow: env.AMBY_SANDBOX_PROVISION,
 								}),
 							)
 							Sentry.logger.info("Telegram command processed", {
@@ -83,10 +83,10 @@ export async function handleQueueBatch(
 						if (!bufferedMessage) {
 							return
 						}
-						// Route supported Telegram messages to ConversationSession Durable Object
-						const doBinding = env.CONVERSATION_SESSION
+						// Route supported Telegram messages to the amby_Conversation Durable Object.
+						const doBinding = env.AMBY_CONVERSATION
 						if (!doBinding) {
-							console.error("[Queue] CONVERSATION_SESSION binding not available")
+							console.error("[Queue] AMBY_CONVERSATION binding not available")
 							return
 						}
 
@@ -96,7 +96,7 @@ export async function handleQueueBatch(
 							await Sentry.startSpan(
 								{
 									op: "durable-object.rpc",
-									name: "ConversationSession.ingestMessage",
+									name: "amby_Conversation.ingestMessage",
 								},
 								async () => {
 									await stub.ingestMessage({

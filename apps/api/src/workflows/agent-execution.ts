@@ -20,7 +20,7 @@ export interface AgentExecutionParams {
 	parentContext?: string
 }
 
-export class AgentExecutionWorkflow extends WorkflowEntrypoint<
+export class AmbyAgentExecution extends WorkflowEntrypoint<
 	WorkerBindings,
 	AgentExecutionParams
 > {
@@ -29,7 +29,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 		let { userId, conversationId } = event.payload
 
 		setTelegramScope({
-			component: "workflow.agent_execution",
+			component: "workflow.amby_agent_execution",
 			chatId,
 			from,
 			userId,
@@ -299,7 +299,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 		userId: string | null,
 		conversationId: string | null | undefined,
 	) {
-		const doBinding = this.env.CONVERSATION_SESSION
+		const doBinding = this.env.AMBY_CONVERSATION
 		if (isSubAgent || !doBinding) return
 
 		await step.do("complete", async () => {

@@ -24,7 +24,7 @@ interface IngestPayload {
 const DEBOUNCE_MS = 3000
 const ACTIVE_DEBOUNCE_MS = 1000
 
-export class ConversationSession extends DurableObject<WorkerBindings> {
+export class AmbyConversation extends DurableObject<WorkerBindings> {
 	private state: SessionState = {
 		status: "idle",
 		userId: null,
@@ -96,7 +96,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 	async ingestMessage(payload: IngestPayload): Promise<void> {
 		await this.hydrate()
 		setTelegramScope({
-			component: "conversation-session.ingest",
+			component: "amby_conversation.ingest",
 			chatId: payload.chatId,
 			from: payload.from,
 			userId: this.state.userId,
@@ -133,13 +133,13 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 
 		if (this.state.status === "processing") {
 			// Agent is already running — forward as interrupt to the active workflow
-			if (this.state.activeWorkflowId && this.env.AGENT_WORKFLOW) {
+			if (this.state.activeWorkflowId && this.env.AMBY_AGENT_EXECUTION) {
 				try {
-					const instance = await this.env.AGENT_WORKFLOW.get(this.state.activeWorkflowId)
+					const instance = await this.env.AMBY_AGENT_EXECUTION.get(this.state.activeWorkflowId)
 					await Sentry.startSpan(
 						{
 							op: "workflow.event",
-							name: "AgentExecutionWorkflow.sendEvent",
+							name: "amby_AgentExecution.sendEvent",
 						},
 						async () => {
 							await instance.sendEvent({
@@ -168,7 +168,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		const pendingFrom = await this.ctx.storage.get<TelegramFrom>("pendingFrom")
 		if (this.state.chatId) {
 			setTelegramScope({
-				component: "conversation-session.alarm",
+				component: "amby_conversation.alarm",
 				chatId: this.state.chatId,
 				from: pendingFrom ?? null,
 				userId: this.state.userId,
@@ -179,7 +179,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 				},
 			})
 		} else {
-			setWorkerScope("conversation-session.alarm", {
+			setWorkerScope("amby_conversation.alarm", {
 				buffered_message_count: this.state.buffer.length,
 				session_status: this.state.status,
 			})
@@ -205,13 +205,13 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		this.state.status = "processing"
 
 		// Launch the workflow
-		const workflow = this.env.AGENT_WORKFLOW
+		const workflow = this.env.AMBY_AGENT_EXECUTION
 		if (workflow) {
 			try {
 				const instance = await Sentry.startSpan(
 					{
 						op: "workflow.start",
-						name: "AgentExecutionWorkflow.create",
+						name: "amby_AgentExecution.create",
 					},
 					() =>
 						workflow.create({
@@ -239,7 +239,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 				await this.ctx.storage.setAlarm(Date.now() + 5000)
 			}
 		} else {
-			console.error("[DO] AGENT_WORKFLOW binding not available")
+			console.error("[DO] AMBY_AGENT_EXECUTION binding not available")
 			this.state.status = "idle"
 		}
 
@@ -249,7 +249,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 	async completeExecution(result: { userId?: string; conversationId?: string }): Promise<void> {
 		await this.hydrate()
 		setTelegramScope({
-			component: "conversation-session.complete",
+			component: "amby_conversation.complete",
 			chatId: this.state.chatId ?? undefined,
 			userId: result.userId ?? this.state.userId,
 			conversationId: result.conversationId ?? this.state.conversationId,

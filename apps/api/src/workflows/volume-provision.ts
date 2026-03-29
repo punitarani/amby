@@ -29,13 +29,13 @@ export interface VolumeProvisionResult {
 	status: "creating" | "ready" | "error" | "deleted"
 }
 
-export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
+export class AmbyVolumeProvision extends WorkflowEntrypoint<
 	WorkerBindings,
 	VolumeProvisionParams
 > {
 	async run(event: WorkflowEvent<VolumeProvisionParams>, step: WorkflowStep) {
 		const { userId, parentWorkflowId } = event.payload
-		const scope = setWorkerScope("workflow.volume_provision", {
+		const scope = setWorkerScope("workflow.amby_volume_provision", {
 			workflow_instance_id: event.instanceId,
 			user_id: userId,
 		})
@@ -131,7 +131,7 @@ export class VolumeProvisionWorkflow extends WorkflowEntrypoint<
 			}
 		}
 
-		const sandboxWorkflow = env.SANDBOX_WORKFLOW
+		const sandboxWorkflow = env.AMBY_SANDBOX_PROVISION
 		if (parentWorkflowId && sandboxWorkflow) {
 			await step.do(
 				"notify-parent",

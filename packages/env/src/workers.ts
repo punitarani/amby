@@ -82,13 +82,13 @@ export interface WorkerBindings {
 	AI?: unknown
 	TELEGRAM_QUEUE?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
 	TELEGRAM_DLQ?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
-	CONVERSATION_SESSION?: {
+	AMBY_CONVERSATION?: {
 		idFromName(name: string): { toString(): string }
 		get(id: { toString(): string }): { ingestMessage(msg: unknown): Promise<void> }
 	}
-	AGENT_WORKFLOW?: WorkflowBinding<unknown>
-	SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>
-	VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
+	AMBY_AGENT_EXECUTION?: WorkflowBinding<unknown>
+	AMBY_SANDBOX_PROVISION?: WorkflowBinding<{ userId: string }>
+	AMBY_VOLUME_PROVISION?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
 }
 
 export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
@@ -160,6 +160,6 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		POSTHOG_HOST: bindings.POSTHOG_HOST ?? "https://us.i.posthog.com",
 
 		// Workflows
-		SANDBOX_WORKFLOW: bindings.SANDBOX_WORKFLOW,
-		VOLUME_WORKFLOW: bindings.VOLUME_WORKFLOW,
+		AMBY_SANDBOX_PROVISION: bindings.AMBY_SANDBOX_PROVISION,
+		AMBY_VOLUME_PROVISION: bindings.AMBY_VOLUME_PROVISION,
 	})

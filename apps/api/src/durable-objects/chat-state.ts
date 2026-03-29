@@ -68,7 +68,7 @@ function readQueueExpiry(raw: string) {
 	}
 }
 
-export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
+export class AmbyChatState<TEnv = unknown> extends DurableObject<TEnv> {
 	private readonly sql: DurableObjectStorage["sql"]
 
 	constructor(ctx: DurableObjectState, env: TEnv) {
@@ -404,7 +404,7 @@ export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 				await this.ctx.storage.setAlarm(next)
 			}
 		} catch (err) {
-			console.error("ChatStateDO alarm failed, rescheduling:", err)
+			console.error("amby_ChatState alarm failed, rescheduling:", err)
 			await this.ctx.storage.setAlarm(Date.now() + 30_000)
 		}
 	}
@@ -433,7 +433,7 @@ export class ChatStateDO<TEnv = unknown> extends DurableObject<TEnv> {
 		const next = this.nextExpiry()
 		if (next !== null) {
 			this.ctx.storage.setAlarm(next).catch((err) => {
-				console.error("ChatStateDO failed to schedule cleanup alarm:", err)
+				console.error("amby_ChatState failed to schedule cleanup alarm:", err)
 			})
 		}
 	}
