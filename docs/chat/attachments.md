@@ -391,6 +391,10 @@ This split is intentional:
 - `docs/chat/attachments.md` explains the durable attachment model
 - `docs/channels/telegram.md` explains how Telegram plugs into that model
 
+## Session-State Hydration
+
+`ConversationSession` persists buffered inbound messages in Durable Object storage. On hydrate it accepts both the current `BufferedInboundMessage` shape and the older text-only `{ text, messageId, date }` rows so existing per-chat sessions can roll forward without a manual reset.
+
 ## Delivery Notes
 
 `ReplyDraftHandle` carries optional `chunkIds` for multi-chunk Telegram messages. The streaming preview is capped at 4090 characters to avoid Telegram `editMessageText` failures. On finalization, the workflow either edits the draft in place for text output or deletes it when the turn ends up attachment-only, which keeps Telegram delivery inside platform limits without leaving stale preview messages behind.

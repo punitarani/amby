@@ -110,13 +110,23 @@ export function createTelegramDeliveryController(params: {
 			if (state.suppressed) return
 
 			if (streamMessageId) {
+				// Once the draft exists, first outbound was already claimed. Finalize the user-visible
+				// response even if a later DO status probe marks the execution stale.
 				if (finalText.trim()) {
-					const [firstChunk, ...moreChunks] = splitTelegramMessage(finalText)
-					if (firstChunk !== undefined) {
-						await params.adapter
-							.editMessage(params.chatId, streamMessageId, firstChunk)
-							.catch(() => {})
-						for (const chunk of moreChunks) {
+					const chunks = splitTelegramMessage(finalText)
+					const [firstChunk, ...moreChunks] = chunks
+					if (firstChunk === undefined) {
+						return
+					}
+
+					const edited = await params.adapter
+						.editMessage(params.chatId, streamMessageId, firstChunk)
+						.then(() => true)
+						.catch(() => false)
+
+					if (!edited) {
+						await params.adapter.deleteMessage(params.chatId, streamMessageId).catch(() => {})
+						for (const chunk of chunks) {
 							await params.adapter
 								.postMessage(params.chatId, chunk)
 								.then(() => {
@@ -124,6 +134,16 @@ export function createTelegramDeliveryController(params: {
 								})
 								.catch(() => {})
 						}
+						return
+					}
+
+					for (const chunk of moreChunks) {
+						await params.adapter
+							.postMessage(params.chatId, chunk)
+							.then(() => {
+								markVisibleOutputSent()
+							})
+							.catch(() => {})
 					}
 				} else {
 					await params.adapter.deleteMessage(params.chatId, streamMessageId).catch(() => {})

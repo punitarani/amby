@@ -52,7 +52,7 @@ export const MAX_DEBOUNCE_WINDOW_MS = 1500
 export const RERUN_DEBOUNCE_MS = 250
 export const WORKFLOW_CREATE_RETRY_MS = 5000
 
-const SUPERSSESSION_PREFIXES = [
+const SUPERSESSION_PREFIXES = [
 	"wait",
 	"actually",
 	"sorry",
@@ -64,7 +64,7 @@ const SUPERSSESSION_PREFIXES = [
 ] as const
 
 const SUPERSESSION_PREFIX_RE = new RegExp(
-	`^(?:${SUPERSSESSION_PREFIXES.map((prefix) => prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?:\\b|[\\s,.:;!?-])`,
+	`^(?:${SUPERSESSION_PREFIXES.map((prefix) => prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?:\\b|[\\s,.:;!?-])`,
 )
 
 export function createInitialSessionState(): SessionState {

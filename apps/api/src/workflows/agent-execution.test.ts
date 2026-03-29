@@ -5,12 +5,15 @@ import {
 	type TelegramDeliveryAdapter,
 } from "./telegram-delivery"
 
-function makeAdapter() {
+function makeAdapter(options?: { failEdit?: boolean }) {
 	const adapter: TelegramDeliveryAdapter = {
 		async deleteMessage(chatId: string, messageId: string) {
 			owner.deletes.push({ chatId, messageId })
 		},
 		async editMessage(chatId: string, messageId: string, text: string) {
+			if (options?.failEdit) {
+				throw new Error("edit failed")
+			}
 			owner.edits.push({ chatId, messageId, text })
 		},
 		async postMessage(chatId: string, text: string) {
@@ -138,6 +141,24 @@ describe("createTelegramDeliveryController", () => {
 
 		expect(adapter.posts).toEqual([])
 		expect(controller.getState().suppressed).toBe(true)
+	})
+
+	it("reposts the final response when editing the streaming draft fails", async () => {
+		const adapter = makeAdapter({ failEdit: true })
+		const controller = createTelegramDeliveryController({
+			adapter: adapter.adapter,
+			chatId: "123",
+			claimFirstOutbound: async () => ({ allowed: true, reason: "ok" }),
+		})
+
+		const streamMessageId = await controller.flushStreamText("preview", null)
+		await controller.finalizeResponse("Final response", streamMessageId)
+
+		expect(adapter.deletes).toEqual([{ chatId: "123", messageId: "msg-1" }])
+		expect(adapter.posts).toEqual([
+			{ chatId: "123", text: "preview" },
+			{ chatId: "123", text: "Final response" },
+		])
 	})
 })
 

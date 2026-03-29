@@ -20,6 +20,7 @@ import {
 	scheduleWorkflowRetryState,
 	WORKFLOW_CREATE_RETRY_MS,
 } from "./conversation-session-state"
+import { readPersistedSessionState } from "./conversation-session-storage"
 
 interface IngestPayload {
 	message: BufferedMessage
@@ -61,9 +62,9 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 
 	private async hydrate(): Promise<void> {
 		if (this.hydrated) return
-		const stored = await this.ctx.storage.get<SessionState>("state")
+		const stored = await this.ctx.storage.get("state")
 		if (stored) {
-			this.state = stored
+			this.state = readPersistedSessionState(stored)
 		}
 		this.hydrated = true
 	}
@@ -109,6 +110,59 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 	private async scheduleWorkflowRetry(now: number) {
 		const deadline = scheduleWorkflowRetryState(this.state, now)
 		await this.ctx.storage.setAlarm(deadline)
+	}
+
+	private async getActiveWorkflowState(): Promise<
+		"active" | "completed-without-callback" | "missing"
+	> {
+		if (!this.state.activeWorkflowId || !this.env.AGENT_WORKFLOW) {
+			return "missing"
+		}
+
+		try {
+			const instance = await this.env.AGENT_WORKFLOW.get(this.state.activeWorkflowId)
+			const status = await instance.status()
+			if (
+				status.status === "queued" ||
+				status.status === "running" ||
+				status.status === "waiting" ||
+				status.status === "paused" ||
+				status.status === "waitingForPause"
+			) {
+				return "active"
+			}
+			if (status.status === "complete") {
+				return "completed-without-callback"
+			}
+		} catch (err) {
+			Sentry.captureException(err)
+			console.error("[DO] Failed to inspect workflow state:", err)
+		}
+
+		return "missing"
+	}
+
+	private async recoverMissingWorkflow(now: number) {
+		this.state.buffer = [...this.state.inFlightMessages, ...this.state.buffer]
+		this.state.status = "idle"
+		resetExecutionState(this.state)
+		await this.scheduleWorkflowRetry(now)
+		await this.persist()
+	}
+
+	private async recoverMissingCompletion(now: number) {
+		const hasBufferedFollowUps = this.state.buffer.length > 0
+		this.state.status = "idle"
+		resetExecutionState(this.state)
+
+		if (hasBufferedFollowUps) {
+			await this.scheduleDebounce(now, { rerun: true })
+		} else {
+			resetDebounceState(this.state)
+			this.state.lastBufferedAt = null
+		}
+
+		await this.persist()
 	}
 
 	async ingestMessage(payload: IngestPayload): Promise<void> {
@@ -169,6 +223,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 	async alarm(): Promise<void> {
 		await this.hydrate()
 		const pendingFrom = await this.ctx.storage.get<TelegramFrom>("pendingFrom")
+		const now = Date.now()
 
 		if (this.state.chatId) {
 			setTelegramScope({
@@ -195,6 +250,30 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 			})
 		}
 
+		if (this.state.status === "processing") {
+			const workflowState = await this.getActiveWorkflowState()
+			if (workflowState === "active") {
+				return
+			}
+			if (workflowState === "completed-without-callback") {
+				Sentry.logger.warn("Conversation workflow completed without DO callback; recovering", {
+					telegram_chat_id: this.state.chatId,
+					workflow_id: this.state.activeWorkflowId,
+				})
+				await this.recoverMissingCompletion(now)
+				return
+			}
+
+			Sentry.logger.warn("Conversation workflow missing; restoring buffered messages", {
+				telegram_chat_id: this.state.chatId,
+				workflow_id: this.state.activeWorkflowId,
+				buffered_message_count: this.state.buffer.length,
+				in_flight_message_count: this.state.inFlightMessages.length,
+			})
+			await this.recoverMissingWorkflow(now)
+			return
+		}
+
 		if (this.state.status !== "debouncing") {
 			return
 		}
@@ -208,7 +287,8 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 
 		const messages = [...this.state.buffer]
 		const executionToken = crypto.randomUUID()
-		const executionStartedAt = Date.now()
+		const executionStartedAt = now
+		const workflowId = crypto.randomUUID()
 
 		beginProcessingState({
 			state: this.state,
@@ -216,6 +296,8 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 			executionToken,
 			now: executionStartedAt,
 		})
+		this.state.activeWorkflowId = workflowId
+		await this.ctx.storage.setAlarm(executionStartedAt + WORKFLOW_CREATE_RETRY_MS)
 		await this.persist()
 
 		const workflow = this.env.AGENT_WORKFLOW
@@ -228,10 +310,10 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 					},
 					() =>
 						workflow.create({
-							id: crypto.randomUUID(),
+							id: workflowId,
 							params: {
 								chatId: this.state.chatId,
-								messages: this.state.inFlightMessages,
+								messages,
 								userId: this.state.userId,
 								from: pendingFrom ?? null,
 								conversationId: this.state.conversationId,
@@ -257,16 +339,12 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 			console.error("[DO] AGENT_WORKFLOW binding not available")
 		}
 
-		this.state.buffer = [...this.state.inFlightMessages, ...this.state.buffer]
-		this.state.status = "idle"
-		resetExecutionState(this.state)
-		await this.scheduleWorkflowRetry(Date.now())
+		await this.recoverMissingWorkflow(now)
 		Sentry.logger.warn("Conversation workflow launch failed; scheduling retry", {
 			telegram_chat_id: this.state.chatId,
 			buffered_message_count: this.state.buffer.length,
 			retry_delay_ms: WORKFLOW_CREATE_RETRY_MS,
 		})
-		await this.persist()
 	}
 
 	async claimFirstOutbound(input: ClaimFirstOutboundInput): Promise<ClaimFirstOutboundResult> {
@@ -281,6 +359,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 
 	async completeExecution(input: CompleteExecutionInput): Promise<CompleteExecutionResult> {
 		await this.hydrate()
+		const now = Date.now()
 		setTelegramScope({
 			component: "conversation-session.complete",
 			chatId: this.state.chatId || undefined,
@@ -296,7 +375,10 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 			},
 		})
 
-		const result = completeExecutionState(this.state, input, Date.now())
+		const result = completeExecutionState(this.state, input, now)
+		if (result.accepted && result.shouldRerun && this.state.debounceDeadlineAt !== null) {
+			await this.ctx.storage.setAlarm(this.state.debounceDeadlineAt)
+		}
 		await this.persist()
 		return result
 	}
