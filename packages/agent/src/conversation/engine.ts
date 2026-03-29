@@ -548,7 +548,7 @@ export function handleTurn(
 		// Persistence checkpoint: abort if the run has been superseded
 		if (request.shouldContinue) {
 			const shouldProceed = yield* Effect.tryPromise({
-				try: () => request.shouldContinue?.() ?? Promise.resolve(false),
+				try: () => request.shouldContinue?.() ?? Promise.resolve(true),
 				catch: () => new AgentError({ message: "shouldContinue check failed" }),
 			}).pipe(Effect.catchAll(() => Effect.succeed(false)))
 			if (!shouldProceed) {

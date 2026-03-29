@@ -228,8 +228,8 @@ When the debounce alarm fires, `ConversationSession` starts `AgentExecutionWorkf
 4. ingests buffered attachment descriptors into private storage after user resolution
 5. builds compact routing text plus current-turn structured parts
 6. calls `ConversationRuntime` through the agent runtime
-7. streams interim output by posting once and then editing every 500ms
-8. sends final reply parts through `ReplySender`, using native Telegram photo/document delivery when possible
+7. delivers the final text response via `postText` (split across messages if > 4096 chars) and any attachment parts via `sendParts`
+8. sends remaining reply parts through `ReplySender`, using native Telegram photo/document delivery when possible
 9. falls back to signed Amby download links for unsupported outbound files
 10. tells `ConversationSession` that execution finished
 
@@ -256,15 +256,14 @@ Telegram identity is translated into Amby entities in a stable way.
 
 Telegram replies leave the system through `@chat-adapter/telegram`.
 
-There are three main outbound styles:
+There are two main outbound styles:
 
 - command replies via `TelegramSender`
 - workflow replies via `ReplySender`
-- streamed workflow edits via the reply sender draft handle
 
 Long final text responses are split with `splitTelegramMessage(...)` to fit Telegram's 4096-character message limit. Images go through `sendPhoto`, documents go through `sendDocument`, and unsupported outbound files fall back to signed attachment URLs.
 
-Streaming behavior: a single typing indicator is sent at workflow start (the previous 4-second recurring typing interval has been removed). During text streaming, the preview is capped at 4090 characters (with `...` truncation) so a single Telegram message is used. On finalization, the streaming draft is always deleted and the complete response is posted fresh via `postText`, which splits naturally into multiple messages when needed. `ReplyDraftHandle` tracks `chunkIds` so that `deleteMessage` can clean up all chunks of a multi-message reply.
+A single typing indicator is sent at workflow start. The final response is delivered via `postText`, which splits at Telegram's 4096-character limit when needed. Attachment parts are sent after the text reply via `sendParts`.
 
 Each attachment part in `sendParts` is error-isolated: if delivery fails for one part (including the signed-URL fallback), the remaining parts still attempt delivery.
 

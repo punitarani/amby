@@ -6,6 +6,7 @@ import {
 	DEBOUNCE_CAP_MS,
 	DEBOUNCE_EXTEND_MS,
 	isCorrectionMessage,
+	migrateBufferEntries,
 	RERUN_DEBOUNCE_MS,
 } from "./conversation-session-logic"
 
@@ -62,7 +63,7 @@ describe("isCorrectionMessage", () => {
 		expect(isCorrectionMessage(msg("also one more thing"))).toBe(false)
 	})
 
-	test("does not match partial word overlap", () => {
+	test("matches partial words that share a correction prefix (known false positives)", () => {
 		expect(isCorrectionMessage(msg("waiting for the bus"))).toBe(true) // "wait" prefix
 		expect(isCorrectionMessage(msg("sorrynotsorry hashtag"))).toBe(true) // "sorry" prefix
 	})
@@ -132,5 +133,34 @@ describe("computeDebounceDeadline", () => {
 	test("rerun: returns now + RERUN_DEBOUNCE_MS regardless of bufferStartedAt", () => {
 		expect(computeDebounceDeadline(now, null, true)).toBe(now + RERUN_DEBOUNCE_MS)
 		expect(computeDebounceDeadline(now, now - 500, true)).toBe(now + RERUN_DEBOUNCE_MS)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// migrateBufferEntries
+// ---------------------------------------------------------------------------
+
+describe("migrateBufferEntries", () => {
+	test("migrates legacy format (text + messageId, no parts)", () => {
+		const legacy = [{ text: "hello", messageId: 42, date: 1000 } as unknown as BufferedMessage]
+		const [entry] = migrateBufferEntries(legacy)
+		expect(entry).toBeDefined()
+		expect(entry?.sourceMessageId).toBe(42)
+		expect(entry?.date).toBe(1000)
+		expect(entry?.textSummary).toBe("hello")
+		expect(entry?.parts).toEqual([{ type: "text", text: "hello" }])
+		expect(entry?.mediaGroupId).toBeNull()
+		expect(entry?.from).toBeNull()
+		expect(entry?.rawSource).toBeNull()
+	})
+
+	test("passes through already-migrated entries unchanged", () => {
+		const modern = msg("already migrated")
+		const [entry] = migrateBufferEntries([modern])
+		expect(entry).toBe(modern)
+	})
+
+	test("returns empty array for empty input", () => {
+		expect(migrateBufferEntries([])).toEqual([])
 	})
 })

@@ -109,12 +109,12 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		this.state.lastBufferedAt = null
 	}
 
-	private scheduleDebounce(now: number, isRerun: boolean): void {
+	private async scheduleDebounce(now: number, isRerun: boolean): Promise<void> {
 		this.state.bufferStartedAt = this.state.bufferStartedAt ?? now
 		const deadline = computeDebounceDeadline(now, this.state.bufferStartedAt, isRerun)
 		this.state.debounceDeadlineAt = deadline
 		this.state.status = "debouncing"
-		this.ctx.storage.setAlarm(deadline)
+		await this.ctx.storage.setAlarm(deadline)
 	}
 
 	// -----------------------------------------------------------------------
@@ -207,7 +207,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		}
 
 		this.state.lastBufferedAt = now
-		this.scheduleDebounce(now, false)
+		await this.scheduleDebounce(now, false)
 		await this.persist()
 	}
 
@@ -353,7 +353,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		if (this.state.supersededAt !== null) {
 			this.state.buffer = [...this.state.inFlightMessages, ...this.state.buffer]
 			this.resetExecutionState()
-			this.scheduleDebounce(now, true)
+			await this.scheduleDebounce(now, true)
 			await this.persist()
 			Sentry.logger.info("Superseded execution completed, scheduling rerun", {
 				telegram_chat_id: this.state.chatId,
@@ -364,7 +364,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 
 		this.resetExecutionState()
 		if (this.state.buffer.length > 0) {
-			this.scheduleDebounce(now, false)
+			await this.scheduleDebounce(now, false)
 		} else {
 			this.state.status = "idle"
 			this.resetDebounceState()
