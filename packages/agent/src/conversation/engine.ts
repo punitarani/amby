@@ -589,11 +589,11 @@ export function handleTurn(
 			const shouldProceed = yield* Effect.tryPromise({
 				try: () => request.shouldContinue!(),
 				catch: () => new AgentError({ message: "shouldContinue check failed" }),
-			}).pipe(Effect.catchAll(() => Effect.succeed(true)))
+			}).pipe(Effect.catchAll(() => Effect.succeed(false)))
 			if (!shouldProceed) {
 				if (rootTraceRef) {
 					yield* rootTraceRef
-						.complete("failed", { reason: "superseded" })
+						.complete("completed", { outcome: "cancelled-superseded" })
 						.pipe(Effect.catchAll(() => Effect.void))
 				}
 				return {

@@ -40,6 +40,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 				message_count: messages.length,
 				is_sub_agent: Boolean(isSubAgent),
 				execution_token: executionToken,
+				workflow_started_at: Date.now(),
 			},
 		})
 

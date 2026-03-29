@@ -110,6 +110,13 @@ async function routeIncomingMessage(
 	if (!bufferedMessage) return
 
 	// No identity check here — resolved in the workflow's resolve-user step.
+	deps.setTelegramScope({
+		component: "chat-sdk.ingest",
+		chatId,
+		from,
+		attributes: { ingest_received_at: Date.now() },
+	})
+
 	const doBinding = env.CONVERSATION_SESSION
 	if (!doBinding) {
 		console.error("[ChatSDK] CONVERSATION_SESSION binding not available")

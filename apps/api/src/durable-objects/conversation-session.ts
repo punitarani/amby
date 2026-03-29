@@ -229,12 +229,14 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 				attributes: {
 					buffered_message_count: this.state.buffer.length,
 					session_status: this.state.status,
+					debounce_started_at: this.state.bufferStartedAt ?? 0,
 				},
 			})
 		} else {
 			setWorkerScope("conversation-session.alarm", {
 				buffered_message_count: this.state.buffer.length,
 				session_status: this.state.status,
+				debounce_started_at: this.state.bufferStartedAt ?? 0,
 			})
 		}
 
@@ -296,6 +298,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 			this.state.buffer = [...this.state.inFlightMessages, ...this.state.buffer]
 			this.resetExecutionState()
 			this.state.status = "idle"
+			await this.ctx.storage.setAlarm(Date.now() + 5000)
 		}
 
 		await this.persist()
