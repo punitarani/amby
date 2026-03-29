@@ -55,6 +55,7 @@ required = [
   "BRAINTRUST_API_KEY",
   "BRAINTRUST_PROJECT_ID",
   "SENTRY_DSN",
+  "VAULT_KEK",
 ]
 
 # Observability

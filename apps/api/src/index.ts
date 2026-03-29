@@ -5,7 +5,14 @@ import { AuthLive, AuthService, resolveAuthCorsOrigin } from "@amby/auth"
 import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { createAmbyBot, TelegramReplySenderLive, TelegramSenderLite } from "@amby/channels"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
-import { ComputeStoreLive, DbServiceLive, TaskStoreLive, TraceStoreLive } from "@amby/db"
+import {
+	CodexAuthStoreLive,
+	ComputeStoreLive,
+	DbServiceLive,
+	TaskStoreLive,
+	TraceStoreLive,
+	VaultStoreLive,
+} from "@amby/db"
 import { EnvService } from "@amby/env"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { AutomationServiceLive } from "@amby/plugins"
@@ -16,6 +23,7 @@ import {
 } from "@amby/plugins/integrations"
 import { MemoryServiceLive } from "@amby/plugins/memory"
 import { PluginRegistryLive } from "@amby/plugins/registry"
+import { CodexVaultServiceLive, VaultServiceLive } from "@amby/vault"
 import { Effect, Either, Layer, ManagedRuntime } from "effect"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
@@ -23,15 +31,24 @@ import { getHomeResponse } from "./home"
 
 // Shared layers — constructed once at startup
 // Layer order: infra (env, db) → services (memory, connectors, etc.) → PluginRegistry (depends on services)
-const StoreLive = Layer.mergeAll(TaskStoreLive, TraceStoreLive, ComputeStoreLive).pipe(
-	Layer.provideMerge(DbServiceLive),
-)
+const StoreLive = Layer.mergeAll(
+	TaskStoreLive,
+	TraceStoreLive,
+	ComputeStoreLive,
+	VaultStoreLive,
+	CodexAuthStoreLive,
+).pipe(Layer.provideMerge(DbServiceLive))
 
 const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
 	Layer.provideMerge(StoreLive),
 	Layer.provideMerge(EnvServiceLive),
 )
 const AttachmentLive = makeAttachmentServicesLocal().pipe(Layer.provideMerge(InfraLive))
+
+const VaultLive = CodexVaultServiceLive.pipe(
+	Layer.provideMerge(VaultServiceLive),
+	Layer.provideMerge(InfraLive),
+)
 
 const ServicesLive = Layer.mergeAll(
 	MemoryServiceLive,
@@ -42,7 +59,10 @@ const ServicesLive = Layer.mergeAll(
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
 	TelegramReplySenderLive,
-).pipe(Layer.provideMerge(InfraLive), Layer.provideMerge(AttachmentLive))
+).pipe(
+	Layer.provideMerge(VaultLive),
+	Layer.provideMerge(AttachmentLive),
+)
 
 const SharedLive = PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 

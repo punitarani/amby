@@ -35,6 +35,7 @@
 		"@amby/env": "workspace:*",
 		"@amby/plugins": "workspace:*",
 		"@amby/skills": "workspace:*",
+		"@amby/vault": "workspace:*",
 		"@chat-adapter/telegram": "^4.20.2",
 		"@sentry/cloudflare": "^10.44.0",
 		"chat": "^4.20.2",
