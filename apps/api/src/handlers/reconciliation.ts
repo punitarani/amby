@@ -4,7 +4,7 @@ import { ComputeStore, CoreError, TaskStore, TraceStore } from "@amby/core"
 import type { WorkerBindings } from "@amby/env/workers"
 import { AutomationService, adaptAutomationService, computeNextCronRun } from "@amby/plugins"
 import { Effect } from "effect"
-import { makeRuntimeForConsumer } from "../queue/runtime"
+import { makeRuntimeForConsumer } from "../runtime/worker-runtime"
 
 export async function handleScheduledReconciliation(env: WorkerBindings): Promise<void> {
 	const rt = makeRuntimeForConsumer(env)

@@ -80,11 +80,15 @@ export interface WorkerBindings {
 	BROWSER?: unknown
 	/** Workers AI binding — used by the Stagehand browser worker. */
 	AI?: unknown
-	TELEGRAM_QUEUE?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
-	TELEGRAM_DLQ?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
+
+	// Cloudflare primitives — typed structurally for portability
 	CONVERSATION_SESSION?: {
 		idFromName(name: string): { toString(): string }
-		get(id: { toString(): string }): { ingestMessage(msg: unknown): Promise<void> }
+		get(id: { toString(): string }): {
+			ingestMessage(msg: unknown): Promise<void>
+			claimFirstOutbound?(input: unknown): Promise<unknown>
+			completeExecution?(input: unknown): Promise<unknown>
+		}
 	}
 	AGENT_WORKFLOW?: WorkflowBinding<unknown>
 	SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>

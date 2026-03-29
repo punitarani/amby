@@ -18,7 +18,7 @@ import { ComputeStore, CoreError } from "@amby/core"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
-import { makeRuntimeForConsumer } from "../queue/runtime"
+import { makeRuntimeForConsumer } from "../runtime/worker-runtime"
 import { setWorkerScope } from "../sentry"
 import { VOLUME_READY_EVENT, type VolumeProvisionResult } from "./volume-provision"
 

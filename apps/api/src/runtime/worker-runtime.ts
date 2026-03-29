@@ -58,7 +58,7 @@ const makeBaseLive = (bindings: WorkerBindings) => {
 	return PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 }
 
-/** Lightweight runtime for queue consumers and workflows that don't need TaskSupervisor */
+/** Lightweight runtime for worker handlers and workflows that don't need TaskSupervisor */
 export const makeRuntimeForConsumer = (bindings: WorkerBindings) =>
 	ManagedRuntime.make(makeBaseLive(bindings))
 

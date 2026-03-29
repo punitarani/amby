@@ -2,6 +2,20 @@
 
 `docs/` is the system of record for Amby's architecture, subsystems, and development practices.
 
+## Documentation map
+
+```mermaid
+flowchart TD
+    A["docs/ARCHITECTURE.md"] --> B["docs/RUNTIME.md"]
+    A --> C["docs/CHANNELS.md"]
+    A --> D["docs/DATA_MODEL.md"]
+    B --> E["docs/channels/telegram.md"]
+    B --> F["docs/chat/attachments.md"]
+    C --> E
+    D --> F
+    A --> G["docs/DEVELOPMENT.md"]
+```
+
 ## Reading order
 
 Start here if you are new to the codebase:
@@ -26,6 +40,7 @@ Then read subsystem docs as needed.
 - [AGENT.md](./AGENT.md) — agent orchestration, tools, context
 - [auth/telegram.md](./auth/telegram.md) — Telegram auth architecture and flows
 - [channels/telegram.md](./channels/telegram.md) — Telegram integration
+- [chat/attachments.md](./chat/attachments.md) — attachment ingest, storage, and delivery
 - [PLUGINS_AND_SKILLS.md](./PLUGINS_AND_SKILLS.md) — plugin contract, skill system
 - [BROWSER_AND_COMPUTER.md](./BROWSER_AND_COMPUTER.md) — browser and sandbox execution
 - [MEMORY.md](./MEMORY.md) — memory system
@@ -39,14 +54,10 @@ Then read subsystem docs as needed.
 - [MARKET.md](./MARKET.md) — market context
 - [MISSION.md](./MISSION.md) — mission statement
 
-### Research
-
-- [research/](./research/) — research references and external material
-
 ## Package READMEs
 
 Each package under `packages/` and `apps/` has its own `README.md` with package-specific setup, API surface, and usage. Start there for package-level details.
 
 ## Maintenance
 
-Update docs when code changes. If a subsystem's behavior shifts, the corresponding doc must be updated in the same PR.
+Update canonical docs when code changes. If a subsystem's behavior shifts, the corresponding doc must be updated in the same PR instead of parking durable information in temporary planning notes.
