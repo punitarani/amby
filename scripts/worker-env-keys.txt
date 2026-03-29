@@ -67,3 +67,7 @@ SENTRY_RELEASE
 # PostHog analytics
 POSTHOG_KEY
 POSTHOG_HOST
+
+# Vault — envelope encryption for agent credentials
+VAULT_KEK
+VAULT_KEK_VERSION
