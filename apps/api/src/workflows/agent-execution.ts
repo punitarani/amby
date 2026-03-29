@@ -117,7 +117,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 				return
 			}
 
-			// Step 2: Run the agent with streaming
+			// Step 2: Run the agent and deliver the response
 			const finalUserId = userId
 
 			const response = await step.do(
@@ -128,11 +128,6 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 				},
 				async () => {
 					const runtime = makeAgentRuntimeForConsumer(this.env)
-					let streamInterval: ReturnType<typeof setInterval> | null = null
-					let streamedText = ""
-					let streamMessageId: string | null = null
-					let isEditing = false
-					let streamingSuppressed = false
 
 					try {
 						const services = await runtime.runPromise(
@@ -145,57 +140,10 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 							}).pipe(Effect.provide(makeConversationRuntimeLive(finalUserId))),
 						)
 
-						// Single typing pulse (no recurring interval)
+						// Single typing pulse
 						if (!isSubAgent) {
 							await services.replySender.startTyping(replyTarget).catch(() => {})
 						}
-
-						const flushStream = async () => {
-							if (isEditing || !streamedText || isSubAgent || streamingSuppressed)
-								return
-							isEditing = true
-							try {
-								if (!streamMessageId) {
-									// First flush: claim outbound before any visible send
-									if (!(await ensureOutbound())) {
-										streamingSuppressed = true
-										if (streamInterval) clearInterval(streamInterval)
-										return
-									}
-								}
-								const displayText =
-									streamedText.length > 4090
-										? `${streamedText.slice(0, 4087)}...`
-										: streamedText
-								if (!streamMessageId) {
-									const draft = await services.replySender.postText(
-										replyTarget,
-										displayText,
-									)
-									streamMessageId = draft?.id ?? null
-								} else {
-									await services.replySender.editText(
-										replyTarget,
-										{ id: streamMessageId },
-										displayText,
-									)
-								}
-							} catch {
-								/* ignore draft edit errors */
-							} finally {
-								isEditing = false
-							}
-						}
-
-						if (!isSubAgent) {
-							streamInterval = setInterval(() => void flushStream(), 500)
-						}
-
-						const onTextDelta = !isSubAgent
-							? (delta: string) => {
-									streamedText += delta
-								}
-							: undefined
 
 						const result = await runtime.runPromise(
 							Effect.gen(function* () {
@@ -253,7 +201,6 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 											},
 										},
 										sendReply,
-										onTextDelta,
 										ensureOutbound,
 									)
 								}
@@ -266,21 +213,13 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 									},
 									undefined,
 									sendReply,
-									onTextDelta,
 									ensureOutbound,
 								)
 							}).pipe(Effect.provide(makeConversationRuntimeLive(finalUserId))),
 						)
 
-						if (streamInterval) clearInterval(streamInterval)
-
-						// If outbound was denied (stale/superseded), skip all delivery
+						// If outbound was denied (stale/superseded) or cancelled, skip delivery
 						if (outboundState === "denied" || result.status === "cancelled") {
-							if (streamMessageId) {
-								await services.replySender
-									.deleteMessage(replyTarget, { id: streamMessageId })
-									.catch(() => {})
-							}
 							return ""
 						}
 
@@ -289,33 +228,13 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 							(part) => part.type === "attachment",
 						)
 
-						// Delivery: claim outbound if not yet claimed (e.g. no streaming happened)
+						// Claim outbound before any visible send
 						if (finalText && !(await ensureOutbound())) {
 							return ""
 						}
 
-						// Safe delivery: avoid stranding the preview
 						try {
-							if (streamMessageId) {
-								if (finalText && finalText.length <= 4096) {
-									// Edit preview in place — no delete-then-post gap
-									await services.replySender.editText(
-										replyTarget,
-										{ id: streamMessageId },
-										finalText,
-									)
-								} else {
-									if (finalText) {
-										await services.replySender.postText(
-											replyTarget,
-											finalText,
-										)
-									}
-									await services.replySender
-										.deleteMessage(replyTarget, { id: streamMessageId })
-										.catch(() => {})
-								}
-							} else if (!isSubAgent && finalText) {
+							if (!isSubAgent && finalText) {
 								await services.replySender.postText(replyTarget, finalText)
 							}
 
@@ -331,7 +250,6 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 
 						return finalText
 					} finally {
-						if (streamInterval) clearInterval(streamInterval)
 						await runtime.dispose()
 					}
 				},

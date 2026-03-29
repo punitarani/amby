@@ -15,7 +15,7 @@ import { queryExecution } from "../execution/query-execution"
 import type { ToolGroups } from "../execution/registry"
 import { createTelemetrySettings } from "../telemetry"
 import { normalizeTraceEnvironment } from "../trace-metadata"
-import type { AgentRunConfig, AgentRunResult, StreamPart } from "../types/agent"
+import type { AgentRunConfig, AgentRunResult } from "../types/agent"
 import type { QueryExecutionResult } from "../types/execution"
 
 const CONVERSATION_MAX_STEPS = 8
@@ -203,7 +203,7 @@ export interface ConversationEngineConfig {
 
 export interface TurnRequest {
 	readonly conversationId: string
-	readonly mode: AgentRunConfig["request"]["mode"]
+	readonly mode: "message" | "batched-message"
 	readonly requestMessages: ReadonlyArray<{
 		role: "user"
 		contentText: string
@@ -211,8 +211,6 @@ export interface TurnRequest {
 	}>
 	readonly metadata?: Record<string, unknown>
 	readonly onReply?: ReplyFn
-	readonly onTextDelta?: (text: string) => void
-	readonly onPart?: (part: StreamPart) => void
 	/**
 	 * Optional checkpoint callback. The engine calls this before any
 	 * irreversible effect (send_message tool, DB persistence). If the callback
@@ -276,7 +274,7 @@ export function handleTurn(
 	config: ConversationEngineConfig,
 	request: TurnRequest,
 ): Effect.Effect<AgentRunResult, AgentError> {
-	const { conversationId, mode, requestMessages, metadata, onReply, onTextDelta, onPart } = request
+	const { conversationId, mode, requestMessages, metadata, onReply } = request
 	const { userId, query } = config
 	let rootTraceRef: TraceWriter | undefined
 
@@ -349,10 +347,7 @@ export function handleTurn(
 			routerModelId: config.routerModelId,
 			userTimezone: prepared.userTimezone,
 			sharedPromptContext: prepared.sharedPromptContext,
-			runtime: {
-				...config.runtime,
-				streamingEnabled: Boolean(onPart || onTextDelta),
-			},
+			runtime: config.runtime,
 		})
 
 		const rootTrace = yield* createRootTrace(query, runConfig, {
@@ -507,7 +502,7 @@ export function handleTurn(
 			prepareStep: buildConversationPrepareStep(),
 			experimental_telemetry: createTelemetrySettings({
 				functionId:
-					mode === "stream-message" ? "amby.conversation.stream" : "amby.conversation.generate",
+					"amby.conversation.generate",
 				request: runConfig.request,
 				modelId: config.defaultModelId,
 				agentRole: "conversation",
@@ -543,40 +538,7 @@ export function handleTurn(
 		>
 
 		const result = yield* Effect.tryPromise({
-			try: async () => {
-				if (onPart || onTextDelta) {
-					const stream = await agent.stream({ messages })
-					for await (const part of stream.fullStream) {
-						switch (part.type) {
-							case "text-delta":
-								onTextDelta?.(part.text)
-								onPart?.({ type: "text-delta", text: part.text })
-								break
-							case "tool-call":
-								onPart?.({
-									type: "tool-call",
-									toolName: part.toolName,
-									args: part.input as Record<string, unknown>,
-								})
-								break
-							case "tool-result":
-								onPart?.({
-									type: "tool-result",
-									toolName: part.toolName,
-									result: part.output,
-								})
-								break
-						}
-					}
-					const [text, toolResults, steps] = await Promise.all([
-						stream.text,
-						stream.toolResults,
-						stream.steps,
-					])
-					return { text, toolResults, steps }
-				}
-				return await agent.generate({ messages })
-			},
+			try: () => agent.generate({ messages }),
 			catch: (cause) => new AgentError({ message: "Agent request failed", cause }),
 		})
 
@@ -771,7 +733,7 @@ function buildRunConfig(params: {
 	userId: string
 	conversationId: string
 	threadId: string
-	mode: "message" | "batched-message" | "stream-message"
+	mode: "message" | "batched-message"
 	environment: string
 	requestMetadata?: Record<string, unknown>
 	modelId: string
@@ -783,7 +745,6 @@ function buildRunConfig(params: {
 		sandboxEnabled: boolean
 		cuaEnabled: boolean
 		integrationEnabled: boolean
-		streamingEnabled: boolean
 		browserEnabled: boolean
 	}
 }): AgentRunConfig {

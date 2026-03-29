@@ -9,7 +9,7 @@ export type AgentRunConfig = {
 		conversationId: string
 		threadId?: string
 		userId: string
-		mode: "message" | "batched-message" | "stream-message"
+		mode: "message" | "batched-message"
 		environment: RunEnvironment
 		metadata?: Record<string, unknown>
 	}
@@ -24,7 +24,6 @@ export type AgentRunConfig = {
 		sandboxEnabled: boolean
 		cuaEnabled: boolean
 		integrationEnabled: boolean
-		streamingEnabled: boolean
 		browserEnabled: boolean
 	}
 	policy: {
@@ -54,11 +53,6 @@ export type AgentRunConfig = {
 		includeContextEvents: boolean
 	}
 }
-
-export type StreamPart =
-	| { type: "text-delta"; text: string }
-	| { type: "tool-call"; toolName: string; args: Record<string, unknown> }
-	| { type: "tool-result"; toolName: string; result: unknown }
 
 export type AgentRunResult = {
 	status: "completed" | "partial" | "failed" | "cancelled"

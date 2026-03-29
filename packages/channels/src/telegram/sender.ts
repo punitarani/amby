@@ -1,10 +1,5 @@
 import { AttachmentService } from "@amby/attachments"
-import type {
-	ConversationMessagePart,
-	ReplyDraftHandle,
-	ReplySenderService,
-	ReplyTarget,
-} from "@amby/core"
+import type { ConversationMessagePart, ReplySenderService, ReplyTarget } from "@amby/core"
 import { ReplySender } from "@amby/core"
 import { EnvService } from "@amby/env"
 import { Context, Effect, Layer, Runtime } from "effect"
@@ -17,8 +12,6 @@ export class TelegramSender extends Context.Tag("TelegramSender")<
 	{
 		sendMessage(chatId: number, text: string): Promise<void>
 		startTyping(chatId: number): Promise<void>
-		editMessage(chatId: number, messageId: string, text: string): Promise<void>
-		deleteMessage(chatId: number, messageId: string): Promise<void>
 	}
 >() {}
 
@@ -55,14 +48,6 @@ function makeTelegramApi(env: { TELEGRAM_BOT_TOKEN: string; TELEGRAM_API_BASE_UR
 			await request<{ message_id: number }>("sendMessage", {
 				json: { chat_id: chatId, text },
 			}),
-		editMessageText: async (chatId: number, messageId: string, text: string) =>
-			await request("editMessageText", {
-				json: { chat_id: chatId, message_id: Number(messageId), text },
-			}),
-		deleteMessage: async (chatId: number, messageId: string) =>
-			await request("deleteMessage", {
-				json: { chat_id: chatId, message_id: Number(messageId) },
-			}),
 		sendChatAction: async (chatId: number, action: string) =>
 			await request("sendChatAction", { json: { chat_id: chatId, action } }),
 		sendPhoto: async (chatId: number, body: ArrayBuffer, filename: string) => {
@@ -93,12 +78,6 @@ function buildTelegramSenderService(env: {
 		},
 		startTyping: async (chatId: number) => {
 			await api.sendChatAction(chatId, "typing")
-		},
-		editMessage: async (chatId: number, messageId: string, text: string) => {
-			await api.editMessageText(chatId, messageId, text)
-		},
-		deleteMessage: async (chatId: number, messageId: string) => {
-			await api.deleteMessage(chatId, messageId)
 		},
 	}
 }
@@ -160,38 +139,10 @@ export const TelegramReplySenderLive = Layer.effect(
 				Promise.resolve(
 					target.channel === "telegram" ? api.sendChatAction(target.chatId, "typing") : undefined,
 				).then(() => undefined),
-			postText: async (target: ReplyTarget, text: string): Promise<ReplyDraftHandle> => {
-				if (target.channel !== "telegram") return { id: crypto.randomUUID() }
-				const chunks = splitTelegramMessage(text)
-				const chunkIds: string[] = []
-				for (const chunk of chunks) {
-					const result = await api.sendMessage(target.chatId, chunk)
-					chunkIds.push(String(result.message_id))
-				}
-				const lastId = chunkIds.at(-1) ?? crypto.randomUUID()
-				return { id: lastId, chunkIds: chunkIds.length > 1 ? chunkIds : undefined }
-			},
-			editText: async (target: ReplyTarget, draft: ReplyDraftHandle, text: string) => {
+			postText: async (target: ReplyTarget, text: string) => {
 				if (target.channel !== "telegram") return
-				const allIds = draft.chunkIds ?? [draft.id]
-				if (allIds.length > 1 || text.length > 4096) {
-					// Multi-chunk or oversized: delete all old chunks and post fresh
-					for (const chunkId of allIds) {
-						await api.deleteMessage(target.chatId, chunkId).catch(() => {})
-					}
-					const newChunks = splitTelegramMessage(text)
-					for (const chunk of newChunks) {
-						await api.sendMessage(target.chatId, chunk)
-					}
-					return
-				}
-				await api.editMessageText(target.chatId, draft.id, text)
-			},
-			deleteMessage: async (target: ReplyTarget, draft: ReplyDraftHandle) => {
-				if (target.channel !== "telegram") return
-				const allIds = draft.chunkIds ?? [draft.id]
-				for (const chunkId of allIds) {
-					await api.deleteMessage(target.chatId, chunkId).catch(() => {})
+				for (const chunk of splitTelegramMessage(text)) {
+					await api.sendMessage(target.chatId, chunk)
 				}
 			},
 			sendParts: async (target: ReplyTarget, parts: ReadonlyArray<ConversationMessagePart>) => {
