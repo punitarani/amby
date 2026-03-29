@@ -40,22 +40,35 @@ export interface WorkflowBinding<Params = unknown> {
 }
 
 export interface Env {
+	// Environment
 	readonly NODE_ENV: string
 	readonly API_URL: string
 	readonly APP_URL: string
-	readonly CLOUDFLARE_AI_GATEWAY_BASE_URL: string
-	readonly CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: string
+
+	// Database
+	readonly DATABASE_URL: string
+
+	// Auth — BetterAuth
+	readonly BETTER_AUTH_SECRET: string
+	readonly BETTER_AUTH_URL: string
+
+	// LLM, STT, TTS
 	readonly OPENROUTER_API_KEY: string
 	readonly OPENAI_API_KEY: string
 	readonly CARTESIA_API_KEY: string
-	readonly DAYTONA_API_KEY: string
-	readonly DAYTONA_API_URL: string
-	readonly DAYTONA_TARGET: string
+
+	// Cloudflare AI Gateway
+	readonly CLOUDFLARE_AI_GATEWAY_BASE_URL: string
+	readonly CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: string
+
+	// Attachments
+	readonly ATTACHMENTS_SIGNING_SECRET: string
+
+	// Telegram
 	readonly TELEGRAM_BOT_TOKEN: string
 	readonly TELEGRAM_BOT_USERNAME: string
 	readonly TELEGRAM_WEBHOOK_SECRET: string
 	readonly TELEGRAM_API_BASE_URL?: string
-	readonly ATTACHMENTS_SIGNING_SECRET: string
 	readonly TELEGRAM_LOGIN_WIDGET_ENABLED: boolean
 	readonly TELEGRAM_MINI_APP_ENABLED: boolean
 	readonly TELEGRAM_OIDC_CLIENT_ID: string
@@ -63,6 +76,16 @@ export interface Env {
 	readonly TELEGRAM_OIDC_REQUEST_PHONE: boolean
 	readonly TELEGRAM_OIDC_REQUEST_BOT_ACCESS: boolean
 	readonly TELEGRAM_MAX_AUTH_AGE_SECONDS: number
+
+	// Daytona Sandbox
+	readonly DAYTONA_API_KEY: string
+	readonly DAYTONA_API_URL: string
+	readonly DAYTONA_TARGET: string
+
+	// Computer / Sandbox
+	readonly ENABLE_CUA: boolean
+
+	// Composio connectors
 	readonly COMPOSIO_API_KEY: string
 	readonly COMPOSIO_WEBHOOK_SECRET: string
 	readonly COMPOSIO_AUTH_CONFIG_GMAIL: string
@@ -70,14 +93,16 @@ export interface Env {
 	readonly COMPOSIO_AUTH_CONFIG_NOTION: string
 	readonly COMPOSIO_AUTH_CONFIG_SLACK: string
 	readonly COMPOSIO_AUTH_CONFIG_GOOGLEDRIVE: string
-	readonly DATABASE_URL: string
-	readonly BETTER_AUTH_SECRET: string
-	readonly BETTER_AUTH_URL: string
-	readonly ENABLE_CUA: boolean
+
+	// Braintrust — agent observability & tracing
 	readonly BRAINTRUST_API_KEY: string
 	readonly BRAINTRUST_PROJECT_ID: string
+
+	// PostHog analytics
 	readonly POSTHOG_KEY: string
 	readonly POSTHOG_HOST: string
+
+	// Workflows
 	readonly SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>
 	readonly VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
 }
