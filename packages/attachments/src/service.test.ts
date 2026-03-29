@@ -52,6 +52,8 @@ const TEST_ENV: Env = {
 	BRAINTRUST_PROJECT_ID: "",
 	POSTHOG_KEY: "",
 	POSTHOG_HOST: "",
+	VAULT_KEK: "",
+	VAULT_KEK_VERSION: 1,
 	SANDBOX_WORKFLOW: undefined,
 	VOLUME_WORKFLOW: undefined,
 }

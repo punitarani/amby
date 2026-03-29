@@ -26,6 +26,7 @@ import { BrowserServiceDisabledLive } from "@amby/browser/local"
 import { SandboxServiceLive, TaskSupervisorLive } from "@amby/computer"
 import {
 	and,
+	CodexAuthStoreLive,
 	ComputeStoreLive,
 	DbService,
 	DbServiceLive,
@@ -33,12 +34,14 @@ import {
 	schema,
 	TaskStoreLive,
 	TraceStoreLive,
+	VaultStoreLive,
 } from "@amby/db"
 import { EnvServiceLive, makeEffectDevToolsLive } from "@amby/env/local"
 import { AutomationServiceLive } from "@amby/plugins"
 import { ConnectorsServiceLive } from "@amby/plugins/integrations"
 import { MemoryServiceLive } from "@amby/plugins/memory"
 import { PluginRegistryLive } from "@amby/plugins/registry"
+import { CodexVaultServiceLive, VaultServiceLive } from "@amby/vault"
 import { Effect, Layer, ManagedRuntime } from "effect"
 
 // ---------------------------------------------------------------------------
@@ -359,14 +362,22 @@ const modelArg = process.argv.find((a) => a.startsWith("--model="))?.split("=")[
 const SIMULATED_TELEGRAM_USER_ID = 99999998
 const SIMULATED_CHAT_ID = 99999998
 
-const StoreLive = Layer.mergeAll(TaskStoreLive, TraceStoreLive, ComputeStoreLive).pipe(
-	Layer.provideMerge(DbServiceLive),
-)
+const StoreLive = Layer.mergeAll(
+	TaskStoreLive,
+	TraceStoreLive,
+	ComputeStoreLive,
+	VaultStoreLive,
+	CodexAuthStoreLive,
+).pipe(Layer.provideMerge(DbServiceLive))
 const InfraLive = Layer.mergeAll(makeEffectDevToolsLive(), SandboxServiceLive).pipe(
 	Layer.provideMerge(StoreLive),
 	Layer.provideMerge(EnvServiceLive),
 )
 const AttachmentLive = makeAttachmentServicesLocal().pipe(Layer.provideMerge(InfraLive))
+const VaultLive = CodexVaultServiceLive.pipe(
+	Layer.provideMerge(VaultServiceLive),
+	Layer.provideMerge(InfraLive),
+)
 
 const ServicesLive = Layer.mergeAll(
 	MemoryServiceLive,
@@ -376,7 +387,7 @@ const ServicesLive = Layer.mergeAll(
 	AuthLive,
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
-).pipe(Layer.provideMerge(InfraLive), Layer.provideMerge(AttachmentLive))
+).pipe(Layer.provideMerge(VaultLive), Layer.provideMerge(AttachmentLive))
 const SharedLive = PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 
 // ---------------------------------------------------------------------------

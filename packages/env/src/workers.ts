@@ -75,6 +75,10 @@ export interface WorkerBindings {
 	POSTHOG_KEY?: string
 	POSTHOG_HOST?: string
 
+	// Vault
+	VAULT_KEK?: string
+	VAULT_KEK_VERSION?: string
+
 	// Cloudflare platform bindings
 	CF_VERSION_METADATA?: { id?: string }
 	BROWSER?: unknown
@@ -167,6 +171,10 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		// PostHog analytics
 		POSTHOG_KEY: bindings.POSTHOG_KEY ?? "",
 		POSTHOG_HOST: bindings.POSTHOG_HOST ?? "https://us.i.posthog.com",
+
+		// Vault
+		VAULT_KEK: bindings.VAULT_KEK ?? "",
+		VAULT_KEK_VERSION: Number.parseInt(bindings.VAULT_KEK_VERSION ?? "1", 10),
 
 		// Workflows
 		SANDBOX_WORKFLOW: bindings.SANDBOX_WORKFLOW,
