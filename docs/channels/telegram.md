@@ -321,7 +321,7 @@ Use it when you want to test Telegram behavior without a real Telegram chat.
 | `apps/api/src/chat-state/cloudflare-chat-state.ts` | Worker-facing Chat SDK state adapter |
 | `apps/api/src/durable-objects/chat-state.ts` | durable Chat SDK state storage |
 | `apps/api/src/durable-objects/conversation-session.ts` | per-chat buffer and debounce controller |
-| `apps/api/src/workflows/agent-execution.ts` | durable agent execution and Telegram streaming |
+| `apps/api/src/workflows/agent-execution.ts` | durable agent execution with execution token gating |
 | `packages/channels/src/telegram/utils.ts` | command parsing, user lookup, conversation creation |
 | `packages/channels/src/telegram/sender.ts` | Telegram send/typing service |
 | `apps/api/src/index.ts` | local Bun entrypoint |
