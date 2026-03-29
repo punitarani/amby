@@ -78,6 +78,14 @@ const fromBase64 = (base64: string): Uint8Array =>
 
 const mapErr = vaultErrorFrom
 
+// Core VaultStoreService returns VaultItemRow / VaultVersionRow whose field
+// types are wider (e.g. `metadataJson: unknown`) than the vault-domain
+// VaultItem / VaultVersion interfaces.  The runtime shapes are identical, so
+// a safe cast bridges the gap without duplicating the Context tag.
+const toItem = (row: unknown): VaultItem => row as VaultItem
+const toItemOrNull = (row: unknown): VaultItem | null => (row ? (row as VaultItem) : null)
+const toVersion = (row: unknown): VaultVersion => row as VaultVersion
+
 // ---------------------------------------------------------------------------
 // Live implementation
 // ---------------------------------------------------------------------------
@@ -88,14 +96,17 @@ export const VaultServiceLive = Layer.effect(
 		const store = yield* VaultStore
 		const env = yield* EnvService
 
-		const kekBase64 = (env as Record<string, unknown>).VAULT_KEK as string | undefined
+		const kekBase64 = (env as unknown as Record<string, unknown>).VAULT_KEK as
+			| string
+			| undefined
 		if (!kekBase64) {
 			return yield* Effect.fail(
 				new VaultError({ message: "VAULT_KEK environment variable is not set" }),
 			)
 		}
 		const kekVersion = Number(
-			((env as Record<string, unknown>).VAULT_KEK_VERSION as string | undefined) ?? "1",
+			((env as unknown as Record<string, unknown>).VAULT_KEK_VERSION as string | undefined) ??
+				"1",
 		)
 
 		const kek = yield* Effect.tryPromise({
@@ -163,7 +174,6 @@ export const VaultServiceLive = Layer.effect(
 			createItem: (params) =>
 				Effect.gen(function* () {
 					const vaultId = crypto.randomUUID()
-					const versionId = crypto.randomUUID()
 					const version = 1
 
 					const encrypted = yield* encryptAndWrap({
@@ -174,7 +184,7 @@ export const VaultServiceLive = Layer.effect(
 						kind: params.kind,
 					})
 
-					const item = yield* store
+					const row = yield* store
 						.insertItem({
 							id: vaultId,
 							userId: params.userId,
@@ -189,10 +199,10 @@ export const VaultServiceLive = Layer.effect(
 						})
 						.pipe(Effect.mapError(mapErr))
 
-					yield* store
+					const ver = yield* store
 						.insertVersion({
-							id: versionId,
-							vaultId,
+							id: crypto.randomUUID(),
+							vaultId: row.id,
 							version,
 							cryptoAlg: "AES-256-GCM",
 							kekVersion,
@@ -206,15 +216,15 @@ export const VaultServiceLive = Layer.effect(
 
 					yield* store
 						.insertAccessLog({
-							vaultId,
-							vaultVersionId: versionId,
+							vaultId: row.id,
+							vaultVersionId: ver.id,
 							action: "create",
 							actorType: params.actorType ?? "system",
 							actorId: params.actorId ?? null,
 						})
 						.pipe(Effect.mapError(mapErr))
 
-					return item
+					return toItem(row)
 				}),
 
 			createVersion: (params) =>
@@ -229,7 +239,6 @@ export const VaultServiceLive = Layer.effect(
 					}
 
 					const nextVersion = existing.currentVersion + 1
-					const versionId = crypto.randomUUID()
 
 					const encrypted = yield* encryptAndWrap({
 						plaintext: params.plaintext,
@@ -241,7 +250,7 @@ export const VaultServiceLive = Layer.effect(
 
 					const vaultVersion = yield* store
 						.insertVersion({
-							id: versionId,
+							id: crypto.randomUUID(),
 							vaultId: params.vaultId,
 							version: nextVersion,
 							cryptoAlg: "AES-256-GCM",
@@ -261,24 +270,26 @@ export const VaultServiceLive = Layer.effect(
 					yield* store
 						.insertAccessLog({
 							vaultId: params.vaultId,
-							vaultVersionId: versionId,
+							vaultVersionId: vaultVersion.id,
 							action: "create",
 							actorType: params.actorType ?? "system",
 							actorId: params.actorId ?? null,
 						})
 						.pipe(Effect.mapError(mapErr))
 
-					return vaultVersion
+					return toVersion(vaultVersion)
 				}),
 
 			getItem: (userId, vaultId) =>
 				store.getItemById(vaultId).pipe(
-					Effect.map((item) => (item && item.userId === userId ? item : null)),
+					Effect.map((item) => (item && item.userId === userId ? toItem(item) : null)),
 					Effect.mapError(mapErr),
 				),
 
 			getItemByKey: (userId, namespace, itemKey) =>
-				store.getItemByKey(userId, namespace, itemKey).pipe(Effect.mapError(mapErr)),
+				store
+					.getItemByKey(userId, namespace, itemKey)
+					.pipe(Effect.map(toItemOrNull), Effect.mapError(mapErr)),
 
 			resolveSecret: (params) =>
 				Effect.gen(function* () {
@@ -307,7 +318,11 @@ export const VaultServiceLive = Layer.effect(
 						)
 					}
 
-					const plaintext = yield* decryptFromVersion(version, params.userId, item.kind)
+					const plaintext = yield* decryptFromVersion(
+						toVersion(version),
+						params.userId,
+						item.kind,
+					)
 
 					yield* store
 						.insertAccessLog({

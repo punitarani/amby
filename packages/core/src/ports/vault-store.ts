@@ -47,6 +47,7 @@ export interface VaultAccessLogInput {
 
 export interface VaultStoreService {
 	readonly insertItem: (values: {
+		id?: string
 		userId: string
 		namespace: string
 		itemKey: string
@@ -82,6 +83,7 @@ export interface VaultStoreService {
 	) => Effect.Effect<VaultItemRow[], DbError>
 
 	readonly insertVersion: (values: {
+		id?: string
 		vaultId: string
 		version: number
 		cryptoAlg?: string

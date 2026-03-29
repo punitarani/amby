@@ -1,5 +1,4 @@
-import type { DbError } from "@amby/core"
-import { Context, type Effect } from "effect"
+import { CodexAuthStore as CoreCodexAuthStore, VaultStore as CoreVaultStore } from "@amby/core"
 
 // ---------------------------------------------------------------------------
 // Domain value types
@@ -63,96 +62,15 @@ export interface VaultAccessLogEntry {
 }
 
 // ---------------------------------------------------------------------------
-// Port: VaultStore — persistence boundary for vault items and versions
+// Re-export canonical Context tags from @amby/core
 // ---------------------------------------------------------------------------
+// The @amby/db repository layers (VaultStoreLive, CodexAuthStoreLive) provide
+// the core tags. By re-exporting the same classes here, the vault service
+// layers resolve the identical Context identifiers at runtime, and the type
+// system sees one unified class.
 
-export interface VaultStoreService {
-	readonly insertItem: (values: {
-		id: string
-		userId: string
-		namespace: VaultNamespace
-		itemKey: string
-		kind: VaultKind
-		displayName?: string | null
-		metadataJson?: Record<string, unknown> | null
-		policyJson?: Record<string, unknown> | null
-		currentVersion: number
-		status: VaultStatus
-	}) => Effect.Effect<VaultItem, DbError>
+export const VaultStore = CoreVaultStore
+export type VaultStore = CoreVaultStore
 
-	readonly updateItem: (
-		id: string,
-		set: Partial<
-			Pick<VaultItem, "displayName" | "kind" | "currentVersion" | "status" | "metadataJson">
-		>,
-	) => Effect.Effect<void, DbError>
-
-	readonly getItemById: (id: string) => Effect.Effect<VaultItem | null, DbError>
-
-	readonly getItemByKey: (
-		userId: string,
-		namespace: string,
-		itemKey: string,
-	) => Effect.Effect<VaultItem | null, DbError>
-
-	readonly insertVersion: (values: {
-		id: string
-		vaultId: string
-		version: number
-		cryptoAlg: string
-		kekVersion: number
-		dekWrapped: string
-		nonce: string
-		ciphertext: string
-		createdByType: VaultActorType
-		createdById?: string | null
-	}) => Effect.Effect<VaultVersion, DbError>
-
-	readonly getVersion: (
-		vaultId: string,
-		version: number,
-	) => Effect.Effect<VaultVersion | null, DbError>
-
-	readonly getLatestVersion: (vaultId: string) => Effect.Effect<VaultVersion | null, DbError>
-
-	readonly insertAccessLog: (values: VaultAccessLogEntry) => Effect.Effect<void, DbError>
-}
-
-export class VaultStore extends Context.Tag("VaultStore")<VaultStore, VaultStoreService>() {}
-
-// ---------------------------------------------------------------------------
-// Port: CodexAuthStore — persistence boundary for codex auth state
-// ---------------------------------------------------------------------------
-
-export interface CodexAuthStateRow {
-	id: string
-	userId: string
-	activeVaultId: string | null
-	activeVaultVersion: number | null
-	method: "api_key" | "chatgpt"
-	status: "unauthenticated" | "pending" | "authenticated" | "invalid" | "revoked"
-	apiKeyLast4: string | null
-	accountId: string | null
-	workspaceId: string | null
-	planType: string | null
-	lastRefresh: Date | null
-	pendingDeviceAuth: Record<string, unknown> | null
-	lastError: string | null
-	lastMaterializedVersion: number | null
-	lastMaterializedAt: Date | null
-	createdAt: Date
-	updatedAt: Date
-}
-
-export class CodexAuthStore extends Context.Tag("CodexAuthStore")<
-	CodexAuthStore,
-	{
-		readonly getByUserId: (userId: string) => Effect.Effect<CodexAuthStateRow | null, DbError>
-		readonly upsert: (
-			userId: string,
-			values: Partial<
-				Omit<CodexAuthStateRow, "id" | "userId" | "createdAt" | "updatedAt">
-			>,
-		) => Effect.Effect<CodexAuthStateRow, DbError>
-	}
->() {}
+export const CodexAuthStore = CoreCodexAuthStore
+export type CodexAuthStore = CoreCodexAuthStore

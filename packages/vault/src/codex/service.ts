@@ -192,7 +192,10 @@ export const CodexVaultServiceLive = Layer.effect(
 
 					if (!version) return null
 
-					return { item, version }
+					return {
+						item,
+						version: version as unknown as VaultVersion,
+					}
 				}),
 
 			resolveCredential: (userId, vaultId, version) =>
@@ -219,9 +222,13 @@ export const CodexVaultServiceLive = Layer.effect(
 
 			revokeCredential: (userId, vaultId) =>
 				Effect.gen(function* () {
+					const existing = yield* authStore
+						.getByUserId(userId)
+						.pipe(Effect.mapError(mapErr))
+					const method = existing?.method ?? "api_key"
 					yield* vault.revokeItem(userId, vaultId)
 					yield* authStore
-						.upsert(userId, { status: "revoked" })
+						.upsert(userId, { method, status: "revoked" })
 						.pipe(Effect.mapError(mapErr))
 				}),
 		}

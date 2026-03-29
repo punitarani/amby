@@ -4,6 +4,12 @@ const AES_GCM = "AES-GCM" as const
 const AES_KW = "AES-KW" as const
 const NONCE_BYTES = 12
 
+// The API project includes both bun-types and @cloudflare/workers-types which
+// define conflicting BufferSource types.  Using explicit casts via a helper
+// keeps the call sites clean and avoids Uint8Array<ArrayBufferLike> errors.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const buf = (v: Uint8Array): any => v
+
 /** Generate a random 256-bit AES-GCM data-encryption key. */
 export const generateDek = (): Promise<CryptoKey> =>
 	crypto.subtle.generateKey({ name: AES_GCM, length: 256 }, true, ["encrypt", "decrypt"])
@@ -16,9 +22,9 @@ export const encrypt = async (params: {
 }): Promise<{ ciphertext: Uint8Array; nonce: Uint8Array }> => {
 	const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES))
 	const encryptedBuffer = await crypto.subtle.encrypt(
-		{ name: AES_GCM, iv: nonce, additionalData: params.aad },
+		{ name: AES_GCM, iv: buf(nonce), additionalData: buf(params.aad) },
 		params.dek,
-		params.plaintext,
+		buf(params.plaintext),
 	)
 	return { ciphertext: new Uint8Array(encryptedBuffer), nonce }
 }
@@ -31,9 +37,9 @@ export const decrypt = async (params: {
 	aad: Uint8Array
 }): Promise<Uint8Array> => {
 	const decryptedBuffer = await crypto.subtle.decrypt(
-		{ name: AES_GCM, iv: params.nonce, additionalData: params.aad },
+		{ name: AES_GCM, iv: buf(params.nonce), additionalData: buf(params.aad) },
 		params.dek,
-		params.ciphertext,
+		buf(params.ciphertext),
 	)
 	return new Uint8Array(decryptedBuffer)
 }
@@ -54,7 +60,7 @@ export const unwrapDek = (params: {
 }): Promise<CryptoKey> =>
 	crypto.subtle.unwrapKey(
 		"raw",
-		params.wrapped,
+		buf(params.wrapped),
 		params.kek,
 		AES_KW,
 		AES_GCM,
