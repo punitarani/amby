@@ -16,6 +16,7 @@ const TEST_ENV: Env = {
 	NODE_ENV: "test",
 	API_URL: "https://api.example.com",
 	APP_URL: "https://app.example.com",
+	CLOUDFLARE_AI_GATEWAY_ID: "",
 	CLOUDFLARE_AI_GATEWAY_BASE_URL: "",
 	CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: "",
 	OPENROUTER_API_KEY: "",
