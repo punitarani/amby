@@ -55,6 +55,7 @@ required = [
   "ATTACHMENTS_SIGNING_SECRET",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_WEBHOOK_SECRET",
+  "VAULT_KEK",
 ]
 
 # Observability
