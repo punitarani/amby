@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { EnvService } from "@amby/env"
 import { Effect, Layer } from "effect"
-import { VaultError } from "../errors"
+import type { VaultError } from "../errors"
 import { VaultServiceLive } from "../service"
 import {
 	makeCodexAuthStoreLayer,
@@ -25,8 +25,7 @@ const buildTestLayer = (
 	)
 }
 
-const run = <A>(effect: Effect.Effect<A, VaultError, CodexVaultService>) =>
-	Effect.runPromise(effect)
+const run = <A>(effect: Effect.Effect<A, VaultError>) => Effect.runPromise(effect)
 
 describe("CodexVaultService", () => {
 	it("creates and resolves an API key credential", async () => {
@@ -56,9 +55,9 @@ describe("CodexVaultService", () => {
 
 		const authRow = auth.rows.get("user-1")
 		expect(authRow).toBeTruthy()
-		expect(authRow!.method).toBe("api_key")
-		expect(authRow!.status).toBe("authenticated")
-		expect(authRow!.apiKeyLast4).toBe("2345")
+		expect(authRow?.method).toBe("api_key")
+		expect(authRow?.status).toBe("authenticated")
+		expect(authRow?.apiKeyLast4).toBe("2345")
 	})
 
 	it("creates and resolves a ChatGPT bundle credential", async () => {
@@ -86,9 +85,9 @@ describe("CodexVaultService", () => {
 		}
 
 		const authRow = auth.rows.get("user-1")
-		expect(authRow!.method).toBe("chatgpt")
-		expect(authRow!.accountId).toBe("acc-1")
-		expect(authRow!.planType).toBe("plus")
+		expect(authRow?.method).toBe("chatgpt")
+		expect(authRow?.accountId).toBe("acc-1")
+		expect(authRow?.planType).toBe("plus")
 	})
 
 	it("revokes a credential and updates auth state", async () => {
@@ -99,17 +98,15 @@ describe("CodexVaultService", () => {
 		await run(
 			Effect.gen(function* () {
 				const svc = yield* CodexVaultService
-				const { vaultItem } = yield* svc.createApiKeyCredential(
-					"user-1",
-					"sk-live-revoke-me",
-				)
+				const { vaultItem } = yield* svc.createApiKeyCredential("user-1", "sk-live-revoke-me")
 				yield* svc.revokeCredential("user-1", vaultItem.id)
 			}).pipe(Effect.provide(layer)),
 		)
 
-		const item = store.items.values().next().value!
-		expect(item.status).toBe("revoked")
-		expect(auth.rows.get("user-1")!.status).toBe("revoked")
+		const item = store.items.values().next().value
+		expect(item).toBeTruthy()
+		expect(item?.status).toBe("revoked")
+		expect(auth.rows.get("user-1")?.status).toBe("revoked")
 	})
 
 	it("upsert creates new version when same kind exists", async () => {
@@ -139,18 +136,14 @@ describe("CodexVaultService", () => {
 			Effect.gen(function* () {
 				const svc = yield* CodexVaultService
 				const first = yield* svc.createApiKeyCredential("user-1", "sk-live-key")
-				const second = yield* svc.createChatgptBundleCredential(
-					"user-1",
-					btoa("archive"),
-					{},
-				)
+				const second = yield* svc.createChatgptBundleCredential("user-1", btoa("archive"), {})
 				return { first, second }
 			}).pipe(Effect.provide(layer)),
 		)
 
 		expect(result.first.vaultItem.id).not.toBe(result.second.vaultItem.id)
 		const oldItem = store.items.get(result.first.vaultItem.id)
-		expect(oldItem!.status).toBe("revoked")
+		expect(oldItem?.status).toBe("revoked")
 	})
 
 	it("getActiveCredential returns null when no credential exists", async () => {
@@ -182,8 +175,8 @@ describe("CodexVaultService", () => {
 		)
 
 		expect(result).not.toBeNull()
-		expect(result!.item.kind).toBe("codex_api_key")
-		expect(result!.version).not.toBeNull()
-		expect(result!.version.version).toBe(1)
+		expect(result?.item.kind).toBe("codex_api_key")
+		expect(result?.version).not.toBeNull()
+		expect(result?.version.version).toBe(1)
 	})
 })

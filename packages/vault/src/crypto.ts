@@ -7,7 +7,7 @@ const NONCE_BYTES = 12
 // The API project includes both bun-types and @cloudflare/workers-types which
 // define conflicting BufferSource types.  Using explicit casts via a helper
 // keeps the call sites clean and avoids Uint8Array<ArrayBufferLike> errors.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: required to bridge conflicting BufferSource types
 const buf = (v: Uint8Array): any => v
 
 /** Generate a random 256-bit AES-GCM data-encryption key. */
@@ -45,28 +45,17 @@ export const decrypt = async (params: {
 }
 
 /** Wrap a DEK with a key-encryption key using AES-KW. */
-export const wrapDek = async (params: {
-	dek: CryptoKey
-	kek: CryptoKey
-}): Promise<Uint8Array> => {
+export const wrapDek = async (params: { dek: CryptoKey; kek: CryptoKey }): Promise<Uint8Array> => {
 	const wrapped = await crypto.subtle.wrapKey("raw", params.dek, params.kek, AES_KW)
 	return new Uint8Array(wrapped)
 }
 
 /** Unwrap a DEK from its wrapped form using a KEK via AES-KW. */
-export const unwrapDek = (params: {
-	wrapped: Uint8Array
-	kek: CryptoKey
-}): Promise<CryptoKey> =>
-	crypto.subtle.unwrapKey(
-		"raw",
-		buf(params.wrapped),
-		params.kek,
-		AES_KW,
-		AES_GCM,
-		true,
-		["encrypt", "decrypt"],
-	)
+export const unwrapDek = (params: { wrapped: Uint8Array; kek: CryptoKey }): Promise<CryptoKey> =>
+	crypto.subtle.unwrapKey("raw", buf(params.wrapped), params.kek, AES_KW, AES_GCM, true, [
+		"encrypt",
+		"decrypt",
+	])
 
 /** Import a base64-encoded 256-bit key as an AES-KW key-encryption key. */
 export const importKek = (base64Key: string): Promise<CryptoKey> => {
@@ -82,6 +71,4 @@ export const buildAad = (params: {
 	version: number
 	kind: string
 }): Uint8Array =>
-	new TextEncoder().encode(
-		`${params.vaultId}:${params.userId}:${params.version}:${params.kind}`,
-	)
+	new TextEncoder().encode(`${params.vaultId}:${params.userId}:${params.version}:${params.kind}`)

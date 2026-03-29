@@ -28,9 +28,7 @@ describe("crypto", () => {
 				version: 2,
 				kind: "codex_api_key",
 			})
-			await expect(
-				decrypt({ ciphertext, nonce, dek, aad: tamperedAad }),
-			).rejects.toThrow()
+			await expect(decrypt({ ciphertext, nonce, dek, aad: tamperedAad })).rejects.toThrow()
 		})
 
 		it("fails when ciphertext is tampered with", async () => {
@@ -39,7 +37,7 @@ describe("crypto", () => {
 			const { ciphertext, nonce } = await encrypt({ plaintext, dek, aad })
 
 			const tampered = new Uint8Array(ciphertext)
-			tampered[0] = tampered[0]! ^ 0xff
+			tampered[0] = (tampered[0] ?? 0) ^ 0xff
 			await expect(decrypt({ ciphertext: tampered, nonce, dek, aad })).rejects.toThrow()
 		})
 	})

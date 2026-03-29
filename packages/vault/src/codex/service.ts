@@ -43,10 +43,7 @@ export class CodexVaultService extends Context.Tag("CodexVaultService")<
 			version?: number,
 		) => Effect.Effect<CodexCredentialPayload, VaultError>
 
-		readonly revokeCredential: (
-			userId: string,
-			vaultId: string,
-		) => Effect.Effect<void, VaultError>
+		readonly revokeCredential: (userId: string, vaultId: string) => Effect.Effect<void, VaultError>
 	}
 >() {}
 
@@ -82,11 +79,7 @@ export const CodexVaultServiceLive = Layer.effect(
 					yield* vault.revokeItem(params.userId, existing.id)
 				}
 
-				if (
-					existing &&
-					existing.status === "active" &&
-					existing.kind === params.kind
-				) {
+				if (existing && existing.status === "active" && existing.kind === params.kind) {
 					yield* vault.createVersion({
 						userId: params.userId,
 						vaultId: existing.id,
@@ -95,11 +88,9 @@ export const CodexVaultServiceLive = Layer.effect(
 					})
 					const updated = yield* vault.getItem(params.userId, existing.id)
 					if (!updated) {
-						return yield* Effect.fail(
-							new VaultError({
-								message: "Failed to re-fetch vault item after version create",
-							}),
-						)
+						return yield* new VaultError({
+							message: "Failed to re-fetch vault item after version create",
+						})
 					}
 					return updated
 				}
@@ -176,9 +167,7 @@ export const CodexVaultServiceLive = Layer.effect(
 
 			getActiveCredential: (userId) =>
 				Effect.gen(function* () {
-					const authState = yield* authStore
-						.getByUserId(userId)
-						.pipe(Effect.mapError(mapErr))
+					const authState = yield* authStore.getByUserId(userId).pipe(Effect.mapError(mapErr))
 
 					if (!authState?.activeVaultId) return null
 
@@ -206,25 +195,21 @@ export const CodexVaultServiceLive = Layer.effect(
 						version,
 						purpose: "codex-credential-resolve",
 					})
-					try {
-						return parseCodexPayload(raw)
-					} catch (cause) {
-						return yield* Effect.fail(
+					return yield* Effect.try({
+						try: () => parseCodexPayload(raw),
+						catch: (cause) =>
 							cause instanceof VaultError
 								? cause
 								: new VaultError({
 										message: "Failed to parse resolved codex credential",
 										cause,
 									}),
-						)
-					}
+					})
 				}),
 
 			revokeCredential: (userId, vaultId) =>
 				Effect.gen(function* () {
-					const existing = yield* authStore
-						.getByUserId(userId)
-						.pipe(Effect.mapError(mapErr))
+					const existing = yield* authStore.getByUserId(userId).pipe(Effect.mapError(mapErr))
 					const method = existing?.method ?? "api_key"
 					yield* vault.revokeItem(userId, vaultId)
 					yield* authStore

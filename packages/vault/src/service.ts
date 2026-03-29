@@ -99,9 +99,7 @@ export const VaultServiceLive = Layer.effect(
 
 		const kekBase64 = env.VAULT_KEK
 		if (!kekBase64) {
-			return yield* Effect.fail(
-				new VaultError({ message: "VAULT_KEK environment variable is not set" }),
-			)
+			return yield* new VaultError({ message: "VAULT_KEK environment variable is not set" })
 		}
 		const kekVersion = env.VAULT_KEK_VERSION
 
@@ -225,13 +223,11 @@ export const VaultServiceLive = Layer.effect(
 
 			createVersion: (params) =>
 				Effect.gen(function* () {
-					const existing = yield* store
-						.getItemById(params.vaultId)
-						.pipe(Effect.mapError(mapErr))
+					const existing = yield* store.getItemById(params.vaultId).pipe(Effect.mapError(mapErr))
 					if (!existing || existing.userId !== params.userId) {
-						return yield* Effect.fail(
-							new VaultError({ message: `Vault item not found: ${params.vaultId}` }),
-						)
+						return yield* new VaultError({
+							message: `Vault item not found: ${params.vaultId}`,
+						})
 					}
 
 					const nextVersion = existing.currentVersion + 1
@@ -289,36 +285,24 @@ export const VaultServiceLive = Layer.effect(
 
 			resolveSecret: (params) =>
 				Effect.gen(function* () {
-					const item = yield* store
-						.getItemById(params.vaultId)
-						.pipe(Effect.mapError(mapErr))
+					const item = yield* store.getItemById(params.vaultId).pipe(Effect.mapError(mapErr))
 					if (!item || item.userId !== params.userId) {
-						return yield* Effect.fail(
-							new VaultError({ message: `Vault item not found: ${params.vaultId}` }),
-						)
+						return yield* new VaultError({
+							message: `Vault item not found: ${params.vaultId}`,
+						})
 					}
 
 					const version = params.version
-						? yield* store
-								.getVersion(params.vaultId, params.version)
-								.pipe(Effect.mapError(mapErr))
-						: yield* store
-								.getLatestVersion(params.vaultId)
-								.pipe(Effect.mapError(mapErr))
+						? yield* store.getVersion(params.vaultId, params.version).pipe(Effect.mapError(mapErr))
+						: yield* store.getLatestVersion(params.vaultId).pipe(Effect.mapError(mapErr))
 
 					if (!version) {
-						return yield* Effect.fail(
-							new VaultError({
-								message: `Vault version not found for ${params.vaultId}`,
-							}),
-						)
+						return yield* new VaultError({
+							message: `Vault version not found for ${params.vaultId}`,
+						})
 					}
 
-					const plaintext = yield* decryptFromVersion(
-						toVersion(version),
-						params.userId,
-						item.kind,
-					)
+					const plaintext = yield* decryptFromVersion(toVersion(version), params.userId, item.kind)
 
 					yield* store
 						.insertAccessLog({
@@ -336,18 +320,12 @@ export const VaultServiceLive = Layer.effect(
 
 			revokeItem: (userId, vaultId) =>
 				Effect.gen(function* () {
-					const item = yield* store
-						.getItemById(vaultId)
-						.pipe(Effect.mapError(mapErr))
+					const item = yield* store.getItemById(vaultId).pipe(Effect.mapError(mapErr))
 					if (!item || item.userId !== userId) {
-						return yield* Effect.fail(
-							new VaultError({ message: `Vault item not found: ${vaultId}` }),
-						)
+						return yield* new VaultError({ message: `Vault item not found: ${vaultId}` })
 					}
 
-					yield* store
-						.updateItem(vaultId, { status: "revoked" })
-						.pipe(Effect.mapError(mapErr))
+					yield* store.updateItem(vaultId, { status: "revoked" }).pipe(Effect.mapError(mapErr))
 
 					yield* store
 						.insertAccessLog({

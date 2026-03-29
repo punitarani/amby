@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { EnvService } from "@amby/env"
 import { Effect, Layer } from "effect"
-import { VaultError } from "./errors"
+import type { VaultError } from "./errors"
 import { VaultService, VaultServiceLive } from "./service"
 import { makeMockVaultStore, makeTestEnv, makeVaultStoreLayer } from "./test-fixtures"
 
@@ -11,8 +11,7 @@ const buildTestLayer = (mock: ReturnType<typeof makeMockVaultStore>) => {
 	return VaultServiceLive.pipe(Layer.provide(Layer.merge(storeLayer, envLayer)))
 }
 
-const run = <A>(effect: Effect.Effect<A, VaultError, VaultService>) =>
-	Effect.runPromise(effect)
+const run = <A>(effect: Effect.Effect<A, VaultError>) => Effect.runPromise(effect)
 
 describe("VaultService", () => {
 	it("createItem encrypts and stores a vault item", async () => {
@@ -41,7 +40,7 @@ describe("VaultService", () => {
 		expect(mock.items.size).toBe(1)
 		expect(mock.versions.size).toBe(1)
 		expect(mock.accessLogs.length).toBe(1)
-		expect(mock.accessLogs[0]!.action).toBe("create")
+		expect(mock.accessLogs[0]?.action).toBe("create")
 	})
 
 	it("resolveSecret decrypts and returns original plaintext", async () => {
@@ -68,7 +67,7 @@ describe("VaultService", () => {
 
 		expect(recovered).toEqual(plaintext)
 		expect(mock.accessLogs.length).toBe(2)
-		expect(mock.accessLogs[1]!.action).toBe("resolve")
+		expect(mock.accessLogs[1]?.action).toBe("resolve")
 	})
 
 	it("createVersion adds a new version and increments currentVersion", async () => {
@@ -95,8 +94,8 @@ describe("VaultService", () => {
 		)
 
 		expect(version.version).toBe(2)
-		const updatedItem = mock.items.values().next().value!
-		expect(updatedItem.currentVersion).toBe(2)
+		const updatedItem = mock.items.values().next().value
+		expect(updatedItem?.currentVersion).toBe(2)
 	})
 
 	it("revokeItem updates status to revoked", async () => {
@@ -117,8 +116,8 @@ describe("VaultService", () => {
 			}).pipe(Effect.provide(layer)),
 		)
 
-		const item = mock.items.values().next().value!
-		expect(item.status).toBe("revoked")
+		const item = mock.items.values().next().value
+		expect(item?.status).toBe("revoked")
 		const revokeLog = mock.accessLogs.find((l) => l.action === "revoke")
 		expect(revokeLog).toBeTruthy()
 	})
@@ -163,6 +162,6 @@ describe("VaultService", () => {
 		)
 
 		expect(result).not.toBeNull()
-		expect(result!.namespace).toBe("codex")
+		expect(result?.namespace).toBe("codex")
 	})
 })
