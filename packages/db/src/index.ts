@@ -18,6 +18,8 @@ export {
 export * from "./errors"
 export * from "./repositories"
 export type {
+	CodexAuthMethod,
+	CodexAuthStatus,
 	ExecutionMode,
 	Platform,
 	RunEventKind,
@@ -29,6 +31,8 @@ export type {
 	TaskRuntime,
 	TaskStatus,
 	ThreadSource,
+	VaultItemStatus,
+	VaultVersionCreatedByType,
 } from "./schema"
 export * as schema from "./schema"
 export * from "./service"

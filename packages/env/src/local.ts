@@ -81,6 +81,8 @@ const EnvConfig = Config.all({
 	BRAINTRUST_PROJECT_ID: Config.string("BRAINTRUST_PROJECT_ID").pipe(Config.withDefault("")),
 	POSTHOG_KEY: Config.string("POSTHOG_KEY").pipe(Config.withDefault("")),
 	POSTHOG_HOST: Config.string("POSTHOG_HOST").pipe(Config.withDefault("https://us.i.posthog.com")),
+	VAULT_KEK: Config.redacted("VAULT_KEK").pipe(Config.withDefault(Redacted.make(""))),
+	VAULT_KEK_VERSION: Config.integer("VAULT_KEK_VERSION").pipe(Config.withDefault(1)),
 })
 
 export const EnvServiceLive = Layer.effect(
@@ -126,6 +128,8 @@ export const EnvServiceLive = Layer.effect(
 			BRAINTRUST_PROJECT_ID: raw.BRAINTRUST_PROJECT_ID,
 			POSTHOG_KEY: raw.POSTHOG_KEY,
 			POSTHOG_HOST: raw.POSTHOG_HOST,
+			VAULT_KEK: Redacted.value(raw.VAULT_KEK),
+			VAULT_KEK_VERSION: raw.VAULT_KEK_VERSION,
 		}
 	}),
 )
