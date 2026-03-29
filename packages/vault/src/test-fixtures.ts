@@ -9,16 +9,18 @@ import type {
 	VaultVersionRow,
 } from "@amby/core"
 import { Effect, Layer } from "effect"
-import type { VaultAccessLogEntry, VaultItem, VaultVersion } from "./types"
+import type { VaultAccessLogEntry } from "./types"
 import { CodexAuthStore, VaultStore } from "./types"
 
 // ---------------------------------------------------------------------------
 // In-memory mock VaultStore
 // ---------------------------------------------------------------------------
 
-// biome-ignore lint/suspicious/noExplicitAny: test mock uses loose internal types
+// biome-ignore lint/suspicious/noExplicitAny: test mock uses loose types to satisfy VaultStoreService
 export type MockVaultStore = Record<string, any> & {
+	// biome-ignore lint/suspicious/noExplicitAny: test mock
 	items: Map<string, Record<string, any>>
+	// biome-ignore lint/suspicious/noExplicitAny: test mock
 	versions: Map<string, Array<Record<string, any>>>
 	accessLogs: VaultAccessLogEntry[]
 }

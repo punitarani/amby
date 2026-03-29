@@ -31,11 +31,7 @@ export const VaultStoreLive = Layer.effect(
 
 			getItemById: (id) =>
 				query(async (d) => {
-					const rows = await d
-						.select()
-						.from(schema.vault)
-						.where(eq(schema.vault.id, id))
-						.limit(1)
+					const rows = await d.select().from(schema.vault).where(eq(schema.vault.id, id)).limit(1)
 					return (rows[0] as VaultItemRow | undefined) ?? null
 				}),
 
@@ -73,10 +69,7 @@ export const VaultStoreLive = Layer.effect(
 
 			insertVersion: (values) =>
 				query(async (d) => {
-					const rows = await d
-						.insert(schema.vaultVersions)
-						.values(values)
-						.returning()
+					const rows = await d.insert(schema.vaultVersions).values(values).returning()
 					const row = rows[0]
 					if (!row) {
 						throw new Error("Failed to insert vault version")
@@ -111,9 +104,7 @@ export const VaultStoreLive = Layer.effect(
 				}),
 
 			insertAccessLog: (values) =>
-				query((d) => d.insert(schema.vaultAccessLog).values(values)).pipe(
-					Effect.asVoid,
-				),
+				query((d) => d.insert(schema.vaultAccessLog).values(values)).pipe(Effect.asVoid),
 		}
 
 		return service

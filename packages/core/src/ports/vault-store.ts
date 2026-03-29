@@ -64,7 +64,7 @@ export interface VaultStoreService {
 		set: Partial<
 			Pick<
 				VaultItemRow,
-				"currentVersion" | "status" | "displayName" | "metadataJson" | "policyJson"
+				"currentVersion" | "status" | "displayName" | "metadataJson" | "policyJson" | "itemKey"
 			>
 		>,
 	) => Effect.Effect<void, DbError>

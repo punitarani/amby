@@ -1,11 +1,16 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
+import { integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 import { computeVolumes } from "./compute"
 import { users } from "./users"
 import { vault } from "./vault"
 
 export type CodexAuthMethod = "api_key" | "chatgpt"
 
-export type CodexAuthStatus = "unauthenticated" | "pending" | "authenticated" | "invalid" | "revoked"
+export type CodexAuthStatus =
+	| "unauthenticated"
+	| "pending"
+	| "authenticated"
+	| "invalid"
+	| "revoked"
 
 export const codexAuthStates = pgTable(
 	"codex_auth_states",

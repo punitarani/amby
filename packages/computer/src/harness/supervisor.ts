@@ -1,6 +1,11 @@
-import type { RunnerKind, SpecialistKind, TaskRecord, TaskStatus } from "@amby/core"
+import type {
+	CodexAuthStateRow,
+	RunnerKind,
+	SpecialistKind,
+	TaskRecord,
+	TaskStatus,
+} from "@amby/core"
 import { CodexAuthStore, ComputeStore, TaskStore, TraceStore } from "@amby/core"
-import type { CodexAuthStateRow } from "@amby/core"
 import { EnvService } from "@amby/env"
 import { CodexVaultService } from "@amby/vault"
 import type { Sandbox } from "@daytonaio/sdk"
@@ -332,9 +337,7 @@ export const TaskSupervisorLive = Layer.scoped(
 			if (parsed.cache.method === "api_key") {
 				const rawParsed = JSON.parse(authJson) as Record<string, unknown>
 				const rawKey =
-					typeof rawParsed.OPENAI_API_KEY === "string"
-						? rawParsed.OPENAI_API_KEY.trim()
-						: null
+					typeof rawParsed.OPENAI_API_KEY === "string" ? rawParsed.OPENAI_API_KEY.trim() : null
 				if (rawKey) {
 					await runPromise(
 						codexVault
@@ -378,15 +381,14 @@ export const TaskSupervisorLive = Layer.scoped(
 					return upsertAndSummarize(userId, {
 						method: authState.method,
 						status: "invalid",
-						lastError:
-							"Stored Codex credentials were not found in the sandbox. Reconnect Codex.",
+						lastError: "Stored Codex credentials were not found in the sandbox. Reconnect Codex.",
 					})
 				}
 				return persistAndSummarize(userId, authState)
 			}
 
 			// Sandbox has auth.json but vault has no credential (auto-migration)
-			if (authJson && (!authState || !authState.activeVaultId)) {
+			if (authJson && !authState?.activeVaultId) {
 				const parsed = parseCodexAuthFile(authJson)
 				if (!parsed) {
 					return upsertAndSummarize(userId, {
@@ -406,10 +408,7 @@ export const TaskSupervisorLive = Layer.scoped(
 			if (authState?.status === "pending" && authState.pendingDeviceAuth) {
 				const pending = authState.pendingDeviceAuth as CodexPendingDeviceAuth
 				try {
-					const cmd = await sandbox.process.getSessionCommand(
-						pending.sessionId,
-						pending.commandId,
-					)
+					const cmd = await sandbox.process.getSessionCommand(pending.sessionId, pending.commandId)
 					if (cmd.exitCode == null) {
 						return persistAndSummarize(userId, authState)
 					}
@@ -453,8 +452,7 @@ export const TaskSupervisorLive = Layer.scoped(
 				return upsertAndSummarize(userId, {
 					method: authState.method,
 					status: "invalid",
-					lastError:
-						"Stored Codex credentials were not found in the sandbox. Reconnect Codex.",
+					lastError: "Stored Codex credentials were not found in the sandbox. Reconnect Codex.",
 				})
 			}
 
@@ -467,9 +465,7 @@ export const TaskSupervisorLive = Layer.scoped(
 			if (authState?.status === "authenticated" && authState.activeVaultId) {
 				return {
 					authMode:
-						authState.method === "chatgpt"
-							? ("chatgpt_account" as const)
-							: ("api_key" as const),
+						authState.method === "chatgpt" ? ("chatgpt_account" as const) : ("api_key" as const),
 				}
 			}
 
@@ -827,9 +823,7 @@ export const TaskSupervisorLive = Layer.scoped(
 
 							await cleanupPreviousPending(userId, sandbox)
 							await ensureCodexHome(sandbox)
-							await sandbox.process.executeCommand(
-								`rm -f ${CODEX_AUTH_FILE} ${CODEX_AUTH_LOG}`,
-							)
+							await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_FILE} ${CODEX_AUTH_LOG}`)
 
 							const sessionId = `codex-auth-${Date.now()}`
 							const command =
@@ -839,10 +833,10 @@ export const TaskSupervisorLive = Layer.scoped(
 								`codex login --device-auth -c 'cli_auth_credentials_store="file"' 2>&1 | tee ${CODEX_AUTH_LOG}`
 
 							await sandbox.process.createSession(sessionId)
-							const execResult = await sandbox.process.executeSessionCommand(
-								sessionId,
-								{ command, runAsync: true },
-							)
+							const execResult = await sandbox.process.executeSessionCommand(sessionId, {
+								command,
+								runAsync: true,
+							})
 
 							let pendingPrompt: {
 								verificationUri: string
@@ -949,9 +943,7 @@ export const TaskSupervisorLive = Layer.scoped(
 									.pipe(Effect.catchAll(() => Effect.void)),
 							)
 
-							await sandbox.process.executeCommand(
-								`rm -f ${CODEX_AUTH_FILE} ${CODEX_AUTH_LOG}`,
-							)
+							await sandbox.process.executeCommand(`rm -f ${CODEX_AUTH_FILE} ${CODEX_AUTH_LOG}`)
 
 							await saveAuthConfig(userId, {})
 							return summarizeCodexAuth(null)

@@ -213,7 +213,12 @@ export const CodexVaultServiceLive = Layer.effect(
 					const method = existing?.method ?? "api_key"
 					yield* vault.revokeItem(userId, vaultId)
 					yield* authStore
-						.upsert(userId, { method, status: "revoked" })
+						.upsert(userId, {
+							method,
+							status: "revoked",
+							activeVaultId: null,
+							activeVaultVersion: null,
+						})
 						.pipe(Effect.mapError(mapErr))
 				}),
 		}

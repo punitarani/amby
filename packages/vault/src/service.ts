@@ -325,7 +325,14 @@ export const VaultServiceLive = Layer.effect(
 						return yield* new VaultError({ message: `Vault item not found: ${vaultId}` })
 					}
 
-					yield* store.updateItem(vaultId, { status: "revoked" }).pipe(Effect.mapError(mapErr))
+					// Rename itemKey to free the unique (userId, namespace, itemKey) constraint
+					// so a new item can be created with the same key.
+					yield* store
+						.updateItem(vaultId, {
+							status: "revoked",
+							itemKey: `${item.itemKey}:revoked:${vaultId}`,
+						})
+						.pipe(Effect.mapError(mapErr))
 
 					yield* store
 						.insertAccessLog({

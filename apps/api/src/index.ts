@@ -59,10 +59,7 @@ const ServicesLive = Layer.mergeAll(
 	ConnectorsServiceLive,
 	BrowserServiceDisabledLive,
 	TelegramReplySenderLive,
-).pipe(
-	Layer.provideMerge(VaultLive),
-	Layer.provideMerge(AttachmentLive),
-)
+).pipe(Layer.provideMerge(VaultLive), Layer.provideMerge(AttachmentLive))
 
 const SharedLive = PluginRegistryLive.pipe(Layer.provideMerge(ServicesLive))
 
