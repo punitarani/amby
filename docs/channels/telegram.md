@@ -261,7 +261,14 @@ There are two main outbound styles:
 - command replies via `TelegramSender`
 - workflow replies via `ReplySender`
 
-Long final text responses are split with `splitTelegramMessage(...)` to fit Telegram's 4096-character message limit. Images go through `sendPhoto`, documents go through `sendDocument`, and unsupported outbound files fall back to signed attachment URLs.
+Outbound text is normalized through `renderTelegramMarkdownChunks(...)` before it touches the Bot API. This keeps markdown-ish assistant output compatible with Telegram by:
+
+- converting rich text to Telegram HTML parse mode (`<b>`, `<i>`, `<code>`, `<pre>`, `<a>`, `<blockquote>`)
+- turning markdown lists into readable plain-text list lines
+- turning markdown tables into ASCII tables inside `<pre>`
+- splitting long rendered messages into Telegram-safe chunks without leaving formatting tags unbalanced
+
+Images go through `sendPhoto`, documents go through `sendDocument`, and unsupported outbound files fall back to signed attachment URLs.
 
 A single typing indicator is sent at workflow start. The final response is delivered via `postText`, which splits at Telegram's 4096-character limit when needed. Attachment parts are sent after the text reply via `sendParts`.
 

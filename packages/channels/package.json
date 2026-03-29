@@ -25,6 +25,8 @@
 		"@chat-adapter/state-memory": "^4.20.2",
 		"@chat-adapter/telegram": "^4.20.2",
 		"chat": "^4.20.2",
+		"micromark": "^4.0.2",
+		"micromark-extension-gfm": "^3.0.0",
 		"posthog-node": "^4.0.1"
 	},
 	"peerDependencies": {

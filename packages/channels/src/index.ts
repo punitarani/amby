@@ -1,6 +1,12 @@
 export { createAmbyBot } from "./telegram/bot"
 export { type ChatSdkDeps, getOrCreateChat } from "./telegram/chat-sdk"
 export {
+	renderTelegramMarkdownChunks,
+	renderTelegramMarkdownToHtml,
+	splitTelegramHtml,
+	type TelegramRenderedChunk,
+} from "./telegram/render-markdown"
+export {
 	TelegramReplySenderLive,
 	TelegramSender,
 	TelegramSenderLite,

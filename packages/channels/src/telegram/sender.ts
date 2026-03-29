@@ -3,7 +3,7 @@ import type { ConversationMessagePart, ReplySenderService, ReplyTarget } from "@
 import { ReplySender } from "@amby/core"
 import { EnvService } from "@amby/env"
 import { Context, Effect, Layer, Runtime } from "effect"
-import { splitTelegramMessage } from "./utils"
+import { renderTelegramMarkdownChunks } from "./render-markdown"
 
 // --- TelegramSender Effect Service ---
 
@@ -44,9 +44,9 @@ function makeTelegramApi(env: { TELEGRAM_BOT_TOKEN: string; TELEGRAM_API_BASE_UR
 	}
 
 	return {
-		sendMessage: async (chatId: number, text: string) =>
+		sendMessage: async (chatId: number, text: string, parseMode?: "HTML") =>
 			await request<{ message_id: number }>("sendMessage", {
-				json: { chat_id: chatId, text },
+				json: { chat_id: chatId, text, ...(parseMode ? { parse_mode: parseMode } : {}) },
 			}),
 		sendChatAction: async (chatId: number, action: string) =>
 			await request("sendChatAction", { json: { chat_id: chatId, action } }),
@@ -72,8 +72,10 @@ function buildTelegramSenderService(env: {
 	const api = makeTelegramApi(env)
 	return {
 		sendMessage: async (chatId: number, text: string) => {
-			for (const chunk of splitTelegramMessage(text)) {
-				await api.sendMessage(chatId, chunk)
+			const renderedChunks = renderTelegramMarkdownChunks(text)
+			if (renderedChunks.length === 0) return
+			for (const chunk of renderedChunks) {
+				await api.sendMessage(chatId, chunk.text, chunk.parseMode)
 			}
 		},
 		startTyping: async (chatId: number) => {
@@ -141,16 +143,20 @@ export const TelegramReplySenderLive = Layer.effect(
 				).then(() => undefined),
 			postText: async (target: ReplyTarget, text: string) => {
 				if (target.channel !== "telegram") return
-				for (const chunk of splitTelegramMessage(text)) {
-					await api.sendMessage(target.chatId, chunk)
+				const renderedChunks = renderTelegramMarkdownChunks(text)
+				if (renderedChunks.length === 0) return
+				for (const chunk of renderedChunks) {
+					await api.sendMessage(target.chatId, chunk.text, chunk.parseMode)
 				}
 			},
 			sendParts: async (target: ReplyTarget, parts: ReadonlyArray<ConversationMessagePart>) => {
 				if (target.channel !== "telegram") return
 				for (const part of parts) {
 					if (part.type === "text") {
-						for (const chunk of splitTelegramMessage(part.text)) {
-							await api.sendMessage(target.chatId, chunk)
+						const renderedChunks = renderTelegramMarkdownChunks(part.text)
+						if (renderedChunks.length === 0) continue
+						for (const chunk of renderedChunks) {
+							await api.sendMessage(target.chatId, chunk.text, chunk.parseMode)
 						}
 						continue
 					}
