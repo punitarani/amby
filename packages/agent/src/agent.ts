@@ -27,7 +27,7 @@ import {
 import { initializeTelemetry, shutdownTelemetry, withTelemetryFlush } from "./telemetry"
 import { createCodexAuthTools } from "./tools/codex-auth"
 import { createTimezoneTools } from "./tools/settings"
-import type { AgentRunResult, StreamPart } from "./types/agent"
+import type { AgentRunResult } from "./types/agent"
 
 export class ConversationRuntime extends Context.Tag("ConversationRuntime")<
 	ConversationRuntime,
@@ -37,33 +37,28 @@ export class ConversationRuntime extends Context.Tag("ConversationRuntime")<
 			message: StructuredUserMessage,
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
-			onTextDelta?: (text: string) => void,
+			shouldContinue?: () => Promise<boolean>,
 		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly handleStructuredBatch: (
 			conversationId: string,
 			messages: ReadonlyArray<StructuredUserMessage>,
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
-			onTextDelta?: (text: string) => void,
+			shouldContinue?: () => Promise<boolean>,
 		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly handleMessage: (
 			conversationId: string,
 			content: string,
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
-			onTextDelta?: (text: string) => void,
+			shouldContinue?: () => Promise<boolean>,
 		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly handleBatchedMessages: (
 			conversationId: string,
 			messages: string[],
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
-			onTextDelta?: (text: string) => void,
-		) => Effect.Effect<AgentRunResult, AgentError>
-		readonly streamMessage: (
-			conversationId: string,
-			content: string,
-			onPart: (part: StreamPart) => void,
+			shouldContinue?: () => Promise<boolean>,
 		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly ensureConversation: (
 			platform: Platform,
@@ -164,7 +159,7 @@ export const makeConversationRuntimeLive = (userId: string) =>
 
 			const runTurn = (params: {
 				conversationId: string
-				mode: "message" | "batched-message" | "stream-message"
+				mode: "message" | "batched-message"
 				requestMessages: ReadonlyArray<{
 					role: "user"
 					contentText: string
@@ -172,8 +167,7 @@ export const makeConversationRuntimeLive = (userId: string) =>
 				}>
 				metadata?: Record<string, unknown>
 				onReply?: ReplyFn
-				onTextDelta?: (text: string) => void
-				onPart?: (part: StreamPart) => void
+				shouldContinue?: () => Promise<boolean>
 			}) => withTelemetryFlush(handleTurn(makeEngineConfig(params.conversationId), params))
 
 			const toStructuredMessage = (content: string): StructuredUserMessage => ({
@@ -182,37 +176,37 @@ export const makeConversationRuntimeLive = (userId: string) =>
 			})
 
 			return {
-				handleStructuredMessage: (conversationId, message, metadata, onReply, onTextDelta) =>
+				handleStructuredMessage: (conversationId, message, metadata, onReply, shouldContinue) =>
 					runTurn({
 						conversationId,
 						mode: "message",
 						requestMessages: [{ role: "user", ...message }],
 						metadata,
 						onReply,
-						onTextDelta,
+						shouldContinue,
 					}),
 
-				handleStructuredBatch: (conversationId, messages, metadata, onReply, onTextDelta) =>
+				handleStructuredBatch: (conversationId, messages, metadata, onReply, shouldContinue) =>
 					runTurn({
 						conversationId,
 						mode: "batched-message",
 						requestMessages: messages.map((message) => ({ role: "user" as const, ...message })),
 						metadata,
 						onReply,
-						onTextDelta,
+						shouldContinue,
 					}),
 
-				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>
+				handleMessage: (conversationId, content, metadata, onReply, shouldContinue) =>
 					runTurn({
 						conversationId,
 						mode: "message",
 						requestMessages: [{ role: "user", ...toStructuredMessage(content) }],
 						metadata,
 						onReply,
-						onTextDelta,
+						shouldContinue,
 					}),
 
-				handleBatchedMessages: (conversationId, messages, metadata, onReply, onTextDelta) =>
+				handleBatchedMessages: (conversationId, messages, metadata, onReply, shouldContinue) =>
 					runTurn({
 						conversationId,
 						mode: "batched-message",
@@ -222,15 +216,7 @@ export const makeConversationRuntimeLive = (userId: string) =>
 						})),
 						metadata,
 						onReply,
-						onTextDelta,
-					}),
-
-				streamMessage: (conversationId, content, onPart) =>
-					runTurn({
-						conversationId,
-						mode: "stream-message",
-						requestMessages: [{ role: "user", ...toStructuredMessage(content) }],
-						onPart,
+						shouldContinue,
 					}),
 
 				ensureConversation: (platform, externalConversationKey) =>

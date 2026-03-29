@@ -22,6 +22,5 @@ export {
 	type TelegramFrom,
 	type TelegramMessage,
 	type TelegramPhotoSize,
-	type TelegramQueueMessage,
 	type TelegramUpdate,
 } from "./telegram/utils"

@@ -1,15 +1,9 @@
-import { TELEGRAM_RELINK_REQUIRED_MESSAGE } from "@amby/auth"
 import type { WorkerBindings } from "@amby/env/workers"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat, type StateAdapter } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
 import type { TelegramFrom, TelegramMessage } from "./utils"
-import {
-	buildBufferedTelegramMessage,
-	handleCommand,
-	parseTelegramCommand,
-	resolveTelegramUser,
-} from "./utils"
+import { buildBufferedTelegramMessage, handleCommand, parseTelegramCommand } from "./utils"
 
 export interface ChatSdkDeps {
 	// biome-ignore lint/suspicious/noExplicitAny: Runtime type parameters vary by caller; correctness verified at the call site
@@ -51,12 +45,12 @@ export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps, state: S
 
 	chat.onNewMention(async (thread, message) => {
 		await thread.subscribe()
-		await routeIncomingMessage(env, adapter, message)
+		await routeIncomingMessage(env, message)
 	})
 
 	chat.onSubscribedMessage(async (_thread, message) => {
 		if (message.author.isMe) return
-		await routeIncomingMessage(env, adapter, message)
+		await routeIncomingMessage(env, message)
 	})
 
 	_chat = chat
@@ -65,7 +59,6 @@ export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps, state: S
 
 async function routeIncomingMessage(
 	env: WorkerBindings,
-	adapter: ReturnType<typeof createTelegramAdapter>,
 	message: Parameters<Parameters<Chat["onNewMention"]>[0]>[1],
 ) {
 	if (!_deps) throw new Error("[ChatSDK] getOrCreateChat must be called before routing messages")
@@ -115,18 +108,14 @@ async function routeIncomingMessage(
 	const bufferedMessage = buildBufferedTelegramMessage(raw)
 	if (!bufferedMessage) return
 
-	const identityRuntime = deps.makeRuntimeForConsumer(env)
-	try {
-		const resolvedUser = await identityRuntime.runPromise(resolveTelegramUser(from, chatId))
-		if (resolvedUser.status === "blocked") {
-			await adapter.postMessage(String(chatId), TELEGRAM_RELINK_REQUIRED_MESSAGE).catch(() => {})
-			return
-		}
-	} finally {
-		await identityRuntime.dispose()
-	}
+	// No identity check here — resolved in the workflow's resolve-user step.
+	deps.setTelegramScope({
+		component: "chat-sdk.ingest",
+		chatId,
+		from,
+		attributes: { ingest_received_at: Date.now() },
+	})
 
-	// Text messages: route to ConversationSession DO for debouncing
 	const doBinding = env.CONVERSATION_SESSION
 	if (!doBinding) {
 		console.error("[ChatSDK] CONVERSATION_SESSION binding not available")

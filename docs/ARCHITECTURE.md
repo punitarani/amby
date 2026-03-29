@@ -74,7 +74,7 @@ graph BT
 - **Effect.js service tags for DI** — packages expose services as Effect layers; apps compose them at the edge
 - **Parse at the boundary** — Telegram webhooks, API responses, LLM tool output are all parsed into typed domain objects at entry
 - **Compute persistence is volume-based** — Daytona sandboxes are disposable; user state lives on persistent volumes
-- **Durable execution** — long-running work uses Cloudflare Workflows, Durable Objects, and Queues; not transient LLM calls
+- **Durable execution** — long-running work uses Cloudflare Workflows and Durable Objects; not transient LLM calls
 - **Plugins are the extension boundary** — integrations (Composio), browser tools, computer tools, and automations are registered via `PluginRegistry` in `@amby/plugins`
 - **Conversation turns are structured** — `messages.content` stays compact for routing and human readability, while `messages.partsJson` stores ordered text and attachment refs
 
@@ -93,9 +93,9 @@ What must **not** cross boundaries:
 ```mermaid
 flowchart LR
     TG[Telegram] --> WH[Webhook Handler]
-    WH --> Q[Queue]
-    Q --> DO[Durable Object]
-    DO --> WF[Workflow]
+    WH --> SDK[Chat SDK]
+    SDK --> DO[ConversationSession DO]
+    DO --> WF[AgentExecutionWorkflow]
     WF --> Attach["@amby/attachments"]
     Attach --> Agent["@amby/agent"]
     Agent --> Sender["ReplySender"]
@@ -103,9 +103,9 @@ flowchart LR
 ```
 
 1. Telegram webhook hits Cloudflare Worker
-2. Queue decouples inbound delivery from processing
-3. Durable Object buffers and debounces per-chat structured messages
-4. Workflow resolves users, ingests attachments into private storage, and runs the agent durably
+2. Chat SDK parses the update and routes it to the ConversationSession DO
+3. DO buffers messages with adaptive debounce (800ms–1.5s), then starts a workflow with an execution token
+4. Workflow resolves users, claims outbound gate, ingests attachments, and runs the agent durably
 5. Agent consumes compact routing text plus current-turn attachment parts
 6. Replies go back through a channel sender that can emit text, photos, documents, or signed download links
 

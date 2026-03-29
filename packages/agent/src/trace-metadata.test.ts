@@ -34,7 +34,6 @@ const config: AgentRunConfig = {
 		sandboxEnabled: true,
 		cuaEnabled: false,
 		integrationEnabled: false,
-		streamingEnabled: false,
 		browserEnabled: true,
 	},
 	policy: {

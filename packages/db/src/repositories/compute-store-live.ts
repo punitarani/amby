@@ -1,6 +1,6 @@
 import type { ComputeStoreService, ComputeVolume } from "@amby/core"
 import { ComputeStore } from "@amby/core"
-import { and, eq, lte, ne } from "drizzle-orm"
+import { and, eq, isNull, lte, ne, or } from "drizzle-orm"
 import { Effect, Layer } from "effect"
 import * as schema from "../schema"
 import { DbService } from "../service"
@@ -90,7 +90,10 @@ export const ComputeStoreLive = Layer.effect(
 								ne(schema.computeInstances.status, "running"),
 								ne(schema.computeInstances.status, "stopped"),
 								ne(schema.computeInstances.status, "archived"),
-								lte(schema.computeInstances.updatedAt, throttleCutoff),
+								or(
+									lte(schema.computeInstances.updatedAt, throttleCutoff),
+									isNull(schema.computeInstances.externalInstanceId),
+								),
 							),
 						)
 						.returning({ id: schema.computeInstances.id })

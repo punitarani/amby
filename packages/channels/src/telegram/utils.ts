@@ -68,11 +68,6 @@ export interface TelegramUpdate {
 	message?: TelegramMessage
 }
 
-export interface TelegramQueueMessage {
-	update: TelegramUpdate
-	receivedAt: number
-}
-
 export type BufferedMessage = BufferedInboundMessage
 
 export const TELEGRAM_COMMANDS = ["/start", "/stop", "/help"] as const

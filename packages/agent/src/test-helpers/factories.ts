@@ -69,7 +69,6 @@ export function makeAgentRunConfig(overrides?: Partial<AgentRunConfig>): AgentRu
 			sandboxEnabled: true,
 			cuaEnabled: false,
 			integrationEnabled: false,
-			streamingEnabled: false,
 			browserEnabled: true,
 			...overrides?.runtime,
 		},

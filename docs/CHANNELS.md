@@ -12,48 +12,45 @@ type Platform = "telegram"
 
 Only **Telegram** is implemented today. New platform values will be added when additional channels are built.
 
-## Telegram inbound flow
+## Telegram message flow (Worker)
 
 ```mermaid
 sequenceDiagram
     participant TG as Telegram
-    participant WH as Webhook (POST /telegram/webhook)
-    participant CA as @chat-adapter/telegram
-    participant Bot as bot.ts handler
-    participant Auth as TelegramIdentityService
-    participant DB as Database
-    participant Agent as AgentService
+    participant WH as Webhook (Hono)
+    participant SDK as Chat SDK
+    participant DO as ConversationSession DO
+    participant WF as AgentExecutionWorkflow
+    participant AG as Agent Engine
 
-    TG->>WH: Update JSON
-    WH->>CA: verify secret, parse update
-    CA->>Bot: onNewMention / onSubscribedMessage
-    Bot->>Bot: parseTelegramCommand (check /start, /stop, /help)
-    Bot->>Auth: resolveTelegramUser(from, chatId)
-    Auth->>DB: provision/update users + accounts
-    DB-->>Auth: userId or blocked
-    Auth-->>Bot: provision result
-    Bot->>Agent: ensureConversation("telegram", chatId)
-    Agent-->>Bot: conversationId
-    Bot->>Agent: handleMessage(conversationId, text, metadata, sendReply)
-    Agent-->>Bot: response
-    Bot->>CA: thread.post(response.text)
-    CA->>TG: sendMessage via Bot API
+    TG->>WH: POST /telegram/webhook
+    WH->>SDK: routeIncomingMessage(...)
+    SDK->>DO: ingestMessage(chatId, message, from)
+    Note over DO: adaptive debounce 800ms–1.5s
+    DO-->>DO: alarm fires
+    Note over DO: assign executionToken, move buffer to inFlightMessages
+    DO->>WF: create(chatId, inFlightMessages, executionToken)
+
+    WF->>WF: resolve-user step (findOrCreateUser)
+    WF->>TG: startTyping (single pulse)
+    WF->>AG: handleStructuredMessage/Batch (shouldContinue)
+    AG-->>AG: run tool loop
+
+    AG->>DO: claimFirstOutbound(executionToken)
+    alt superseded
+        DO-->>AG: allowed=false
+        AG-->>WF: status=cancelled, no DB write
+    else normal
+        DO-->>AG: allowed=true
+        AG->>AG: persist messages to DB
+        AG-->>WF: AgentRunResult
+        WF->>TG: postText(finalResponse)
+    end
+
+    WF->>DO: completeExecution(executionToken)
 ```
 
-## Telegram outbound flow
-
-```mermaid
-sequenceDiagram
-    participant Agent as AgentService
-    participant Bot as bot.ts handler
-    participant CA as @chat-adapter/telegram
-    participant TG as Telegram Bot API
-
-    Agent->>Bot: response / streaming callback
-    Bot->>CA: thread.post(text)
-    CA->>TG: sendMessage
-    Note over CA,TG: Streaming uses editMessageText for progressive updates
-```
+Commands (`/start`, `/stop`, `/help`) are handled inline by the Chat SDK without the DO or workflow.
 
 ## Identity mapping
 

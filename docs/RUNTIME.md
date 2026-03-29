@@ -8,27 +8,46 @@ How a user message becomes an agent response.
 sequenceDiagram
     participant TG as Telegram
     participant WH as Webhook (Hono)
-    participant Q as Queue
+    participant SDK as Chat SDK
     participant DO as ConversationSession DO
     participant WF as AgentExecutionWorkflow
-    participant AG as AgentService
-    participant TG2 as Telegram
+    participant AG as Agent Engine
 
     TG->>WH: POST /telegram/webhook
-    WH->>Q: enqueue message
-    Q->>DO: ingestMessage(chatId)
-    Note over DO: debounce 3s, buffer messages
-    DO->>WF: create(chatId, messages, from)
-    WF->>WF: resolve user (findOrCreateUser)
-    WF->>WF: ingest attachments (AttachmentService)
-    WF->>AG: handleStructuredMessage / handleStructuredBatch
-    AG->>AG: resolveThread
-    AG->>AG: resolveModelMessageContent (current turn)
-    AG->>AG: handleTurn (ToolLoopAgent)
-    AG-->>WF: AgentRunResult (text + attachment parts)
-    WF->>TG2: delete streaming draft + post final text
-    WF->>TG2: sendParts (photos, documents, signed links)
-    WF->>DO: completeExecution(userId, conversationId)
+    WH->>SDK: routeIncomingMessage(...)
+    SDK->>DO: ingestMessage(chatId, message, from)
+    Note over DO: adaptive debounce 800ms–1.5s
+    DO-->>DO: alarm fires
+    Note over DO: assign executionToken, move buffer to inFlightMessages
+    DO->>WF: create(chatId, inFlightMessages, executionToken)
+
+    WF->>WF: resolve-user step (findOrCreateUser)
+    WF->>TG: startTyping (single pulse)
+    WF->>AG: handleStructuredMessage/Batch (shouldContinue)
+    AG-->>AG: run tool loop
+
+    AG->>DO: claimFirstOutbound(executionToken)
+    alt superseded
+        DO-->>AG: allowed=false
+        AG-->>WF: status=cancelled, no DB write
+    else normal
+        DO-->>AG: allowed=true
+        AG->>AG: persist messages to DB
+        AG-->>WF: AgentRunResult
+        WF->>TG: postText(finalResponse)
+    end
+
+    WF->>DO: completeExecution(executionToken)
+    alt superseded
+        DO-->>DO: merge inFlight+buffer, scheduleDebounce(rerun)
+        DO-->>WF: accepted=true, shouldRerun=true
+    else follow-ups buffered
+        DO-->>DO: scheduleDebounce(normal)
+        DO-->>WF: accepted=true, shouldRerun=false
+    else idle
+        DO-->>DO: status=idle
+        DO-->>WF: accepted=true, shouldRerun=false
+    end
 ```
 
 ## Durable Object: ConversationSession
@@ -36,11 +55,13 @@ sequenceDiagram
 One instance per Telegram chat. Provides:
 
 - **Message buffering** -- collects rapid-fire messages into a batch
-- **Debounce** -- 3s idle timer (1s when resuming after a completed run)
-- **Single-flight execution** -- only one active workflow per chat
-- **Interrupt forwarding** -- messages arriving during execution are sent as workflow events
+- **Adaptive debounce** -- 800ms base, +400ms per additional message, 1500ms cap, 250ms rerun debounce
+- **Single-flight execution** -- only one active workflow per chat; assigns an execution token on start
+- **Mid-run buffering** -- messages arriving during execution are buffered for the next turn or trigger supersession
 
 States: `idle` -> `debouncing` -> `processing` -> `idle`
+
+Ingress: `worker.ts` -> `chat-sdk.ts` -> DO via direct webhook (no queue).
 
 ## AgentExecutionWorkflow
 
@@ -48,13 +69,19 @@ Cloudflare Workflow with durable steps and retry:
 
 | Step | What it does |
 |------|-------------|
-| `resolve-user` | Map Telegram identity to DB user via `findOrCreateUser` |
-| `agent-loop` | Ingest attachments, run ConversationRuntime with structured messages, stream reply, deliver final parts (retries: 3, backoff: exponential, timeout: 5 min) |
-| `complete` | Notify DO that execution finished |
+| `resolve-user` | Map Telegram identity to DB user via `findOrCreateUser` (identity resolution happens here, not pre-DO) |
+| `agent-loop` | Ingest attachments, run ConversationRuntime with structured messages, deliver final response (retries: 3, backoff: exponential, timeout: 5 min) |
+| `complete` | Notify DO that execution finished via `completeExecution(executionToken)` |
 
-The `agent-loop` step handles attachment ingest (`AttachmentService.ingestBufferedMessages`), calls `handleStructuredMessage` / `handleStructuredBatch` on the agent, and sends final reply parts through `ReplySender`.
+The DO assigns an **execution token** when starting a workflow. The workflow must call `claimFirstOutbound(executionToken)` before any visible send or DB persistence. This prevents stale output from a superseded run and stale history from leaking into subsequent turns.
 
-Streaming: posts first chunk, then edits every 500ms. The streaming preview is capped at 4090 characters. On finalization, the streaming draft is deleted and the final response is posted fresh (which splits at Telegram's 4096-character limit when needed). Attachment parts are sent after the text reply via `sendParts`.
+The `agent-loop` step sends a single typing pulse, ingests attachments (`AttachmentService.ingestBufferedMessages`), calls `handleStructuredMessage` / `handleStructuredBatch` on the agent (passing `ensureOutbound` as a callback), and sends the final text + attachment parts through `ReplySender`.
+
+**Supersession:** when a user sends a correction (prefix-matched: "wait", "actually", "sorry", "i meant", "ignore that", "correction", "to clarify", "instead") before the first outbound is claimed, the current run is superseded. On completion, in-flight messages and the buffer are merged for a rerun with a 250ms debounce.
+
+**Persistence checkpoint:** the engine calls `shouldContinue` before persisting messages. If denied (superseded), a `cancelled` `AgentRunResult` is returned with no DB writes.
+
+**Delivery:** a single typing indicator is sent at workflow start. The final response is posted via `postText` (split at Telegram's 4096-character limit when needed). Attachment parts are sent after the text reply via `sendParts`. After first outbound is claimed, delivery errors are caught and logged but not rethrown (prevents step retries from duplicating visible output).
 
 ## Thread routing
 
@@ -107,7 +134,7 @@ The conversation agent is a `ToolLoopAgent` (Vercel AI SDK):
   - `query_execution` -- inspect running/completed tasks
 - **Step gate:** after `execute_plan` or `query_execution` fires, all tools are disabled (forces the agent to synthesize)
 
-Streaming: when enabled, text deltas are forwarded to the workflow for live Telegram edits.
+The engine calls `shouldContinue` before persisting; if the callback returns false (superseded), it returns a `cancelled` result without DB writes.
 
 ## Execution planner
 
@@ -169,9 +196,15 @@ Providers: `internal` | `stagehand` | `codex`
 - **Run** = one LLM coordination pass (one ToolLoopAgent invocation)
 - **Task** = durable work unit dispatched to a specialist runner
 
+## Workflow outcomes
+
+A workflow run ends as one of: `completed`, `failed`, `cancelled` (superseded by a correction before first outbound was claimed).
+
 ## Key runtime invariants
 
-- One active workflow per chat (enforced by DO)
+- One active workflow per chat (enforced by DO with execution token)
+- Workflow must `claimFirstOutbound` before any visible send or DB persistence
+- `shouldContinue` is checked before persisting messages; superseded runs write nothing
 - Thread routing runs before every agent turn
 - Context is rebuilt fresh each turn (no stale prompt caching)
 - `execute_plan` can fire at most once per conversation turn
