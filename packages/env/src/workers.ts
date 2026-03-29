@@ -111,6 +111,7 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		CARTESIA_API_KEY: bindings.CARTESIA_API_KEY ?? "",
 
 		// Cloudflare AI Gateway
+		CLOUDFLARE_AI_GATEWAY_ID: bindings.CLOUDFLARE_AI_GATEWAY_ID,
 		CLOUDFLARE_AI_GATEWAY_BASE_URL: bindings.CLOUDFLARE_AI_GATEWAY_BASE_URL,
 		CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: bindings.CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN,
 

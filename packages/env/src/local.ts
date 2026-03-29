@@ -23,6 +23,7 @@ const EnvConfig = Config.all({
 	CARTESIA_API_KEY: Config.redacted("CARTESIA_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
 
 	// Cloudflare AI Gateway
+	CLOUDFLARE_AI_GATEWAY_ID: Config.string("CLOUDFLARE_AI_GATEWAY_ID").pipe(Config.withDefault("")),
 	CLOUDFLARE_AI_GATEWAY_BASE_URL: Config.string("CLOUDFLARE_AI_GATEWAY_BASE_URL").pipe(
 		Config.withDefault(""),
 	),
@@ -129,6 +130,7 @@ export const EnvServiceLive = Layer.effect(
 			CARTESIA_API_KEY: Redacted.value(raw.CARTESIA_API_KEY),
 
 			// Cloudflare AI Gateway
+			CLOUDFLARE_AI_GATEWAY_ID: raw.CLOUDFLARE_AI_GATEWAY_ID,
 			CLOUDFLARE_AI_GATEWAY_BASE_URL: raw.CLOUDFLARE_AI_GATEWAY_BASE_URL,
 			CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: Redacted.value(raw.CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN),
 

@@ -58,6 +58,7 @@ export interface Env {
 	readonly CARTESIA_API_KEY: string
 
 	// Cloudflare AI Gateway
+	readonly CLOUDFLARE_AI_GATEWAY_ID: string
 	readonly CLOUDFLARE_AI_GATEWAY_BASE_URL: string
 	readonly CLOUDFLARE_AI_GATEWAY_AUTH_TOKEN: string
 
