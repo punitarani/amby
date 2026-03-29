@@ -7,7 +7,7 @@ export interface CodexApiKeyPayload {
 export interface CodexChatgptHomePayload {
 	schemaVersion: 1
 	method: "chatgpt"
-	archiveFormat: "tar.gz"
+	archiveFormat: "json" | "tar.gz"
 	archiveBase64: string
 	capturedAt: string // ISO timestamp
 }

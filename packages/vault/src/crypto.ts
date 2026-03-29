@@ -74,10 +74,14 @@ export const importKek = (base64Key: string): Promise<CryptoKey> => {
 	return crypto.subtle.importKey("raw", keyData, AES_KW, false, ["wrapKey", "unwrapKey"])
 }
 
-/** Build additional authenticated data for GCM from vault context fields. */
+/** Build additional authenticated data for GCM from vault context fields.
+ *  Uses a canonical delimiter format (not JSON) to guarantee deterministic byte ordering. */
 export const buildAad = (params: {
 	vaultId: string
 	userId: string
 	version: number
 	kind: string
-}): Uint8Array => new TextEncoder().encode(JSON.stringify(params))
+}): Uint8Array =>
+	new TextEncoder().encode(
+		`${params.vaultId}:${params.userId}:${params.version}:${params.kind}`,
+	)

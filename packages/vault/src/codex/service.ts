@@ -148,7 +148,7 @@ export const CodexVaultServiceLive = Layer.effect(
 					const payload = serializeCodexPayload({
 						schemaVersion: 1,
 						method: "chatgpt",
-						archiveFormat: "tar.gz",
+						archiveFormat: "json",
 						archiveBase64,
 						capturedAt: new Date().toISOString(),
 					})

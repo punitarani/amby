@@ -1,3 +1,4 @@
+import type { VaultItemRow, VaultVersionRow } from "@amby/core"
 import { EnvService } from "@amby/env"
 import { Context, Effect, Layer } from "effect"
 import { buildAad, decrypt, encrypt, generateDek, importKek, unwrapDek, wrapDek } from "./crypto"
@@ -71,10 +72,9 @@ export class VaultService extends Context.Tag("VaultService")<
 // Helpers
 // ---------------------------------------------------------------------------
 
-const toBase64 = (data: Uint8Array): string => btoa(String.fromCharCode(...data))
+const toBase64 = (data: Uint8Array): string => Buffer.from(data).toString("base64")
 
-const fromBase64 = (base64: string): Uint8Array =>
-	Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+const fromBase64 = (base64: string): Uint8Array => new Uint8Array(Buffer.from(base64, "base64"))
 
 const mapErr = vaultErrorFrom
 
@@ -82,9 +82,10 @@ const mapErr = vaultErrorFrom
 // types are wider (e.g. `metadataJson: unknown`) than the vault-domain
 // VaultItem / VaultVersion interfaces.  The runtime shapes are identical, so
 // a safe cast bridges the gap without duplicating the Context tag.
-const toItem = (row: unknown): VaultItem => row as VaultItem
-const toItemOrNull = (row: unknown): VaultItem | null => (row ? (row as VaultItem) : null)
-const toVersion = (row: unknown): VaultVersion => row as VaultVersion
+const toItem = (row: VaultItemRow): VaultItem => row as unknown as VaultItem
+const toItemOrNull = (row: VaultItemRow | null): VaultItem | null =>
+	row ? (row as unknown as VaultItem) : null
+const toVersion = (row: VaultVersionRow): VaultVersion => row as unknown as VaultVersion
 
 // ---------------------------------------------------------------------------
 // Live implementation
@@ -96,18 +97,13 @@ export const VaultServiceLive = Layer.effect(
 		const store = yield* VaultStore
 		const env = yield* EnvService
 
-		const kekBase64 = (env as unknown as Record<string, unknown>).VAULT_KEK as
-			| string
-			| undefined
+		const kekBase64 = env.VAULT_KEK
 		if (!kekBase64) {
 			return yield* Effect.fail(
 				new VaultError({ message: "VAULT_KEK environment variable is not set" }),
 			)
 		}
-		const kekVersion = Number(
-			((env as unknown as Record<string, unknown>).VAULT_KEK_VERSION as string | undefined) ??
-				"1",
-		)
+		const kekVersion = env.VAULT_KEK_VERSION
 
 		const kek = yield* Effect.tryPromise({
 			try: () => importKek(kekBase64),
@@ -232,7 +228,7 @@ export const VaultServiceLive = Layer.effect(
 					const existing = yield* store
 						.getItemById(params.vaultId)
 						.pipe(Effect.mapError(mapErr))
-					if (!existing) {
+					if (!existing || existing.userId !== params.userId) {
 						return yield* Effect.fail(
 							new VaultError({ message: `Vault item not found: ${params.vaultId}` }),
 						)
@@ -296,7 +292,7 @@ export const VaultServiceLive = Layer.effect(
 					const item = yield* store
 						.getItemById(params.vaultId)
 						.pipe(Effect.mapError(mapErr))
-					if (!item) {
+					if (!item || item.userId !== params.userId) {
 						return yield* Effect.fail(
 							new VaultError({ message: `Vault item not found: ${params.vaultId}` }),
 						)

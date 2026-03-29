@@ -39,5 +39,28 @@ export const parseCodexPayload = (data: Uint8Array): CodexCredentialPayload => {
 		})
 	}
 
+	if (record.method === "api_key") {
+		if (typeof record.apiKey !== "string" || !record.apiKey) {
+			throw new VaultError({
+				message: "Invalid Codex credential payload: missing apiKey for api_key method",
+			})
+		}
+	}
+
+	if (record.method === "chatgpt") {
+		if (typeof record.archiveBase64 !== "string" || !record.archiveBase64) {
+			throw new VaultError({
+				message:
+					"Invalid Codex credential payload: missing archiveBase64 for chatgpt method",
+			})
+		}
+		if (typeof record.archiveFormat !== "string") {
+			throw new VaultError({
+				message:
+					"Invalid Codex credential payload: missing archiveFormat for chatgpt method",
+			})
+		}
+	}
+
 	return parsed as CodexCredentialPayload
 }
