@@ -72,7 +72,10 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		await this.ctx.storage.put("state", this.state)
 	}
 
-	private mergeBufferedMessages(existing: BufferedMessage, incoming: BufferedMessage): BufferedMessage {
+	private mergeBufferedMessages(
+		existing: BufferedMessage,
+		incoming: BufferedMessage,
+	): BufferedMessage {
 		const existingText = existing.parts.find((part) => part.type === "text")
 		const incomingText = incoming.parts.find((part) => part.type === "text")
 		const textSummary =

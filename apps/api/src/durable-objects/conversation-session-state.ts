@@ -90,7 +90,10 @@ export function createInitialSessionState(): SessionState {
 
 export function getBufferedMessageText(message: BufferedMessage): string {
 	const text = message.parts
-		.filter((part): part is Extract<(typeof message.parts)[number], { type: "text" }> => part.type === "text")
+		.filter(
+			(part): part is Extract<(typeof message.parts)[number], { type: "text" }> =>
+				part.type === "text",
+		)
 		.map((part) => part.text.trim())
 		.filter(Boolean)
 		.join(" ")

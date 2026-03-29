@@ -141,9 +141,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 						}
 					}
 
-					const streamInterval = !isSubAgent
-						? setInterval(() => void flushStream(), 500)
-						: null
+					const streamInterval = !isSubAgent ? setInterval(() => void flushStream(), 500) : null
 					const onTextDelta = !isSubAgent
 						? (delta: string) => {
 								streamedText += delta
