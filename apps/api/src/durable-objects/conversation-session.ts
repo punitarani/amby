@@ -3,15 +3,23 @@ import type { BufferedMessage, TelegramFrom } from "@amby/channels"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { setTelegramScope, setWorkerScope } from "../sentry"
-
-interface SessionState {
-	status: "idle" | "debouncing" | "processing"
-	userId: string | null
-	conversationId: string | null
-	chatId: number
-	buffer: BufferedMessage[]
-	activeWorkflowId: string | null
-}
+import {
+	beginProcessingState,
+	type ClaimFirstOutboundInput,
+	type ClaimFirstOutboundResult,
+	type CompleteExecutionInput,
+	type CompleteExecutionResult,
+	claimFirstOutboundState,
+	completeExecutionState,
+	createInitialSessionState,
+	handleProcessingFollowUpState,
+	resetDebounceState,
+	resetExecutionState,
+	type SessionState,
+	scheduleDebounceState,
+	scheduleWorkflowRetryState,
+	WORKFLOW_CREATE_RETRY_MS,
+} from "./conversation-session-state"
 
 interface IngestPayload {
 	message: BufferedMessage
@@ -21,18 +29,33 @@ interface IngestPayload {
 	from: TelegramFrom
 }
 
-const DEBOUNCE_MS = 3000
-const ACTIVE_DEBOUNCE_MS = 1000
+export type {
+	ClaimFirstOutboundInput,
+	ClaimFirstOutboundReason,
+	ClaimFirstOutboundResult,
+	CompleteExecutionInput,
+	CompleteExecutionResult,
+	ExecutionOutcome,
+	SessionState,
+	SessionStatus,
+	SupersedeReason,
+} from "./conversation-session-state"
+export {
+	computeDebounceDeadline,
+	createInitialSessionState,
+	getBufferedMessageText,
+	INCREMENTAL_DEBOUNCE_MS,
+	INITIAL_DEBOUNCE_MS,
+	MAX_DEBOUNCE_WINDOW_MS,
+	normalizeSupersessionText,
+	RERUN_DEBOUNCE_MS,
+	shouldSupersedeBufferedMessage,
+	shouldSupersedeBufferedText,
+	WORKFLOW_CREATE_RETRY_MS,
+} from "./conversation-session-state"
 
 export class ConversationSession extends DurableObject<WorkerBindings> {
-	private state: SessionState = {
-		status: "idle",
-		userId: null,
-		conversationId: null,
-		chatId: 0,
-		buffer: [],
-		activeWorkflowId: null,
-	}
+	private state: SessionState = createInitialSessionState()
 
 	private hydrated = false
 
@@ -41,22 +64,6 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		const stored = await this.ctx.storage.get<SessionState>("state")
 		if (stored) {
 			this.state = stored
-			// Migrate legacy buffer entries (pre-attachment format)
-			this.state.buffer = this.state.buffer.map((entry) => {
-				const raw = entry as unknown as Record<string, unknown>
-				if ("text" in raw && !("parts" in raw)) {
-					return {
-						sourceMessageId: (raw.messageId as number) ?? 0,
-						date: (raw.date as number) ?? 0,
-						textSummary: (raw.text as string) ?? "",
-						parts: raw.text ? [{ type: "text" as const, text: raw.text as string }] : [],
-						mediaGroupId: null,
-						from: null,
-						rawSource: null,
-					} satisfies BufferedMessage
-				}
-				return entry
-			})
 		}
 		this.hydrated = true
 	}
@@ -65,10 +72,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		await this.ctx.storage.put("state", this.state)
 	}
 
-	private mergeBufferedMessages(
-		existing: BufferedMessage,
-		incoming: BufferedMessage,
-	): BufferedMessage {
+	private mergeBufferedMessages(existing: BufferedMessage, incoming: BufferedMessage): BufferedMessage {
 		const existingText = existing.parts.find((part) => part.type === "text")
 		const incomingText = incoming.parts.find((part) => part.type === "text")
 		const textSummary =
@@ -79,6 +83,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		const incomingRawIds = Array.isArray(incoming.rawSource?.messageIds)
 			? incoming.rawSource.messageIds
 			: [incoming.sourceMessageId]
+
 		return {
 			sourceMessageId: existing.sourceMessageId,
 			date: Math.min(existing.date, incoming.date),
@@ -93,8 +98,22 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		}
 	}
 
+	private async scheduleDebounce(now: number, options?: { rerun?: boolean }) {
+		const deadline = scheduleDebounceState(this.state, now, options)
+		await this.ctx.storage.setAlarm(deadline)
+	}
+
+	private async scheduleWorkflowRetry(now: number) {
+		const deadline = scheduleWorkflowRetryState(this.state, now)
+		await this.ctx.storage.setAlarm(deadline)
+	}
+
 	async ingestMessage(payload: IngestPayload): Promise<void> {
 		await this.hydrate()
+
+		const now = Date.now()
+		this.state.lastBufferedAt = now
+
 		setTelegramScope({
 			component: "conversation-session.ingest",
 			chatId: payload.chatId,
@@ -105,67 +124,49 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 				telegram_message_id: payload.messageId,
 				buffered_message_count: this.state.buffer.length + 1,
 				session_status: this.state.status,
+				buffer_started_at: this.state.bufferStartedAt ?? undefined,
+				debounce_deadline_at: this.state.debounceDeadlineAt ?? undefined,
+				in_flight_message_count: this.state.inFlightMessages.length,
+				first_outbound_claimed_at: this.state.firstOutboundClaimedAt ?? undefined,
+				superseded_at: this.state.supersededAt ?? undefined,
+				mid_run_followup_count: this.state.midRunFollowupCount,
 			},
 		})
 
-		// Initialize chatId on first message
 		if (this.state.chatId === 0) {
 			this.state.chatId = payload.chatId
 		}
 
-		// Always store from info so the workflow can re-resolve the user if needed
 		await this.ctx.storage.put("pendingFrom", payload.from)
 
-		// Buffer the message
 		const lastBuffered = this.state.buffer.at(-1)
-		if (
+		const bufferedMessage =
 			lastBuffered?.mediaGroupId &&
 			payload.message.mediaGroupId &&
 			lastBuffered.mediaGroupId === payload.message.mediaGroupId
-		) {
-			this.state.buffer[this.state.buffer.length - 1] = this.mergeBufferedMessages(
-				lastBuffered,
-				payload.message,
-			)
-		} else {
+				? this.mergeBufferedMessages(lastBuffered, payload.message)
+				: payload.message
+
+		if (bufferedMessage === payload.message) {
 			this.state.buffer.push(payload.message)
+		} else {
+			this.state.buffer[this.state.buffer.length - 1] = bufferedMessage
 		}
 
 		if (this.state.status === "processing") {
-			// Agent is already running — forward as interrupt to the active workflow
-			if (this.state.activeWorkflowId && this.env.AGENT_WORKFLOW) {
-				try {
-					const instance = await this.env.AGENT_WORKFLOW.get(this.state.activeWorkflowId)
-					await Sentry.startSpan(
-						{
-							op: "workflow.event",
-							name: "AgentExecutionWorkflow.sendEvent",
-						},
-						async () => {
-							await instance.sendEvent({
-								type: "user-message",
-								payload: { message: payload.message, messageId: payload.messageId },
-							})
-						},
-					)
-				} catch (err) {
-					Sentry.captureException(err)
-					console.error("[DO] Failed to send event to workflow:", err)
-				}
-			}
+			handleProcessingFollowUpState(this.state, bufferedMessage, now)
 			await this.persist()
 			return
 		}
 
-		// Set or reset the debounce alarm
-		this.state.status = "debouncing"
-		await this.ctx.storage.setAlarm(Date.now() + DEBOUNCE_MS)
+		await this.scheduleDebounce(now)
 		await this.persist()
 	}
 
 	async alarm(): Promise<void> {
 		await this.hydrate()
 		const pendingFrom = await this.ctx.storage.get<TelegramFrom>("pendingFrom")
+
 		if (this.state.chatId) {
 			setTelegramScope({
 				component: "conversation-session.alarm",
@@ -176,35 +177,44 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 				attributes: {
 					buffered_message_count: this.state.buffer.length,
 					session_status: this.state.status,
+					buffer_started_at: this.state.bufferStartedAt ?? undefined,
+					debounce_deadline_at: this.state.debounceDeadlineAt ?? undefined,
+					in_flight_message_count: this.state.inFlightMessages.length,
 				},
 			})
 		} else {
 			setWorkerScope("conversation-session.alarm", {
 				buffered_message_count: this.state.buffer.length,
 				session_status: this.state.status,
+				buffer_started_at: this.state.bufferStartedAt ?? undefined,
+				debounce_deadline_at: this.state.debounceDeadlineAt ?? undefined,
+				in_flight_message_count: this.state.inFlightMessages.length,
 			})
+		}
+
+		if (this.state.status !== "debouncing") {
+			return
 		}
 
 		if (this.state.buffer.length === 0) {
 			this.state.status = "idle"
+			resetDebounceState(this.state)
 			await this.persist()
 			return
 		}
 
-		// Resolve userId if not yet resolved
-		if (!this.state.userId) {
-			if (pendingFrom) {
-				// userId resolution requires Effect runtime — we'll do it in the workflow
-				// For now, store the from data and let the workflow resolve it
-			}
-		}
-
-		// Drain the buffer
 		const messages = [...this.state.buffer]
-		this.state.buffer = []
-		this.state.status = "processing"
+		const executionToken = crypto.randomUUID()
+		const executionStartedAt = Date.now()
 
-		// Launch the workflow
+		beginProcessingState({
+			state: this.state,
+			messages,
+			executionToken,
+			now: executionStartedAt,
+		})
+		await this.persist()
+
 		const workflow = this.env.AGENT_WORKFLOW
 		if (workflow) {
 			try {
@@ -218,9 +228,11 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 							id: crypto.randomUUID(),
 							params: {
 								chatId: this.state.chatId,
-								messages,
+								messages: this.state.inFlightMessages,
 								userId: this.state.userId,
 								from: pendingFrom ?? null,
+								conversationId: this.state.conversationId,
+								executionToken,
 							},
 						}),
 				)
@@ -229,49 +241,60 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 					telegram_chat_id: this.state.chatId,
 					buffered_message_count: messages.length,
 					workflow_id: instance.id,
+					execution_token: executionToken,
+					execution_started_at: executionStartedAt,
 				})
+				await this.persist()
+				return
 			} catch (err) {
 				Sentry.captureException(err)
 				console.error("[DO] Failed to launch workflow:", err)
-				// Put messages back in buffer and retry
-				this.state.buffer = [...messages, ...this.state.buffer]
-				this.state.status = "idle"
-				await this.ctx.storage.setAlarm(Date.now() + 5000)
 			}
 		} else {
 			console.error("[DO] AGENT_WORKFLOW binding not available")
-			this.state.status = "idle"
 		}
 
+		this.state.buffer = [...this.state.inFlightMessages, ...this.state.buffer]
+		this.state.status = "idle"
+		resetExecutionState(this.state)
+		await this.scheduleWorkflowRetry(Date.now())
+		Sentry.logger.warn("Conversation workflow launch failed; scheduling retry", {
+			telegram_chat_id: this.state.chatId,
+			buffered_message_count: this.state.buffer.length,
+			retry_delay_ms: WORKFLOW_CREATE_RETRY_MS,
+		})
 		await this.persist()
 	}
 
-	async completeExecution(result: { userId?: string; conversationId?: string }): Promise<void> {
+	async claimFirstOutbound(input: ClaimFirstOutboundInput): Promise<ClaimFirstOutboundResult> {
+		await this.hydrate()
+
+		const result = claimFirstOutboundState(this.state, input, Date.now())
+		if (result.allowed && result.reason === "ok") {
+			await this.persist()
+		}
+		return result
+	}
+
+	async completeExecution(input: CompleteExecutionInput): Promise<CompleteExecutionResult> {
 		await this.hydrate()
 		setTelegramScope({
 			component: "conversation-session.complete",
-			chatId: this.state.chatId ?? undefined,
-			userId: result.userId ?? this.state.userId,
-			conversationId: result.conversationId ?? this.state.conversationId,
+			chatId: this.state.chatId || undefined,
+			userId: input.userId ?? this.state.userId,
+			conversationId: input.conversationId ?? this.state.conversationId,
 			attributes: {
 				buffered_message_count: this.state.buffer.length,
 				session_status: this.state.status,
+				in_flight_message_count: this.state.inFlightMessages.length,
+				first_outbound_claimed_at: this.state.firstOutboundClaimedAt ?? undefined,
+				superseded_at: this.state.supersededAt ?? undefined,
+				outcome: input.outcome,
 			},
 		})
 
-		// Cache resolved IDs from the workflow
-		if (result.userId) this.state.userId = result.userId
-		if (result.conversationId) this.state.conversationId = result.conversationId
-
-		this.state.activeWorkflowId = null
-		this.state.status = "idle"
-
-		// If new messages arrived during processing, start a shorter debounce
-		if (this.state.buffer.length > 0) {
-			this.state.status = "debouncing"
-			await this.ctx.storage.setAlarm(Date.now() + ACTIVE_DEBOUNCE_MS)
-		}
-
+		const result = completeExecutionState(this.state, input, Date.now())
 		await this.persist()
+		return result
 	}
 }

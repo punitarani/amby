@@ -1,15 +1,9 @@
-import { TELEGRAM_RELINK_REQUIRED_MESSAGE } from "@amby/auth"
 import type { WorkerBindings } from "@amby/env/workers"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat, type StateAdapter } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
 import type { TelegramFrom, TelegramMessage } from "./utils"
-import {
-	buildBufferedTelegramMessage,
-	handleCommand,
-	parseTelegramCommand,
-	resolveTelegramUser,
-} from "./utils"
+import { buildBufferedTelegramMessage, handleCommand, parseTelegramCommand } from "./utils"
 
 export interface ChatSdkDeps {
 	// biome-ignore lint/suspicious/noExplicitAny: Runtime type parameters vary by caller; correctness verified at the call site
@@ -27,11 +21,6 @@ export interface ChatSdkDeps {
 let _chat: Chat | null = null
 let _deps: ChatSdkDeps | null = null
 
-/**
- * Returns (or creates) the singleton Chat instance.
- * NOTE: `deps` and `state` are captured only on first call. Subsequent calls
- * reuse the existing singleton and ignore later arguments.
- */
 export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps, state: StateAdapter) {
 	if (_chat) return { chat: _chat }
 	_deps = deps
@@ -51,12 +40,12 @@ export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps, state: S
 
 	chat.onNewMention(async (thread, message) => {
 		await thread.subscribe()
-		await routeIncomingMessage(env, adapter, message)
+		await routeIncomingMessage(env, message)
 	})
 
 	chat.onSubscribedMessage(async (_thread, message) => {
 		if (message.author.isMe) return
-		await routeIncomingMessage(env, adapter, message)
+		await routeIncomingMessage(env, message)
 	})
 
 	_chat = chat
@@ -65,7 +54,6 @@ export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps, state: S
 
 async function routeIncomingMessage(
 	env: WorkerBindings,
-	adapter: ReturnType<typeof createTelegramAdapter>,
 	message: Parameters<Parameters<Chat["onNewMention"]>[0]>[1],
 ) {
 	if (!_deps) throw new Error("[ChatSDK] getOrCreateChat must be called before routing messages")
@@ -89,7 +77,6 @@ async function routeIncomingMessage(
 		},
 	})
 
-	// Commands: handle inline
 	if (parsedCommand) {
 		const runtime = deps.makeRuntimeForConsumer(env)
 		try {
@@ -115,18 +102,6 @@ async function routeIncomingMessage(
 	const bufferedMessage = buildBufferedTelegramMessage(raw)
 	if (!bufferedMessage) return
 
-	const identityRuntime = deps.makeRuntimeForConsumer(env)
-	try {
-		const resolvedUser = await identityRuntime.runPromise(resolveTelegramUser(from, chatId))
-		if (resolvedUser.status === "blocked") {
-			await adapter.postMessage(String(chatId), TELEGRAM_RELINK_REQUIRED_MESSAGE).catch(() => {})
-			return
-		}
-	} finally {
-		await identityRuntime.dispose()
-	}
-
-	// Text messages: route to ConversationSession DO for debouncing
 	const doBinding = env.CONVERSATION_SESSION
 	if (!doBinding) {
 		console.error("[ChatSDK] CONVERSATION_SESSION binding not available")

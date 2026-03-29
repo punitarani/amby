@@ -9,7 +9,6 @@ Core backend service — Telegram bot, agent orchestration, and HTTP API.
 - Manage per-chat conversation state via Durable Objects
 - Persist Chat SDK transport state in the Worker runtime via a dedicated Durable Object
 - Expose HTTP endpoints (health, link redirects, Composio OAuth, webhook)
-- Queue-based async task processing
 
 ## Non-responsibilities
 
@@ -29,7 +28,7 @@ Core backend service — Telegram bot, agent orchestration, and HTTP API.
 | `src/durable-objects/conversation-session.ts` | Per-chat session state |
 | `src/durable-objects/chat-state.ts` | Chat SDK state DO and Worker-facing state exports |
 | `src/chat-state/` | Worker-only Chat SDK state adapter |
-| `src/queue/` | Queue consumer |
+| `src/runtime/worker-runtime.ts` | Worker runtime layer for handlers and workflows |
 | `src/handlers/` | Event handlers (task-events, reconciliation) |
 
 ## Running

@@ -8,7 +8,7 @@ Amby runs once — you reach it everywhere. It keeps a living understanding of w
 
 ```
 apps/
-  api               Cloudflare Workers API — Telegram adapter, queue runtime
+  api               Cloudflare Workers API — Telegram adapter, Durable Objects, workflows
   web               Next.js marketing site
   mock              Mock Telegram chat UI for local development
 packages/

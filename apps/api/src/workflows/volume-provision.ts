@@ -11,7 +11,7 @@ import { ComputeStore, CoreError } from "@amby/core"
 import type { WorkerBindings } from "@amby/env/workers"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
-import { makeRuntimeForConsumer } from "../queue/runtime"
+import { makeRuntimeForConsumer } from "../runtime/worker-runtime"
 import { setWorkerScope } from "../sentry"
 
 const MAX_VOLUME_POLLS = 240 // 240 × 5s = 20 minutes

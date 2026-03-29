@@ -1,6 +1,6 @@
 # Runtime
 
-How a user message becomes an agent response.
+How a Telegram message becomes an agent response in the production Worker runtime.
 
 ## System overview
 
@@ -8,53 +8,119 @@ How a user message becomes an agent response.
 sequenceDiagram
     participant TG as Telegram
     participant WH as Webhook (Hono)
-    participant Q as Queue
-    participant DO as ConversationSession DO
+    participant SDK as Chat SDK
+    participant State as ChatStateDO
+    participant Sess as ConversationSession DO
     participant WF as AgentExecutionWorkflow
-    participant AG as AgentService
-    participant TG2 as Telegram
+    participant AG as ConversationRuntime
+    participant API as Telegram Bot API
 
     TG->>WH: POST /telegram/webhook
-    WH->>Q: enqueue message
-    Q->>DO: ingestMessage(chatId)
-    Note over DO: debounce 3s, buffer messages
-    DO->>WF: create(chatId, messages, from)
-    WF->>WF: resolve user (findOrCreateUser)
-    WF->>WF: ingest attachments (AttachmentService)
-    WF->>AG: handleStructuredMessage / handleStructuredBatch
-    AG->>AG: resolveThread
-    AG->>AG: resolveModelMessageContent (current turn)
-    AG->>AG: handleTurn (ToolLoopAgent)
-    AG-->>WF: AgentRunResult (text + attachment parts)
-    WF->>TG2: delete streaming draft + post final text
-    WF->>TG2: sendParts (photos, documents, signed links)
-    WF->>DO: completeExecution(userId, conversationId)
+    WH->>SDK: chat.webhooks.telegram(...)
+    SDK->>State: thread state, locks, subscriptions
+    SDK->>SDK: parseTelegramCommand(...)
+    alt command
+        SDK->>API: inline command reply
+    else normal text or attachments
+        SDK->>Sess: ingestMessage(...)
+        Sess->>Sess: adaptive debounce + active-turn state
+        Sess->>WF: create(chatId, messages, executionToken)
+        WF->>WF: resolve-user
+        WF->>AG: handleStructuredMessage / handleStructuredBatch
+        AG-->>WF: AgentRunResult
+        WF->>Sess: claimFirstOutbound(executionToken)
+        WF->>API: send/edit/delete text and attachments
+        WF->>Sess: completeExecution(executionToken, outcome)
+    end
 ```
+
+Telegram ingress is direct webhook to Chat SDK to Durable Objects to workflow. There is no queue hop on the production path.
 
 ## Durable Object: ConversationSession
 
-One instance per Telegram chat. Provides:
+One instance per Telegram chat. It owns the per-chat turn state for normal user input:
 
-- **Message buffering** -- collects rapid-fire messages into a batch
-- **Debounce** -- 3s idle timer (1s when resuming after a completed run)
-- **Single-flight execution** -- only one active workflow per chat
-- **Interrupt forwarding** -- messages arriving during execution are sent as workflow events
+- pending buffered messages
+- adaptive debounce timing
+- the current unsaved in-flight turn
+- the active execution token
+- cached `userId` and `conversationId`
+- first-outbound claim state
+- pre-first-outbound supersession state
 
-States: `idle` -> `debouncing` -> `processing` -> `idle`
+State machine:
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> debouncing: first message
+    debouncing --> debouncing: more buffered messages
+    debouncing --> processing: alarm fires
+    processing --> processing: follow-up queued
+    processing --> debouncing: superseded or queued follow-up after completion
+    processing --> idle: completion with empty buffer
+```
+
+### Debounce policy
+
+- first buffered message: `deadline = now + 800ms`
+- each additional buffered message: `deadline = min(bufferStartedAt + 1500ms, now + 400ms)`
+- rerun after a completed processing turn with pending follow-up: `deadline = now + 250ms`
+
+### Follow-up handling
+
+`ConversationSession` keeps the active unsaved turn in `inFlightMessages` until the workflow completes.
+
+During `processing`:
+
+- if first outbound has already been claimed, every follow-up queues for the next turn
+- otherwise, only narrow correction prefixes supersede the active run:
+  - `wait`
+  - `actually`
+  - `sorry`
+  - `i meant`
+  - `ignore that`
+  - `correction`
+  - `to clarify`
+  - `instead`
+- ambiguous follow-ups queue without superseding
+
+When a superseded run completes, the DO rebuilds the next turn as:
+
+`inFlightMessages + buffered follow-ups`
+
+### First outbound claim
+
+The workflow must call `claimFirstOutbound(executionToken)` before the first visible Telegram send path:
+
+- relink-required reply
+- progress or tool reply
+- first streaming draft post
+- first non-stream final text post
+- attachment-only reply
+- pre-output error reply
+
+This is the atomic gate that prevents stale output from superseded or stale executions.
 
 ## AgentExecutionWorkflow
 
-Cloudflare Workflow with durable steps and retry:
+Cloudflare Workflow with two meaningful phases:
 
 | Step | What it does |
-|------|-------------|
-| `resolve-user` | Map Telegram identity to DB user via `findOrCreateUser` |
-| `agent-loop` | Ingest attachments, run ConversationRuntime with structured messages, stream reply, deliver final parts (retries: 3, backoff: exponential, timeout: 5 min) |
-| `complete` | Notify DO that execution finished |
+|------|--------------|
+| `typing` | Send Telegram typing indicator |
+| `resolve-user` | Resolve Telegram identity to an Amby user; retries are allowed here |
+| `agent-loop` | Run `ConversationRuntime`; no workflow retries because this step may produce visible Telegram output |
+| `complete` | Notify `ConversationSession` with `completeExecution(executionToken, outcome)` |
 
-The `agent-loop` step handles attachment ingest (`AttachmentService.ingestBufferedMessages`), calls `handleStructuredMessage` / `handleStructuredBatch` on the agent, and sends final reply parts through `ReplySender`.
+### Delivery rules
 
-Streaming: posts first chunk, then edits every 500ms. The streaming preview is capped at 4090 characters. On finalization, the streaming draft is deleted and the final response is posted fresh (which splits at Telegram's 4096-character limit when needed). Attachment parts are sent after the text reply via `sendParts`.
+- first visible send must claim first outbound from the DO
+- once first outbound is claimed, later follow-ups queue by DO rule instead of superseding
+- stale or superseded runs suppress visible output
+- if a run errors after visible output already exists, the workflow logs and completes but does not append a generic apology
+- long Telegram responses are split to stay inside Telegram limits
+- attachments are ingested into structured user messages before the agent runs and are delivered after text output when the agent returns attachment parts
 
 ## Thread routing
 
@@ -63,131 +129,105 @@ Streaming: posts first chunk, then edits every 500ms. The streaming preview is c
 ```mermaid
 flowchart TD
     A[Ensure default thread] --> B[Archive stale threads >24h]
-    B --> C{Platform thread key?}
+    B --> C{"Platform thread key?"}
     C -->|yes| D[Use native thread]
-    C -->|no| E{Gap <2min from last msg?}
+    C -->|no| E{"Gap <2min from last msg?"}
     E -->|yes| F[Continue current thread]
-    E -->|no| G{Label match?}
+    E -->|no| G{"Label match?"}
     G -->|yes| H[Switch to matched thread]
-    G -->|no| I{2+ keyword hits?}
+    G -->|no| I{"2+ keyword hits?"}
     I -->|yes| J[Switch to matched thread]
     I -->|no| K[Ask model: continue/switch/new]
 ```
 
 Config constants:
 
-- `GAP_CONTINUE_MS` = 2 min (auto-continue threshold)
-- `DORMANT_MS` = 1 hour (triggers synopsis on resume)
-- `STALE_ARCHIVE_MS` = 24 hours (auto-archive)
+- `GAP_CONTINUE_MS` = 2 min
+- `DORMANT_MS` = 1 hour
+- `STALE_ARCHIVE_MS` = 24 hours
 - `OPEN_THREADS_CAP` = 10
 
 ## Context assembly
 
 `prepareConversationContext()` builds the prompt from:
 
-- **User memory** -- static + dynamic profile via MemoryService, deduplicated
-- **Thread history** -- 20-message tail for the active thread
-- **Other thread summaries** -- synopses from sibling threads
-- **Resumed thread synopsis** -- included when thread was dormant
-- **Thread artifacts** -- recent file/artifact recap
-- **Current date/time** -- formatted in user timezone
+- user memory
+- active thread history
+- sibling thread summaries
+- dormant-thread synopsis when needed
+- thread artifact recap
+- current date and time in the user timezone
 
-Output: system prompt + message history array + shared context string for sub-agents.
+Output: system prompt, message history, and shared context string for sub-agents.
 
 ## Agent turn loop
 
-The conversation agent is a `ToolLoopAgent` (Vercel AI SDK):
+The conversation agent is a `ToolLoopAgent`:
 
-- **Max steps:** 8 (`CONVERSATION_MAX_STEPS`)
-- **Max tool calls per run:** 32
-- **Tools available:**
-  - `search_memories` -- recall from long-term memory
-  - `send_message` -- incremental reply to user
-  - `execute_plan` -- delegate to specialist execution (one per turn)
-  - `query_execution` -- inspect running/completed tasks
-- **Step gate:** after `execute_plan` or `query_execution` fires, all tools are disabled (forces the agent to synthesize)
+- max steps: 8
+- max tool calls per run: 32
+- tools:
+  - `search_memories`
+  - `send_message`
+  - `execute_plan`
+  - `query_execution`
+- after `execute_plan` or `query_execution`, tools are disabled for the rest of the turn
 
-Streaming: when enabled, text deltas are forwarded to the workflow for live Telegram edits.
+When streaming is enabled, text deltas are buffered in the workflow and flushed to Telegram through the delivery controller.
 
 ## Execution planner
 
-`execute_plan` triggers `buildExecutionPlan()` which routes to specialists:
+`execute_plan` routes to specialists in one of four modes:
 
 | Mode | When | Behavior |
 |------|------|----------|
 | `direct` | No specialist needed | Conversation agent answers directly |
-| `sequential` | Single specialist or ordered chain | Tasks run one after another |
-| `parallel` | Independent read-heavy tasks (e.g. multiple URLs) | Tasks run concurrently |
-| `background` | User requests long-running autonomous work | Handed off to sandbox, returns immediately |
+| `sequential` | Ordered specialist work | Tasks run one after another |
+| `parallel` | Independent read-heavy work | Tasks run concurrently |
+| `background` | User asks for long-running autonomous work | Handed off to sandbox |
 
-Routing is heuristic-first (regex pattern matching on request text). Falls back to model planner when the heuristic produces 3+ tasks or the user explicitly asks for planning.
-
-**Specialists:** conversation, planner, research, builder, integration, computer, browser, memory, settings, validator
-
-Each specialist has a defined `runnerKind` (in_process, browser, background_handoff), tool groups, model selection, and step budget.
-
-## Task lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> pending
-    pending --> awaiting_auth: needs credentials
-    pending --> preparing: setup started
-    awaiting_auth --> preparing: auth resolved
-    preparing --> running: execution begins
-    running --> succeeded: completed ok
-    running --> partial: partial results
-    running --> escalated: needs human input
-    running --> failed: error
-    running --> cancelled: user/system cancel
-    running --> timed_out: deadline exceeded
-    running --> lost: process disappeared
-```
-
-Runtimes: `in_process` | `browser` | `sandbox`
-Providers: `internal` | `stagehand` | `codex`
+Routing is heuristic-first and falls back to the model planner when needed.
 
 ## Persistence touchpoints
 
 | When | What is written |
-|------|----------------|
-| Thread resolution | Thread created/updated, stale threads archived with synopsis |
-| User message received | `messages` row (role=user, with threadId + metadata) |
-| Assistant response | `messages` row (role=assistant) if non-empty |
-| Root trace created | `execution_traces` row with config, router decision |
-| Each model step | Trace events: `model_request`, `model_response` |
-| Tool calls/results | Trace events: `tool_call`, `tool_result` (flushed in batch) |
-| Task created | `tasks` row (status=pending) |
-| Task completed | `tasks` row updated, `task_events` appended |
-| Run complete | Trace marked completed/failed with execution mode + status |
-| Synopsis | Thread synopsis + keywords written on dormant switch or archive |
+|------|-----------------|
+| Thread resolution | Thread created or updated, stale threads archived |
+| User message persisted | `messages` row with role `user` |
+| Assistant response persisted | `messages` row with role `assistant` when non-empty |
+| Root trace created | `execution_traces` row with router decision |
+| Model step | trace events for request and response |
+| Tool call/result | batched trace events |
+| Task created or updated | `tasks` row and `task_events` |
+| Run complete | trace marked completed or failed |
+| Synopsis generated | thread synopsis and keywords |
 
 ## Hierarchy
 
-- **Conversation** = platform boundary (one per Telegram chat per user)
-- **Thread** = internal routing group (sources: derived, native, reply_chain, manual)
-- **Run** = one LLM coordination pass (one ToolLoopAgent invocation)
-- **Task** = durable work unit dispatched to a specialist runner
+- conversation = platform boundary
+- thread = internal routing group
+- run = one coordinator model pass
+- task = durable work unit handled by a specialist runner
 
 ## Key runtime invariants
 
-- One active workflow per chat (enforced by DO)
-- Thread routing runs before every agent turn
-- Context is rebuilt fresh each turn (no stale prompt caching)
-- `execute_plan` can fire at most once per conversation turn
-- After execution boundary tools fire, all tools are disabled for remaining steps
-- Messages are persisted only after the agent completes (not optimistically)
-- Workflow step retries use exponential backoff (max 3 retries, 5 min timeout)
-- DO caches resolved userId and conversationId across runs
+- one active workflow per Telegram chat
+- `ConversationSession` owns both pending buffered input and the active unsaved turn
+- the workflow may not send visible output before `claimFirstOutbound`
+- only narrow pre-first-outbound correction follow-ups may supersede the active run
+- stale `completeExecution` calls are ignored by execution token
+- user messages are persisted after agent completion, not optimistically on webhook ingress
+- only `resolve-user` uses workflow retries
+- Chat SDK transport state and conversation execution state live in separate Durable Objects
 
 ## Infrastructure workflows
 
 Two additional Cloudflare Workflows handle compute provisioning:
 
 | Workflow | Responsibility |
-|----------|---------------|
-| `SandboxProvisionWorkflow` | Ensure user has a valid main sandbox on correct volume |
-| `VolumeProvisionWorkflow` | Ensure per-user persistent volume exists and is ready |
+|----------|----------------|
+| `SandboxProvisionWorkflow` | Ensure the user has a valid main sandbox |
+| `VolumeProvisionWorkflow` | Ensure the per-user persistent volume exists |
 
 ```mermaid
 flowchart LR
@@ -195,4 +235,4 @@ flowchart LR
     SandboxWF -->|needs volume| VolumeWF[VolumeProvisionWorkflow]
 ```
 
-Stale/invalid sandboxes and unusable volumes are replaced automatically.
+Stale or invalid sandboxes and unusable volumes are replaced automatically.

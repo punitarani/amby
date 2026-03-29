@@ -1,6 +1,6 @@
 import { AttachmentService } from "@amby/attachments"
 import { AuthService, resolveAuthCorsOrigin } from "@amby/auth"
-import { type ChatSdkDeps, getOrCreateChat, type TelegramQueueMessage } from "@amby/channels"
+import { type ChatSdkDeps, getOrCreateChat } from "@amby/channels"
 import { getPostHogClient } from "@amby/channels/posthog"
 import type { WorkerBindings } from "@amby/env/workers"
 import {
@@ -26,8 +26,7 @@ import { ConversationSession as ConversationSessionBase } from "./durable-object
 import { handleScheduledReconciliation } from "./handlers/reconciliation"
 import { handleTaskEventPost } from "./handlers/task-events"
 import { getHomeResponse } from "./home"
-import { handleQueueBatch } from "./queue/consumer"
-import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "./queue/runtime"
+import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "./runtime/worker-runtime"
 import { getSentryOptions, getSentryOptionsOrFallback, setTelegramScope } from "./sentry"
 import { AgentExecutionWorkflow as AgentExecutionWorkflowBase } from "./workflows/agent-execution"
 import { SandboxProvisionWorkflow as SandboxProvisionWorkflowBase } from "./workflows/sandbox-provision"
@@ -294,12 +293,8 @@ app.post("/composio/webhook", async (c) => {
 	}
 })
 
-const worker: ExportedHandler<ApiBindings, TelegramQueueMessage> = {
+const worker: ExportedHandler<ApiBindings> = {
 	fetch: app.fetch,
-
-	async queue(batch: MessageBatch<TelegramQueueMessage>, env: ApiBindings) {
-		await handleQueueBatch(batch, env)
-	},
 
 	async scheduled(_controller: ScheduledController, env: ApiBindings, _ctx: ExecutionContext) {
 		await handleScheduledReconciliation(env)
@@ -307,4 +302,4 @@ const worker: ExportedHandler<ApiBindings, TelegramQueueMessage> = {
 }
 
 // `withSentry` wraps the full `ExportedHandler` (fetch + queue + scheduled); cron is preserved.
-export default Sentry.withSentry<ApiBindings, TelegramQueueMessage>(getSentryOptions, worker)
+export default Sentry.withSentry<ApiBindings>(getSentryOptions, worker)
