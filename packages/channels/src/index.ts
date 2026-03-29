@@ -13,6 +13,5 @@ export {
 	type TelegramCommandName,
 	type TelegramFrom,
 	type TelegramMessage,
-	type TelegramQueueMessage,
 	type TelegramUpdate,
 } from "./telegram/utils"

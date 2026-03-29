@@ -1,18 +1,29 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers"
 import { ConversationRuntime, makeConversationRuntimeLive } from "@amby/agent"
-import { TELEGRAM_RELINK_REQUIRED_MESSAGE } from "@amby/auth"
-import {
-	type BufferedMessage,
-	resolveTelegramUser,
-	splitTelegramMessage,
-	type TelegramFrom,
-} from "@amby/channels"
+import { type BufferedMessage, resolveTelegramUser, type TelegramFrom } from "@amby/channels"
 import type { WorkerBindings } from "@amby/env/workers"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import * as Sentry from "@sentry/cloudflare"
 import { Effect } from "effect"
-import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "../queue/runtime"
+import type {
+	ClaimFirstOutboundInput,
+	ClaimFirstOutboundResult,
+	CompleteExecutionInput,
+	ExecutionOutcome,
+} from "../durable-objects/conversation-session-state"
+import { makeAgentRuntimeForConsumer, makeRuntimeForConsumer } from "../runtime/worker-runtime"
 import { setTelegramScope } from "../sentry"
+import { AGENT_LOOP_STEP_OPTIONS, createTelegramDeliveryController } from "./telegram-delivery"
+
+interface ConversationSessionStub {
+	completeExecution(input: CompleteExecutionInput): Promise<unknown>
+	claimFirstOutbound(input: ClaimFirstOutboundInput): Promise<ClaimFirstOutboundResult>
+}
+
+export const RESOLVE_USER_STEP_OPTIONS = {
+	retries: { limit: 2, delay: "2 seconds", backoff: "exponential" },
+	timeout: "30 seconds",
+} as const
 
 export interface AgentExecutionParams {
 	chatId: number
@@ -20,6 +31,7 @@ export interface AgentExecutionParams {
 	userId: string | null
 	from: TelegramFrom | null
 	conversationId?: string | null
+	executionToken: string
 	isSubAgent?: boolean
 	parentContext?: string
 }
@@ -29,8 +41,13 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 	AgentExecutionParams
 > {
 	async run(event: WorkflowEvent<AgentExecutionParams>, step: WorkflowStep) {
-		const { chatId, messages, from, isSubAgent, parentContext } = event.payload
+		const { chatId, messages, from, isSubAgent, parentContext, executionToken } = event.payload
 		let { userId, conversationId } = event.payload
+		let outcome: ExecutionOutcome = "completed"
+		let response = ""
+		let runError: unknown = null
+		let userResolutionBlocked = false
+		let result = { response, userId, conversationId }
 
 		setTelegramScope({
 			component: "workflow.agent_execution",
@@ -42,6 +59,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 				workflow_instance_id: event.instanceId,
 				message_count: messages.length,
 				is_sub_agent: Boolean(isSubAgent),
+				execution_token: executionToken,
 			},
 		})
 
@@ -51,24 +69,34 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			mode: "webhook",
 		})
 		const chatIdStr = String(chatId)
-
-		const sendTyping = () => adapter.startTyping(chatIdStr).catch(() => {})
+		const doStub = this.getConversationSessionStub(chatId, isSubAgent)
+		const delivery = createTelegramDeliveryController({
+			adapter,
+			chatId: chatIdStr,
+			claimFirstOutbound: async () => {
+				if (!doStub) {
+					return { allowed: false, reason: "stale" as const }
+				}
+				return doStub.claimFirstOutbound({ executionToken })
+			},
+		})
 
 		try {
-			// Step 1: Send typing indicator
 			if (!isSubAgent) {
-				await step.do("typing", () => sendTyping())
+				await step.do("typing", () => delivery.startTyping())
 			}
 
-			// Step 2: Always resolve user from Telegram identity to ensure the ID is valid
-			// (the DO may cache a stale userId if the DB was reset)
 			if (from) {
-				userId = await step.do("resolve-user", async () => {
+				userId = await step.do("resolve-user", RESOLVE_USER_STEP_OPTIONS, async () => {
 					const runtime = makeRuntimeForConsumer(this.env)
 					try {
 						const resolved = await runtime.runPromise(resolveTelegramUser(from, chatId))
 						if (resolved.status === "blocked") {
-							await adapter.postMessage(chatIdStr, TELEGRAM_RELINK_REQUIRED_MESSAGE).catch(() => {})
+							userResolutionBlocked = true
+							if (!isSubAgent) {
+								await delivery.sendRelinkRequired()
+							}
+							outcome = "blocked"
 							return null
 						}
 						return resolved.userId
@@ -79,31 +107,25 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 			}
 
 			if (!userId) {
+				outcome = userResolutionBlocked ? "blocked" : "failed"
 				Sentry.captureMessage(
 					"Agent execution workflow missing both userId and Telegram identity",
 					"error",
 				)
 				console.error("[Workflow] No userId and no from data — cannot proceed")
-				return
-			}
+				result = { response, userId, conversationId }
+			} else {
+				const finalUserId = userId
+				const messageTexts = messages.map((message) => message.text)
+				const input = parentContext
+					? `${parentContext}\n\nUser: ${messageTexts.join("\n\n")}`
+					: messageTexts.join("\n\n")
 
-			// Step 3: Run the agent with streaming
-			const finalUserId = userId
-			const messageTexts = messages.map((m) => m.text)
-			const input = parentContext
-				? `${parentContext}\n\nUser: ${messageTexts.join("\n\n")}`
-				: messageTexts.join("\n\n")
+				response = await step.do("agent-loop", AGENT_LOOP_STEP_OPTIONS, async () => {
+					const typingInterval = setInterval(() => {
+						void delivery.startTyping()
+					}, 4000)
 
-			const response = await step.do(
-				"agent-loop",
-				{
-					retries: { limit: 3, delay: "5 seconds", backoff: "exponential" },
-					timeout: "5 minutes",
-				},
-				async () => {
-					const typingInterval = setInterval(sendTyping, 4000)
-
-					// Streaming state — post first chunk, then edit every 500ms
 					let streamedText = ""
 					let streamMessageId: string | null = null
 					let isEditing = false
@@ -112,21 +134,13 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 						if (isEditing || !streamedText) return
 						isEditing = true
 						try {
-							if (!streamMessageId) {
-								const posted = await adapter.postMessage(chatIdStr, streamedText)
-								streamMessageId = posted.id
-							} else {
-								await adapter.editMessage(chatIdStr, streamMessageId, streamedText)
-							}
-						} catch {
-							/* ignore edit errors */
+							streamMessageId = await delivery.flushStreamText(streamedText, streamMessageId)
 						} finally {
 							isEditing = false
 						}
 					}
 
-					const streamInterval = !isSubAgent ? setInterval(flushStream, 500) : null
-
+					const streamInterval = !isSubAgent ? setInterval(() => void flushStream(), 500) : null
 					const onTextDelta = !isSubAgent
 						? (delta: string) => {
 								streamedText += delta
@@ -136,13 +150,15 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 					try {
 						const runtime = makeAgentRuntimeForConsumer(this.env)
 						try {
-							const sendReply = (text: string) =>
-								adapter.postMessage(chatIdStr, text).then(() => {})
 							const effect = Effect.gen(function* () {
 								const agent = yield* ConversationRuntime
 								const convId =
 									conversationId ?? (yield* agent.ensureConversation("telegram", String(chatId)))
 								conversationId = convId
+
+								const sendReply = async (text: string) => {
+									await delivery.sendProgress(text)
+								}
 
 								if (messageTexts.length > 1) {
 									return yield* agent.handleBatchedMessages(
@@ -158,32 +174,11 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 								return yield* agent.handleMessage(convId, input, undefined, sendReply, onTextDelta)
 							}).pipe(Effect.provide(makeConversationRuntimeLive(finalUserId)))
 
-							const result = await runtime.runPromise(effect)
-							const finalText = result.userResponse.text
+							const agentResult = await runtime.runPromise(effect)
+							const finalText = agentResult.userResponse.text
 
-							// Finalize streamed message
 							if (streamInterval) clearInterval(streamInterval)
-							if (streamMessageId) {
-								if (finalText.trim()) {
-									const [firstChunk, ...moreChunks] = splitTelegramMessage(finalText)
-									if (firstChunk !== undefined) {
-										await adapter
-											.editMessage(chatIdStr, streamMessageId, firstChunk)
-											.catch(() => {})
-										for (const chunk of moreChunks) {
-											await adapter.postMessage(chatIdStr, chunk)
-										}
-									}
-								} else {
-									// Response empty (tool sent replies) — remove streaming message
-									await adapter.deleteMessage(chatIdStr, streamMessageId).catch(() => {})
-								}
-							} else if (!isSubAgent && finalText.trim()) {
-								// No streaming happened — post full response
-								for (const chunk of splitTelegramMessage(finalText)) {
-									await adapter.postMessage(chatIdStr, chunk)
-								}
-							}
+							await delivery.finalizeResponse(finalText, streamMessageId)
 
 							return finalText
 						} finally {
@@ -193,51 +188,80 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 						if (streamInterval) clearInterval(streamInterval)
 						clearInterval(typingInterval)
 					}
-				},
-			)
-			Sentry.logger.info("Agent execution completed", {
-				workflow_instance_id: event.instanceId,
-				message_count: messages.length,
-				response_length: response.length,
-				is_sub_agent: Boolean(isSubAgent),
-			})
+				})
 
-			// Step 4: Notify the DO that execution is complete
-			await this.notifyComplete(step, chatId, isSubAgent, userId, conversationId)
+				Sentry.logger.info("Agent execution completed", {
+					workflow_instance_id: event.instanceId,
+					message_count: messages.length,
+					response_length: response.length,
+					is_sub_agent: Boolean(isSubAgent),
+					execution_token: executionToken,
+				})
 
-			return { response, userId, conversationId }
+				result = { response, userId, conversationId }
+			}
 		} catch (err) {
-			// Send error message to user and reset DO state
+			runError = err
+			outcome = "failed"
 			if (!isSubAgent) {
 				await step.do("error-reply", async () => {
-					await adapter
-						.postMessage(chatIdStr, "Sorry, something went wrong. Please try again.")
-						.catch(() => {})
+					await delivery.sendErrorReply("Sorry, something went wrong. Please try again.")
 				})
 			}
-			await this.notifyComplete(step, chatId, isSubAgent, userId, conversationId)
-			throw err
+			result = { response, userId, conversationId }
 		}
+
+		try {
+			await this.notifyComplete(step, {
+				chatId,
+				isSubAgent,
+				userId,
+				conversationId,
+				executionToken,
+				outcome,
+			})
+		} catch (completeError) {
+			Sentry.captureException(completeError)
+			console.error("[Workflow] Failed to notify ConversationSession completion:", completeError)
+			if (!runError) {
+				runError = completeError
+			}
+		}
+
+		if (runError) {
+			throw runError
+		}
+
+		return result
+	}
+
+	private getConversationSessionStub(chatId: number, isSubAgent?: boolean) {
+		const doBinding = this.env.CONVERSATION_SESSION
+		if (isSubAgent || !doBinding) return null
+		const doId = doBinding.idFromName(String(chatId))
+		return doBinding.get(doId) as unknown as ConversationSessionStub
 	}
 
 	private async notifyComplete(
 		step: WorkflowStep,
-		chatId: number,
-		isSubAgent: boolean | undefined,
-		userId: string | null,
-		conversationId: string | null | undefined,
+		params: {
+			chatId: number
+			isSubAgent?: boolean
+			userId: string | null
+			conversationId: string | null | undefined
+			executionToken: string
+			outcome: ExecutionOutcome
+		},
 	) {
-		const doBinding = this.env.CONVERSATION_SESSION
-		if (isSubAgent || !doBinding) return
+		const doStub = this.getConversationSessionStub(params.chatId, params.isSubAgent)
+		if (!doStub) return
 
 		await step.do("complete", async () => {
-			const doId = doBinding.idFromName(String(chatId))
-			const stub = doBinding.get(doId) as unknown as {
-				completeExecution(result: { userId?: string; conversationId?: string }): Promise<void>
-			}
-			await stub.completeExecution({
-				userId: userId ?? undefined,
-				conversationId: conversationId ?? undefined,
+			await doStub.completeExecution({
+				executionToken: params.executionToken,
+				userId: params.userId ?? undefined,
+				conversationId: params.conversationId ?? undefined,
+				outcome: params.outcome,
 			})
 		})
 	}

@@ -41,11 +41,6 @@ export interface TelegramUpdate {
 	message?: TelegramMessage
 }
 
-export interface TelegramQueueMessage {
-	update: TelegramUpdate
-	receivedAt: number
-}
-
 export interface BufferedMessage {
 	text: string
 	messageId: number

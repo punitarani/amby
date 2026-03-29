@@ -7,36 +7,34 @@ This document explains the Telegram channel end to end: where messages enter, ho
 This doc covers:
 
 - the production Cloudflare Worker path
-- the local Bun dev path
+- the local Bun path
 - command handling
 - normal message handling
 - Telegram-specific state ownership
 - local mock testing
 
-It does not explain the full agent internals in depth. For that, see [../AGENT.md](../AGENT.md) and [../RUNTIME.md](../RUNTIME.md).
-
 ## Mental model
 
-Telegram logic is a transport boundary. It is responsible for:
+Telegram is a transport boundary. It is responsible for:
 
 - accepting Telegram updates
 - verifying and parsing them through `@chat-adapter/telegram`
-- deciding whether a message is a simple command or a normal user message
-- mapping Telegram identity to an Amby user and conversation
+- deciding whether a message is a simple command or normal user text
+- mapping Telegram identity to an Amby user
 - delivering replies back through the Telegram Bot API
 
-Telegram logic is not responsible for:
+Telegram is not responsible for:
 
 - long-term memory
 - execution planning
 - browser or sandbox work
-- application business logic outside the channel boundary
+- business logic outside the channel boundary
 
 ## Entry points
 
 | Runtime | File | When it is used | Core difference |
 |---|---|---|---|
-| Cloudflare Worker | `apps/api/src/worker.ts` | production-style runtime and `wrangler dev` | uses `ChatStateDO`, `ConversationSession`, and `AgentExecutionWorkflow` |
+| Cloudflare Worker | `apps/api/src/worker.ts` | production and `wrangler dev` | uses `ChatStateDO`, `ConversationSession`, and `AgentExecutionWorkflow` |
 | Bun | `apps/api/src/index.ts` | local Bun-only development | uses `createAmbyBot()` and in-memory Chat SDK state |
 
 ## Production Worker flow
@@ -63,11 +61,12 @@ sequenceDiagram
         DB->>API: sendMessage
     else normal text
         SDK->>Sess: ingestMessage(...)
-        Sess->>Sess: buffer + debounce
+        Sess->>Sess: adaptive debounce + active-turn state
         Sess->>WF: create workflow
-        WF->>DB: findOrCreateUser(...)
+        WF->>DB: resolveTelegramUser(...)
         WF->>Agent: ensureConversation + handleMessage / handleBatchedMessages
         Agent-->>WF: final response
+        WF->>Sess: claimFirstOutbound(...)
         WF->>API: postMessage / editMessage / deleteMessage
         WF->>Sess: completeExecution(...)
     end
@@ -79,31 +78,31 @@ sequenceDiagram
 
 `apps/api/src/worker.ts` exposes `POST /telegram/webhook`.
 
-That route does three things:
+That route:
 
 1. creates or reuses the Worker Chat SDK singleton via `getOrCreateChat(...)`
 2. injects the Worker-only Chat SDK state adapter backed by `ChatStateDO`
 3. hands the raw request to `chat.webhooks.telegram(...)`
 
-At this point the raw HTTP request leaves Hono and enters the Chat SDK plus `@chat-adapter/telegram`.
+At that point the raw HTTP request leaves Hono and enters the Chat SDK plus `@chat-adapter/telegram`.
 
 ### 2. Chat SDK bootstrap
 
 `packages/channels/src/telegram/chat-sdk.ts` creates a singleton `Chat` instance in webhook mode.
 
-Important responsibilities here:
+Responsibilities:
 
 - configure the Telegram adapter with bot token, API base URL, and webhook secret
-- keep Chat SDK thread/subscription state in the injected `StateAdapter`
+- keep Chat SDK thread and subscription state in the injected `StateAdapter`
 - subscribe to new mentions
 - ignore messages authored by the bot itself
 - route accepted messages into `routeIncomingMessage(...)`
 
-The Worker path uses a dedicated `ChatStateDO` through `createCloudflareChatState(...)`.
+The Worker path uses `ChatStateDO` through `createCloudflareChatState(...)`.
 
 ### 3. Chat SDK state ownership
 
-`ChatStateDO` is not the business workflow state. It only stores Chat SDK transport state.
+`ChatStateDO` stores Chat SDK transport state, not business workflow state.
 
 ```mermaid
 flowchart LR
@@ -121,14 +120,17 @@ flowchart LR
 - thread subscriptions
 - thread locks
 - small cached values and dedupe keys
-- Chat SDK list/history storage
+- Chat SDK list and history storage
 
 `ConversationSession` owns:
 
 - the per-chat message buffer
-- debounce timing
-- active workflow id
+- adaptive debounce timing
+- the active unsaved turn
+- the active workflow id and execution token
 - cached `userId` and `conversationId`
+- first-outbound claim state
+- supersession state
 
 Keeping them separate matters because they solve different problems.
 
@@ -152,21 +154,15 @@ Supported commands live in `packages/channels/src/telegram/utils.ts`:
 - `/stop`
 - `/help`
 
-`handleCommand(...)` does the following:
-
-1. resolves or creates the Amby user with `findOrCreateUser(...)`
-2. uses `TelegramSender` to reply through the Telegram Bot API
-3. on `/start`, ensures the Telegram conversation exists and may kick off sandbox provisioning
-4. on `/start <payload>`, treats the payload as an integration callback helper and sends a follow-up status message
-5. on `/stop` and `/help`, sends simple inline replies
-
-Commands do not go through the buffering Durable Object or the agent workflow.
+`handleCommand(...)` resolves or creates the Amby user, replies through the Telegram Bot API, and may kick off sandbox provisioning. Commands do not go through `ConversationSession` or `AgentExecutionWorkflow`.
 
 #### Normal text path
 
-If the message is not a command and has text, `routeIncomingMessage(...)` forwards it to `ConversationSession.ingestMessage(...)` using one Durable Object instance per Telegram chat id.
+If the message is not a command and has text, `routeIncomingMessage(...)` forwards it straight to `ConversationSession.ingestMessage(...)`.
 
-### 5. Per-chat buffering and debounce
+Important invariant: the Chat SDK does not resolve Telegram identity for normal text before the DO hop. Identity resolution happens once, inside the workflow.
+
+### 5. Per-chat buffering, debounce, and supersession
 
 `apps/api/src/durable-objects/conversation-session.ts` is the control point for normal text.
 
@@ -178,17 +174,35 @@ stateDiagram-v2
     idle --> debouncing: first message
     debouncing --> debouncing: more messages arrive
     debouncing --> processing: alarm fires
-    processing --> debouncing: new messages arrive during run
-    processing --> idle: workflow completes with empty buffer
-    debouncing --> idle: buffer drained or reset
+    processing --> processing: follow-up queued
+    processing --> debouncing: completion with pending buffer
+    processing --> idle: completion with empty buffer
 ```
 
-Key behavior:
+Debounce policy:
 
-- first message starts a 3 second debounce window
-- more messages during debounce are appended to the same buffer
-- messages arriving during processing are forwarded to the active workflow as events and also rebuffered
-- when the workflow completes, a shorter 1 second debounce is used if follow-up messages arrived mid-run
+- first buffered message: `now + 800ms`
+- each additional buffered message: `min(bufferStartedAt + 1500ms, now + 400ms)`
+- rerun after completion with queued follow-up: `now + 250ms`
+
+While processing:
+
+- the DO preserves the unsaved active turn in `inFlightMessages`
+- if first outbound has already been claimed, every follow-up queues for the next turn
+- before first outbound, only narrow correction prefixes may supersede:
+  - `wait`
+  - `actually`
+  - `sorry`
+  - `i meant`
+  - `ignore that`
+  - `correction`
+  - `to clarify`
+  - `instead`
+- ambiguous follow-ups queue without superseding
+
+When a superseded execution completes, the next turn is rebuilt from:
+
+`inFlightMessages + buffered follow-ups`
 
 ### 6. Durable workflow execution
 
@@ -197,14 +211,26 @@ When the debounce alarm fires, `ConversationSession` starts `AgentExecutionWorkf
 `apps/api/src/workflows/agent-execution.ts` then:
 
 1. sends a typing indicator
-2. re-resolves the user with `findOrCreateUser(...)`
+2. resolves the user with `resolveTelegramUser(...)`
 3. builds the input from the buffered message texts
-4. calls `ConversationRuntime` through the agent runtime
+4. calls `ConversationRuntime`
 5. streams interim output by posting once and then editing every 500ms
 6. splits long final messages to stay within Telegram limits
-7. tells `ConversationSession` that execution finished
+7. calls `completeExecution(executionToken, outcome)`
 
-The workflow is where Telegram delivery and agent execution meet.
+The workflow step that may produce visible Telegram output does not use workflow retries.
+
+### 7. Atomic first-outbound claim
+
+The workflow must call `claimFirstOutbound(executionToken)` before the first visible Telegram send path:
+
+- relink-required reply
+- tool or progress reply
+- first streaming draft post
+- first final text post when no draft exists
+- error reply before any visible output exists
+
+If the claim is denied because the execution is stale or superseded, the workflow suppresses visible output and completes silently.
 
 ## Identity and persistence
 
@@ -217,27 +243,27 @@ Telegram identity is translated into Amby entities in a stable way.
 | Amby user | `users.id` | durable user id |
 | Conversation | `platform="telegram"` + `externalConversationKey=String(chatId)` | one conversation per Telegram chat |
 
-`findOrCreateUser(...)`:
+`resolveTelegramUser(...)`:
 
 - updates account metadata on every message
 - creates the user and account transactionally if needed
-- infers a best-effort timezone from Telegram `language_code`
+- returns a blocked status when a Telegram identity tombstone should prevent reprovisioning
 
 ## Outbound message rules
 
 Telegram replies leave the system through `@chat-adapter/telegram`.
 
-There are three main outbound styles:
+Outbound styles:
 
 - command replies via `TelegramSender`
 - workflow replies via `createTelegramAdapter(...).postMessage(...)`
 - streamed workflow edits via `editMessage(...)`
 
-Long final responses are split with `splitTelegramMessage(...)` to fit Telegram's message size limit.
+Long final responses are split with `splitTelegramMessage(...)` to fit Telegram limits.
 
 ## Local Bun path
 
-Local Bun dev keeps the Telegram flow simpler.
+Local Bun development keeps the Telegram flow simpler.
 
 ```mermaid
 sequenceDiagram
@@ -253,7 +279,7 @@ sequenceDiagram
     alt command
         Bot->>TGA: inline command reply
     else normal text
-        Bot->>Agent: findOrCreateUser + ensureConversation + handleMessage
+        Bot->>Agent: resolveTelegramUser + ensureConversation + handleMessage
         Agent-->>Bot: response
         Bot->>TGA: post reply
     end
@@ -267,31 +293,30 @@ Differences from the Worker path:
 - does not use `ConversationSession`
 - does not use `AgentExecutionWorkflow`
 
-This path is for local development convenience, not for production durability.
+This path is for local development convenience, not production durability.
 
 ## Local mock testing
 
 `apps/mock` emulates the Telegram boundary for local testing.
 
-It does two useful things:
+It:
 
 - constructs realistic `TelegramUpdate` payloads
 - captures outbound Bot API calls so you can inspect replies in a browser UI
-
-Use it when you want to test Telegram behavior without a real Telegram chat.
 
 ## Key files
 
 | File | Role |
 |---|---|
 | `apps/api/src/worker.ts` | Worker webhook entrypoint |
-| `packages/channels/src/telegram/chat-sdk.ts` | shared Worker Chat SDK bootstrap and routing |
+| `packages/channels/src/telegram/chat-sdk.ts` | Worker Chat SDK bootstrap and routing |
 | `apps/api/src/chat-state/cloudflare-chat-state.ts` | Worker-facing Chat SDK state adapter |
 | `apps/api/src/durable-objects/chat-state.ts` | durable Chat SDK state storage |
-| `apps/api/src/durable-objects/conversation-session.ts` | per-chat buffer and debounce controller |
+| `apps/api/src/durable-objects/conversation-session.ts` | per-chat buffer, execution token, and supersession controller |
 | `apps/api/src/workflows/agent-execution.ts` | durable agent execution and Telegram streaming |
-| `packages/channels/src/telegram/utils.ts` | command parsing, user lookup, conversation creation |
-| `packages/channels/src/telegram/sender.ts` | Telegram send/typing service |
+| `apps/api/src/workflows/telegram-delivery.ts` | first-outbound claim and visible-delivery gating |
+| `packages/channels/src/telegram/utils.ts` | command parsing and Telegram identity helpers |
+| `packages/channels/src/telegram/sender.ts` | Telegram send and typing service |
 | `apps/api/src/index.ts` | local Bun entrypoint |
 | `packages/channels/src/telegram/bot.ts` | Bun-only Telegram bot path |
 

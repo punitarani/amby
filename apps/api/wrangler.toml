@@ -87,22 +87,6 @@ binding = "HYPERDRIVE"
 id = "5b4f5571613141edbb3545c17bd44cdf"
 localConnectionString = "postgresql://postgres:postgres@localhost:54322/postgres"
 
-# --- Queue: inbound Telegram messages ---
-[[queues.producers]]
-binding = "TELEGRAM_QUEUE"
-queue = "telegram-inbound"
-
-[[queues.consumers]]
-queue = "telegram-inbound"
-max_batch_size = 10
-max_batch_timeout = 1
-max_retries = 3
-dead_letter_queue = "telegram-dlq"
-
-[[queues.producers]]
-binding = "TELEGRAM_DLQ"
-queue = "telegram-dlq"
-
 # --- Durable Object: ConversationSession ---
 [durable_objects]
 bindings = [
