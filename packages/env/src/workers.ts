@@ -44,6 +44,8 @@ export interface WorkerBindings {
 	HYPERDRIVE?: { connectionString: string }
 	POSTHOG_KEY?: string
 	POSTHOG_HOST?: string
+	VAULT_KEK?: string
+	VAULT_KEK_VERSION?: string
 	CF_VERSION_METADATA?: { id?: string }
 	BROWSER?: unknown
 	/** Workers AI binding — used by the Stagehand browser worker. */
@@ -110,6 +112,8 @@ export const makeEnvServiceFromBindings = (bindings: WorkerBindings) =>
 		BRAINTRUST_PROJECT_ID: bindings.BRAINTRUST_PROJECT_ID ?? "",
 		POSTHOG_KEY: bindings.POSTHOG_KEY ?? "",
 		POSTHOG_HOST: bindings.POSTHOG_HOST ?? "https://us.i.posthog.com",
+		VAULT_KEK: bindings.VAULT_KEK ?? "",
+		VAULT_KEK_VERSION: Number.parseInt(bindings.VAULT_KEK_VERSION ?? "1", 10),
 		SANDBOX_WORKFLOW: bindings.SANDBOX_WORKFLOW,
 		VOLUME_WORKFLOW: bindings.VOLUME_WORKFLOW,
 	})

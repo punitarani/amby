@@ -78,6 +78,8 @@ export interface Env {
 	readonly BRAINTRUST_PROJECT_ID: string
 	readonly POSTHOG_KEY: string
 	readonly POSTHOG_HOST: string
+	readonly VAULT_KEK: string
+	readonly VAULT_KEK_VERSION: number
 	readonly SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>
 	readonly VOLUME_WORKFLOW?: WorkflowBinding<{ userId: string; parentWorkflowId?: string }>
 }
