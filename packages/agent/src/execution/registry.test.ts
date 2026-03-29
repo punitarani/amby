@@ -134,7 +134,6 @@ describe("resolveVisibleTools", () => {
 				sandboxEnabled: true,
 				cuaEnabled: false,
 				integrationEnabled: false,
-				streamingEnabled: false,
 				browserEnabled: true,
 			},
 		})
@@ -149,7 +148,6 @@ describe("resolveVisibleTools", () => {
 				sandboxEnabled: true,
 				cuaEnabled: false,
 				integrationEnabled: true,
-				streamingEnabled: false,
 				browserEnabled: true,
 			},
 		})
@@ -164,7 +162,6 @@ describe("resolveVisibleTools", () => {
 				sandboxEnabled: true,
 				cuaEnabled: false,
 				integrationEnabled: false,
-				streamingEnabled: false,
 				browserEnabled: true,
 			},
 		})
@@ -179,7 +176,6 @@ describe("resolveVisibleTools", () => {
 				sandboxEnabled: true,
 				cuaEnabled: true,
 				integrationEnabled: false,
-				streamingEnabled: false,
 				browserEnabled: true,
 			},
 		})
@@ -194,7 +190,6 @@ describe("resolveVisibleTools", () => {
 				sandboxEnabled: false,
 				cuaEnabled: false,
 				integrationEnabled: false,
-				streamingEnabled: false,
 				browserEnabled: true,
 			},
 		})

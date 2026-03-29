@@ -14,7 +14,6 @@ const stubRuntime: AgentRunConfig["runtime"] = {
 	sandboxEnabled: true,
 	cuaEnabled: true,
 	integrationEnabled: true,
-	streamingEnabled: false,
 	browserEnabled: true,
 }
 
