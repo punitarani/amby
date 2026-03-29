@@ -59,7 +59,7 @@ export function getOrCreateChat(env: WorkerBindings, deps: ChatSdkDeps, state: S
 
 async function routeIncomingMessage(
 	env: WorkerBindings,
-	adapter: ReturnType<typeof createTelegramAdapter>,
+	_adapter: ReturnType<typeof createTelegramAdapter>,
 	message: Parameters<Parameters<Chat["onNewMention"]>[0]>[1],
 ) {
 	if (!_deps) throw new Error("[ChatSDK] getOrCreateChat must be called before routing messages")

@@ -501,8 +501,7 @@ export function handleTurn(
 			stopWhen: stepCountIs(runConfig.budgets.maxConversationSteps),
 			prepareStep: buildConversationPrepareStep(),
 			experimental_telemetry: createTelemetrySettings({
-				functionId:
-					"amby.conversation.generate",
+				functionId: "amby.conversation.generate",
 				request: runConfig.request,
 				modelId: config.defaultModelId,
 				agentRole: "conversation",
@@ -549,7 +548,7 @@ export function handleTurn(
 		// Persistence checkpoint: abort if the run has been superseded
 		if (request.shouldContinue) {
 			const shouldProceed = yield* Effect.tryPromise({
-				try: () => request.shouldContinue!(),
+				try: () => request.shouldContinue?.() ?? Promise.resolve(false),
 				catch: () => new AgentError({ message: "shouldContinue check failed" }),
 			}).pipe(Effect.catchAll(() => Effect.succeed(false)))
 			if (!shouldProceed) {

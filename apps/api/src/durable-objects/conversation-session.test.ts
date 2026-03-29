@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test"
+import type { BufferedMessage } from "@amby/channels"
 import {
 	computeDebounceDeadline,
-	isCorrectionMessage,
 	DEBOUNCE_BASE_MS,
-	DEBOUNCE_EXTEND_MS,
 	DEBOUNCE_CAP_MS,
+	DEBOUNCE_EXTEND_MS,
+	isCorrectionMessage,
 	RERUN_DEBOUNCE_MS,
 } from "./conversation-session-logic"
-import type { BufferedMessage } from "@amby/channels"
 
 // ---------------------------------------------------------------------------
 // Helper

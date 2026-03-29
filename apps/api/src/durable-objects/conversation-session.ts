@@ -195,10 +195,7 @@ export class ConversationSession extends DurableObject<WorkerBindings> {
 		this.bufferMessage(payload.message)
 
 		if (this.state.status === "processing") {
-			if (
-				isCorrectionMessage(payload.message) &&
-				this.state.firstOutboundClaimedAt === null
-			) {
+			if (isCorrectionMessage(payload.message) && this.state.firstOutboundClaimedAt === null) {
 				if (this.state.supersededAt === null) {
 					this.state.supersededAt = now
 				}

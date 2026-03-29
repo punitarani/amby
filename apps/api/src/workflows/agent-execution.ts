@@ -149,18 +149,14 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 							Effect.gen(function* () {
 								const convId =
 									conversationId ??
-									(yield* services.agent.ensureConversation(
-										"telegram",
-										String(chatId),
-									))
+									(yield* services.agent.ensureConversation("telegram", String(chatId)))
 								conversationId = convId
 
-								let structuredMessages =
-									yield* services.attachments.ingestBufferedMessages({
-										userId: finalUserId,
-										conversationId: convId,
-										messages,
-									})
+								let structuredMessages = yield* services.attachments.ingestBufferedMessages({
+									userId: finalUserId,
+									conversationId: convId,
+									messages,
+								})
 
 								if (parentContext?.trim()) {
 									if (structuredMessages[0]) {
@@ -186,9 +182,7 @@ export class AgentExecutionWorkflow extends WorkflowEntrypoint<
 								}
 
 								const sendReply = (text: string) =>
-									services.replySender
-										.postText(replyTarget, text)
-										.then(() => {})
+									services.replySender.postText(replyTarget, text).then(() => {})
 
 								if (structuredMessages.length > 1) {
 									return yield* services.agent.handleStructuredBatch(
