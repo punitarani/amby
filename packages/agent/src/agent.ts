@@ -38,6 +38,7 @@ export class ConversationRuntime extends Context.Tag("ConversationRuntime")<
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
 			onTextDelta?: (text: string) => void,
+			shouldContinue?: () => Promise<boolean>,
 		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly handleStructuredBatch: (
 			conversationId: string,
@@ -45,6 +46,7 @@ export class ConversationRuntime extends Context.Tag("ConversationRuntime")<
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
 			onTextDelta?: (text: string) => void,
+			shouldContinue?: () => Promise<boolean>,
 		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly handleMessage: (
 			conversationId: string,
@@ -52,6 +54,7 @@ export class ConversationRuntime extends Context.Tag("ConversationRuntime")<
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
 			onTextDelta?: (text: string) => void,
+			shouldContinue?: () => Promise<boolean>,
 		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly handleBatchedMessages: (
 			conversationId: string,
@@ -59,6 +62,7 @@ export class ConversationRuntime extends Context.Tag("ConversationRuntime")<
 			metadata?: Record<string, unknown>,
 			onReply?: ReplyFn,
 			onTextDelta?: (text: string) => void,
+			shouldContinue?: () => Promise<boolean>,
 		) => Effect.Effect<AgentRunResult, AgentError>
 		readonly streamMessage: (
 			conversationId: string,
@@ -174,6 +178,7 @@ export const makeConversationRuntimeLive = (userId: string) =>
 				onReply?: ReplyFn
 				onTextDelta?: (text: string) => void
 				onPart?: (part: StreamPart) => void
+				shouldContinue?: () => Promise<boolean>
 			}) => withTelemetryFlush(handleTurn(makeEngineConfig(params.conversationId), params))
 
 			const toStructuredMessage = (content: string): StructuredUserMessage => ({
@@ -182,7 +187,14 @@ export const makeConversationRuntimeLive = (userId: string) =>
 			})
 
 			return {
-				handleStructuredMessage: (conversationId, message, metadata, onReply, onTextDelta) =>
+				handleStructuredMessage: (
+					conversationId,
+					message,
+					metadata,
+					onReply,
+					onTextDelta,
+					shouldContinue,
+				) =>
 					runTurn({
 						conversationId,
 						mode: "message",
@@ -190,9 +202,17 @@ export const makeConversationRuntimeLive = (userId: string) =>
 						metadata,
 						onReply,
 						onTextDelta,
+						shouldContinue,
 					}),
 
-				handleStructuredBatch: (conversationId, messages, metadata, onReply, onTextDelta) =>
+				handleStructuredBatch: (
+					conversationId,
+					messages,
+					metadata,
+					onReply,
+					onTextDelta,
+					shouldContinue,
+				) =>
 					runTurn({
 						conversationId,
 						mode: "batched-message",
@@ -200,9 +220,17 @@ export const makeConversationRuntimeLive = (userId: string) =>
 						metadata,
 						onReply,
 						onTextDelta,
+						shouldContinue,
 					}),
 
-				handleMessage: (conversationId, content, metadata, onReply, onTextDelta) =>
+				handleMessage: (
+					conversationId,
+					content,
+					metadata,
+					onReply,
+					onTextDelta,
+					shouldContinue,
+				) =>
 					runTurn({
 						conversationId,
 						mode: "message",
@@ -210,9 +238,17 @@ export const makeConversationRuntimeLive = (userId: string) =>
 						metadata,
 						onReply,
 						onTextDelta,
+						shouldContinue,
 					}),
 
-				handleBatchedMessages: (conversationId, messages, metadata, onReply, onTextDelta) =>
+				handleBatchedMessages: (
+					conversationId,
+					messages,
+					metadata,
+					onReply,
+					onTextDelta,
+					shouldContinue,
+				) =>
 					runTurn({
 						conversationId,
 						mode: "batched-message",
@@ -223,6 +259,7 @@ export const makeConversationRuntimeLive = (userId: string) =>
 						metadata,
 						onReply,
 						onTextDelta,
+						shouldContinue,
 					}),
 
 				streamMessage: (conversationId, content, onPart) =>

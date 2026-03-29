@@ -213,6 +213,13 @@ export interface TurnRequest {
 	readonly onReply?: ReplyFn
 	readonly onTextDelta?: (text: string) => void
 	readonly onPart?: (part: StreamPart) => void
+	/**
+	 * Optional checkpoint callback. The engine calls this before any
+	 * irreversible effect (send_message tool, DB persistence). If the callback
+	 * returns false the turn is cancelled: no messages are persisted, and a
+	 * cancelled AgentRunResult is returned.
+	 */
+	readonly shouldContinue?: () => Promise<boolean>
 }
 
 function summarizeReplyContent(parts: ReadonlyArray<ConversationMessagePart>): string {
@@ -370,6 +377,9 @@ export function handleTurn(
 						"Send a short progress update to the user. In runtimes without incremental messaging this becomes a no-op.",
 					inputSchema: z.object({ text: z.string() }),
 					execute: async ({ text }) => {
+						if (request.shouldContinue && !(await request.shouldContinue())) {
+							return { sent: false, cancelled: true }
+						}
 						await onReply(text)
 						return { sent: true }
 					},
@@ -573,6 +583,31 @@ export function handleTurn(
 		yield* Effect.tryPromise(() => flushConversationToolEvents(result, rootTrace, rt)).pipe(
 			Effect.catchAll(() => Effect.void),
 		)
+
+		// Persistence checkpoint: abort if the run has been superseded
+		if (request.shouldContinue) {
+			const shouldProceed = yield* Effect.tryPromise({
+				try: () => request.shouldContinue!(),
+				catch: () => new AgentError({ message: "shouldContinue check failed" }),
+			}).pipe(Effect.catchAll(() => Effect.succeed(true)))
+			if (!shouldProceed) {
+				if (rootTraceRef) {
+					yield* rootTraceRef
+						.complete("failed", { reason: "superseded" })
+						.pipe(Effect.catchAll(() => Effect.void))
+				}
+				return {
+					status: "cancelled" as const,
+					userResponse: { text: "", parts: [] },
+					execution: {
+						mode: "direct" as const,
+						rootTraceId: rootTraceRef?.runId ?? "",
+						tasks: [],
+					},
+					sideEffects: {},
+				}
+			}
+		}
 
 		// Persist messages
 		const threadMeta = {

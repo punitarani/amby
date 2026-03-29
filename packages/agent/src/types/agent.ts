@@ -61,7 +61,7 @@ export type StreamPart =
 	| { type: "tool-result"; toolName: string; result: unknown }
 
 export type AgentRunResult = {
-	status: "completed" | "partial" | "failed"
+	status: "completed" | "partial" | "failed" | "cancelled"
 	userResponse: {
 		text: string
 		parts: ConversationMessagePart[]

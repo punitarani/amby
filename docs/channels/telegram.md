@@ -68,9 +68,10 @@ sequenceDiagram
         DB->>API: sendMessage
     else normal message
         SDK->>Sess: ingestMessage(...)
-        Sess->>Sess: buffer + debounce
-        Sess->>WF: create workflow
-        WF->>DB: findOrCreateUser(...)
+        Sess->>Sess: buffer + adaptive debounce (800ms–1.5s)
+        Sess->>WF: create workflow (assign execution token)
+        WF->>DB: findOrCreateUser(...) (resolve-user step)
+        WF->>WF: claimFirstOutbound (gate before any send or DB write)
         WF->>Attach: ingest buffered parts + store attachments
         WF->>Agent: ensureConversation + handleStructuredMessage / handleStructuredBatch
         Agent-->>WF: final response
@@ -171,7 +172,7 @@ Commands do not go through the buffering Durable Object or the agent workflow.
 
 #### Normal message path
 
-If the message is not a command and can be normalized into a `BufferedInboundMessage`, `routeIncomingMessage(...)` forwards it to `ConversationSession.ingestMessage(...)` using one Durable Object instance per Telegram chat id.
+If the message is not a command and can be normalized into a `BufferedInboundMessage`, `routeIncomingMessage(...)` forwards it to `ConversationSession.ingestMessage(...)` using one Durable Object instance per Telegram chat id. Identity resolution (`findOrCreateUser`) no longer happens before routing to the DO -- it is handled by the workflow's `resolve-user` step.
 
 For v1 this includes:
 
@@ -201,11 +202,19 @@ stateDiagram-v2
 
 Key behavior:
 
-- first message starts a 3 second debounce window
-- more messages during debounce are appended to the same buffer
+- first message starts an 800ms base debounce window
+- each additional message extends the debounce by 400ms, up to a 1500ms cap
 - Telegram media groups are merged into one buffered turn when they share a `media_group_id`
-- messages arriving during processing are forwarded to the active workflow as events and also rebuffered
-- when the workflow completes, a shorter 1 second debounce is used if follow-up messages arrived mid-run
+- messages arriving during processing are buffered (no event forwarding to the workflow); they feed the next turn or trigger supersession
+- when the workflow completes with buffered follow-up messages, a 250ms rerun debounce is used
+
+#### Execution token and `claimFirstOutbound`
+
+The DO assigns an execution token when starting a workflow. The workflow must call `claimFirstOutbound` before performing any visible send or DB persistence. This gate prevents stale output from a superseded run and stale history from leaking into subsequent turns.
+
+#### Supersession
+
+When a user sends a correction before the first outbound is claimed, the current run is superseded. Correction messages are prefix-matched against: "wait", "actually", "sorry", "i meant", "ignore that", "correction", "to clarify", "instead". On completion of the superseded run, in-flight messages and the buffer are merged for a rerun. The `shouldContinue` persistence checkpoint prevents the superseded run from writing to the DB.
 
 ### 6. Durable workflow execution
 
@@ -213,15 +222,16 @@ When the debounce alarm fires, `ConversationSession` starts `AgentExecutionWorkf
 
 `apps/api/src/workflows/agent-execution.ts` then:
 
-1. sends a typing indicator
-2. re-resolves the user with `findOrCreateUser(...)`
-3. ingests buffered attachment descriptors into private storage after user resolution
-4. builds compact routing text plus current-turn structured parts
-5. calls `ConversationRuntime` through the agent runtime
-6. streams interim output by posting once and then editing every 500ms
-7. sends final reply parts through `ReplySender`, using native Telegram photo/document delivery when possible
-8. falls back to signed Amby download links for unsupported outbound files
-9. tells `ConversationSession` that execution finished
+1. sends a single typing pulse (no recurring interval)
+2. resolves the user with `findOrCreateUser(...)` (the `resolve-user` step -- identity resolution happens here, not pre-DO)
+3. calls `claimFirstOutbound` to acquire the execution gate before any visible send or DB write
+4. ingests buffered attachment descriptors into private storage after user resolution
+5. builds compact routing text plus current-turn structured parts
+6. calls `ConversationRuntime` through the agent runtime
+7. streams interim output by posting once and then editing every 500ms
+8. sends final reply parts through `ReplySender`, using native Telegram photo/document delivery when possible
+9. falls back to signed Amby download links for unsupported outbound files
+10. tells `ConversationSession` that execution finished
 
 The workflow is where Telegram delivery, attachment ingest, and agent execution meet.
 
@@ -254,7 +264,7 @@ There are three main outbound styles:
 
 Long final text responses are split with `splitTelegramMessage(...)` to fit Telegram's 4096-character message limit. Images go through `sendPhoto`, documents go through `sendDocument`, and unsupported outbound files fall back to signed attachment URLs.
 
-Streaming behavior: during text streaming, the preview is capped at 4090 characters (with `...` truncation) so a single Telegram message is used. On finalization, the streaming draft is always deleted and the complete response is posted fresh via `postText`, which splits naturally into multiple messages when needed. `ReplyDraftHandle` tracks `chunkIds` so that `deleteMessage` can clean up all chunks of a multi-message reply.
+Streaming behavior: a single typing indicator is sent at workflow start (the previous 4-second recurring typing interval has been removed). During text streaming, the preview is capped at 4090 characters (with `...` truncation) so a single Telegram message is used. On finalization, the streaming draft is always deleted and the complete response is posted fresh via `postText`, which splits naturally into multiple messages when needed. `ReplyDraftHandle` tracks `chunkIds` so that `deleteMessage` can clean up all chunks of a multi-message reply.
 
 Each attachment part in `sendParts` is error-isolated: if delivery fails for one part (including the signed-URL fallback), the remaining parts still attempt delivery.
 

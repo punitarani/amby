@@ -1,15 +1,9 @@
-import { TELEGRAM_RELINK_REQUIRED_MESSAGE } from "@amby/auth"
 import type { WorkerBindings } from "@amby/env/workers"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat, type StateAdapter } from "chat"
 import { Effect, type ManagedRuntime } from "effect"
 import type { TelegramFrom, TelegramMessage } from "./utils"
-import {
-	buildBufferedTelegramMessage,
-	handleCommand,
-	parseTelegramCommand,
-	resolveTelegramUser,
-} from "./utils"
+import { buildBufferedTelegramMessage, handleCommand, parseTelegramCommand } from "./utils"
 
 export interface ChatSdkDeps {
 	// biome-ignore lint/suspicious/noExplicitAny: Runtime type parameters vary by caller; correctness verified at the call site
@@ -115,18 +109,7 @@ async function routeIncomingMessage(
 	const bufferedMessage = buildBufferedTelegramMessage(raw)
 	if (!bufferedMessage) return
 
-	const identityRuntime = deps.makeRuntimeForConsumer(env)
-	try {
-		const resolvedUser = await identityRuntime.runPromise(resolveTelegramUser(from, chatId))
-		if (resolvedUser.status === "blocked") {
-			await adapter.postMessage(String(chatId), TELEGRAM_RELINK_REQUIRED_MESSAGE).catch(() => {})
-			return
-		}
-	} finally {
-		await identityRuntime.dispose()
-	}
-
-	// Text messages: route to ConversationSession DO for debouncing
+	// No identity check here — resolved in the workflow's resolve-user step.
 	const doBinding = env.CONVERSATION_SESSION
 	if (!doBinding) {
 		console.error("[ChatSDK] CONVERSATION_SESSION binding not available")

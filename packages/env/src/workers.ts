@@ -84,7 +84,18 @@ export interface WorkerBindings {
 	TELEGRAM_DLQ?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
 	CONVERSATION_SESSION?: {
 		idFromName(name: string): { toString(): string }
-		get(id: { toString(): string }): { ingestMessage(msg: unknown): Promise<void> }
+		get(id: { toString(): string }): {
+			ingestMessage(msg: unknown): Promise<void>
+			claimFirstOutbound(params: { executionToken: string }): Promise<{
+				allowed: boolean
+				reason: "ok" | "stale" | "superseded" | "already-claimed"
+			}>
+			completeExecution(result: {
+				executionToken: string
+				userId?: string
+				conversationId?: string
+			}): Promise<{ accepted: boolean; shouldRerun: boolean }>
+		}
 	}
 	AGENT_WORKFLOW?: WorkflowBinding<unknown>
 	SANDBOX_WORKFLOW?: WorkflowBinding<{ userId: string }>
