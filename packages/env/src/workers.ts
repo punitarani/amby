@@ -80,8 +80,6 @@ export interface WorkerBindings {
 	BROWSER?: unknown
 	/** Workers AI binding — used by the Stagehand browser worker. */
 	AI?: unknown
-	TELEGRAM_QUEUE?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
-	TELEGRAM_DLQ?: { send(body: unknown, options?: { contentType?: string }): Promise<void> }
 	CONVERSATION_SESSION?: {
 		idFromName(name: string): { toString(): string }
 		get(id: { toString(): string }): {
