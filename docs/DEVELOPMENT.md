@@ -95,7 +95,7 @@ See [CHANNELS.md](./CHANNELS.md), [channels/telegram.md](./channels/telegram.md)
 ### Bun vs Worker API paths
 
 * `bun run api:dev` uses the Bun entrypoint in `apps/api/src/index.ts` and keeps Chat SDK state in memory.
-* `bun run api:dev:worker` uses the Cloudflare Worker entrypoint in `apps/api/src/worker.ts` and exercises the Durable Object-backed Chat SDK state path used in production.
+* `bun run api:dev:worker` uses the Cloudflare Worker entrypoint in `apps/api/src/worker.ts` and exercises the Durable Object-backed Chat SDK state path used in production. It runs `wrangler dev --local --live-reload false`: the Worker executes locally (Miniflare/workerd), `--local` disables remote bindings so all resources use local simulations for that session, and `--live-reload false` turns off HTML live-reload. Wrangler still rebuilds the bundle when sources change; there is no built-in flag to disable that file watching.
 
 ## Testing
 

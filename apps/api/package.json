@@ -9,7 +9,7 @@
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
 		"dev": "bun run --hot src/index.ts",
-		"dev:worker": "wrangler dev",
+		"dev:worker": "wrangler dev --local --live-reload false",
 		"deploy:message": "bun run src/scripts/worker-version-message.ts",
 		"deploy": "export SENTRY_RELEASE=${SENTRY_RELEASE:-$(sentry-cli releases propose-version)} && export WORKER_VERSION_MESSAGE=$(bun run --silent deploy:message) && wrangler deploy --outdir dist-worker --upload-source-maps --var SENTRY_RELEASE:$SENTRY_RELEASE --message \"$WORKER_VERSION_MESSAGE\" && bun run sentry:sourcemaps",
 		"sentry:release": "sentry-cli releases info \"$SENTRY_RELEASE\" >/dev/null 2>&1 || sentry-cli releases new \"$SENTRY_RELEASE\"",
