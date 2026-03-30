@@ -84,18 +84,18 @@ The mock app emulates a Telegram-like chat interface for local testing without a
 
 Start it with `bun run mock` and set:
 
-- `TELEGRAM_API_BASE_URL=http://localhost:3100/api/mock-bot`
-- `BETTER_AUTH_URL=http://localhost:3001`
-- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME`
-- `TELEGRAM_LOGIN_WIDGET_ENABLED=true` if you want widget flows
-- `TELEGRAM_MINI_APP_ENABLED=true` if you want Mini App flows
+* `TELEGRAM_API_BASE_URL=http://localhost:3100/api/mock-bot`
+* `BETTER_AUTH_URL=http://localhost:3001`
+* `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME`
+* `TELEGRAM_LOGIN_WIDGET_ENABLED=true` if you want widget flows
+* `TELEGRAM_MINI_APP_ENABLED=true` if you want Mini App flows
 
 See [CHANNELS.md](./CHANNELS.md), [channels/telegram.md](./channels/telegram.md), and [apps/mock/README.md](../apps/mock/README.md) for details.
 
 ### Bun vs Worker API paths
 
-- `bun run api:dev` uses the Bun entrypoint in `apps/api/src/index.ts` and keeps Chat SDK state in memory.
-- `bun run api:dev:worker` uses the Cloudflare Worker entrypoint in `apps/api/src/worker.ts` and exercises the Durable Object-backed Chat SDK state path used in production.
+* `bun run api:dev` uses the Bun entrypoint in `apps/api/src/index.ts` and keeps Chat SDK state in memory.
+* `bun run api:dev:worker` uses the Cloudflare Worker entrypoint in `apps/api/src/worker.ts` and exercises the Durable Object-backed Chat SDK state path used in production. It runs `wrangler dev --local --no-live-reload`: the Worker executes locally (Miniflare/workerd), `--local` disables remote bindings so all resources use local simulations for that session, and `--no-live-reload` turns off HTML live-reload. Wrangler still rebuilds the bundle when sources change; there is no built-in flag to disable that file watching.
 
 ## Testing
 
@@ -119,6 +119,7 @@ bun test --coverage                         # With coverage
 **What to test:** Decision logic, architectural boundaries, state machines. Not: schema definitions, migration SQL, trivial barrel exports, third-party internals.
 
 **Adding tests:**
+
 1. Co-locate `module.test.ts` next to `module.ts`
 2. Use `describe` blocks matching the function name
 3. Test boundary conditions, not just happy paths
@@ -145,6 +146,6 @@ Update documentation when code changes affect setup, commands, architecture, or 
 
 ## Further Reading
 
-- [ARCHITECTURE.md](../ARCHITECTURE.md) -- system map and module boundaries
-- [channels/telegram.md](./channels/telegram.md) -- channel integration details
-- [DATA_MODEL.md](./DATA_MODEL.md) -- data model and schema reference
+* [ARCHITECTURE.md](../ARCHITECTURE.md) -- system map and module boundaries
+* [channels/telegram.md](./channels/telegram.md) -- channel integration details
+* [DATA\_MODEL.md](./DATA_MODEL.md) -- data model and schema reference

@@ -4,11 +4,12 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"clean": "rm -rf node_modules .turbo dist dist-worker .wrangler",
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
 		"dev": "bun run --hot src/index.ts",
-		"dev:worker": "wrangler dev",
+		"dev:worker": "wrangler dev --local --no-live-reload",
 		"deploy:message": "bun run src/scripts/worker-version-message.ts",
 		"deploy:reconcile-queues": "bun run src/scripts/reconcile-queue-consumers.ts",
 		"deploy": "export SENTRY_RELEASE=${SENTRY_RELEASE:-$(sentry-cli releases propose-version)} && export WORKER_VERSION_MESSAGE=$(bun run --silent deploy:message) && wrangler deploy --outdir dist-worker --upload-source-maps --var SENTRY_RELEASE:$SENTRY_RELEASE --message \"$WORKER_VERSION_MESSAGE\" && bun run sentry:sourcemaps",
