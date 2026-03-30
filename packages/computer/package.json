@@ -8,6 +8,7 @@
 		"./sandbox-config": "./src/sandbox-config.ts"
 	},
 	"scripts": {
+		"clean": "rm -rf node_modules .turbo dist",
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",

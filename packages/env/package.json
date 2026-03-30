@@ -9,6 +9,7 @@
 		"./workers": "./src/workers.ts"
 	},
 	"scripts": {
+		"clean": "rm -rf node_modules .turbo dist",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/shared.ts ./src/local.ts ./src/workers.ts --outdir dist --target bun"
 	},

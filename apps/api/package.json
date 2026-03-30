@@ -4,6 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"clean": "rm -rf node_modules .turbo dist dist-worker .wrangler",
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"build": "bun build ./src/index.ts --outdir dist --target bun",
