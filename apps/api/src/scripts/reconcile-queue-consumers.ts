@@ -28,9 +28,17 @@ type CloudflareApiEnvelope<T> = {
 	success: boolean
 	result: T
 	errors?: Array<{ code?: number; message?: string }>
+	result_info?: {
+		count?: number
+		page?: number
+		per_page?: number
+		total_count?: number
+		total_pages?: number
+	}
 }
 
 type CloudflareFetch = (input: string, init?: RequestInit) => Promise<Response>
+const CLOUDFLARE_QUEUES_PAGE_SIZE = 100
 
 export type QueueConsumerDrift = {
 	queueId: string
@@ -61,6 +69,38 @@ function normalizeNonEmpty(value: string | undefined): string | undefined {
 function toArray<T>(value: T | T[] | undefined): T[] {
 	if (!value) return []
 	return Array.isArray(value) ? value : [value]
+}
+
+function normalizeHeaders(headersInit: RequestInit["headers"]): Record<string, string> {
+	const headers: Record<string, string> = {}
+	if (!headersInit) return headers
+
+	if (Array.isArray(headersInit)) {
+		for (const [key, value] of headersInit) {
+			headers[key] = value
+		}
+		return headers
+	}
+
+	if (headersInit instanceof Headers) {
+		headersInit.forEach((value, key) => {
+			headers[key] = value
+		})
+		return headers
+	}
+
+	if (Symbol.iterator in Object(headersInit)) {
+		for (const entry of headersInit as Iterable<readonly [string, string]>) {
+			headers[entry[0]] = entry[1]
+		}
+		return headers
+	}
+
+	for (const [key, value] of Object.entries(headersInit)) {
+		headers[key] = value
+	}
+
+	return headers
 }
 
 export function parseQueueConsumerConfig(tomlText: string): QueueConsumerConfig {
@@ -123,20 +163,20 @@ async function cloudflareRequest<T>(
 	env: Record<string, string | undefined>,
 	fetchFn: CloudflareFetch,
 	init?: RequestInit,
-): Promise<T> {
+): Promise<CloudflareApiEnvelope<T>> {
 	const accountId = normalizeNonEmpty(env.CLOUDFLARE_ACCOUNT_ID)
 	const apiToken = normalizeNonEmpty(env.CLOUDFLARE_API_TOKEN)
 
 	if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID is required")
 	if (!apiToken) throw new Error("CLOUDFLARE_API_TOKEN is required")
 
+	const headers = normalizeHeaders(init?.headers)
+	headers.Authorization = `Bearer ${apiToken}`
+	headers["Content-Type"] = "application/json"
+
 	const response = await fetchFn(`${CLOUDFLARE_API_BASE_URL}/accounts/${accountId}${path}`, {
 		...init,
-		headers: {
-			Authorization: `Bearer ${apiToken}`,
-			"Content-Type": "application/json",
-			...(init?.headers ?? {}),
-		},
+		headers,
 	})
 
 	const payload = (await response.json()) as CloudflareApiEnvelope<T>
@@ -149,7 +189,37 @@ async function cloudflareRequest<T>(
 		throw new Error(`Cloudflare API request failed for ${path}: ${errorMessage}`)
 	}
 
-	return payload.result
+	return payload
+}
+
+async function listCloudflareQueues(
+	env: Record<string, string | undefined>,
+	fetchFn: CloudflareFetch,
+): Promise<CloudflareQueue[]> {
+	const queues: CloudflareQueue[] = []
+	let page = 1
+	let totalPages = 1
+
+	do {
+		const query = new URLSearchParams({
+			page: String(page),
+			per_page: String(CLOUDFLARE_QUEUES_PAGE_SIZE),
+		})
+		const payload = await cloudflareRequest<CloudflareQueue[]>(
+			`/queues?${query.toString()}`,
+			env,
+			fetchFn,
+		)
+
+		queues.push(...payload.result)
+		totalPages =
+			typeof payload.result_info?.total_pages === "number" && payload.result_info.total_pages > 0
+				? payload.result_info.total_pages
+				: page
+		page += 1
+	} while (page <= totalPages)
+
+	return queues
 }
 
 export async function reconcileQueueConsumers(options: ReconcileOptions = {}) {
@@ -167,7 +237,7 @@ export async function reconcileQueueConsumers(options: ReconcileOptions = {}) {
 	const wranglerToml = await readTextFile(wranglerTomlPath)
 	const config = parseQueueConsumerConfig(wranglerToml)
 	const desiredConsumerQueues = new Set(config.consumerQueues)
-	const queues = await cloudflareRequest<CloudflareQueue[]>("/queues", env, fetchFn)
+	const queues = await listCloudflareQueues(env, fetchFn)
 	const staleConsumers = findStaleQueueConsumers(queues, config.scriptName, desiredConsumerQueues)
 
 	if (staleConsumers.length === 0) {

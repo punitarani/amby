@@ -5,6 +5,31 @@ import {
 	reconcileQueueConsumers,
 } from "./reconcile-queue-consumers"
 
+function readHeader(headersInit: RequestInit["headers"] | undefined, name: string): string | null {
+	if (!headersInit) return null
+	if (Array.isArray(headersInit)) {
+		const entry = headersInit.find(([key]) => key.toLowerCase() === name.toLowerCase())
+		return entry?.[1] ?? null
+	}
+	if (headersInit instanceof Headers) {
+		return headersInit.get(name)
+	}
+	if (Symbol.iterator in Object(headersInit)) {
+		for (const entry of headersInit as Iterable<readonly [string, string]>) {
+			if (entry[0].toLowerCase() === name.toLowerCase()) {
+				return entry[1]
+			}
+		}
+		return null
+	}
+	for (const [key, value] of Object.entries(headersInit as Record<string, string>)) {
+		if (key.toLowerCase() === name.toLowerCase()) {
+			return value
+		}
+	}
+	return null
+}
+
 describe("parseQueueConsumerConfig", () => {
 	it("reads the worker name and queue consumers from wrangler.toml", () => {
 		const config = parseQueueConsumerConfig(`
@@ -88,6 +113,75 @@ describe("findStaleQueueConsumers", () => {
 })
 
 describe("reconcileQueueConsumers", () => {
+	it("fetches every queue page before deciding there are no stale consumers", async () => {
+		const fetchFn = vi.fn(async (input: string) => {
+			const url = new URL(input)
+			const page = url.searchParams.get("page")
+
+			if (page === "1") {
+				return new Response(
+					JSON.stringify({
+						success: true,
+						result: [
+							{
+								queue_id: "queue-1",
+								queue_name: "telegram-inbound",
+								consumers: [],
+							},
+						],
+						result_info: {
+							page: 1,
+							per_page: 100,
+							total_pages: 2,
+						},
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				)
+			}
+
+			return new Response(
+				JSON.stringify({
+					success: true,
+					result: [
+						{
+							queue_id: "queue-2",
+							queue_name: "later-page-queue",
+							consumers: [
+								{
+									consumer_id: "consumer-2",
+									script_name: "amby-api",
+									type: "worker",
+								},
+							],
+						},
+					],
+					result_info: {
+						page: 2,
+						per_page: 100,
+						total_pages: 2,
+					},
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			)
+		})
+
+		await expect(
+			reconcileQueueConsumers({
+				env: {
+					CLOUDFLARE_ACCOUNT_ID: "account-1",
+					CLOUDFLARE_API_TOKEN: "token-1",
+				},
+				fetchFn,
+				log: { error() {}, log() {} },
+				readTextFile: async () => 'name = "amby-api"',
+			}),
+		).rejects.toThrow("Cloudflare still has stale queue consumers attached to this Worker.")
+
+		expect(fetchFn).toHaveBeenCalledTimes(2)
+		expect(fetchFn.mock.calls[0]?.[0]).toContain("page=1")
+		expect(fetchFn.mock.calls[1]?.[0]).toContain("page=2")
+	})
+
 	it("fails in read-only mode when stale consumers exist", async () => {
 		const fetchFn = vi.fn(async () => {
 			return new Response(
@@ -128,6 +222,8 @@ describe("reconcileQueueConsumers", () => {
 		const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input)
 			if (!init?.method || init.method === "GET") {
+				expect(readHeader(init?.headers, "Authorization")).toBe("Bearer token-1")
+
 				return new Response(
 					JSON.stringify({
 						success: true,
