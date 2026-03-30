@@ -30,6 +30,8 @@ type CloudflareApiEnvelope<T> = {
 	errors?: Array<{ code?: number; message?: string }>
 }
 
+type CloudflareFetch = (input: string, init?: RequestInit) => Promise<Response>
+
 export type QueueConsumerDrift = {
 	queueId: string
 	queueName: string
@@ -40,7 +42,7 @@ export type QueueConsumerDrift = {
 type ReconcileOptions = {
 	apply?: boolean
 	env?: Record<string, string | undefined>
-	fetchFn?: typeof fetch
+	fetchFn?: CloudflareFetch
 	log?: Pick<typeof console, "error" | "log">
 	readTextFile?: (path: string) => Promise<string>
 	wranglerTomlPath?: string
@@ -119,7 +121,7 @@ export function findStaleQueueConsumers(
 async function cloudflareRequest<T>(
 	path: string,
 	env: Record<string, string | undefined>,
-	fetchFn: typeof fetch,
+	fetchFn: CloudflareFetch,
 	init?: RequestInit,
 ): Promise<T> {
 	const accountId = normalizeNonEmpty(env.CLOUDFLARE_ACCOUNT_ID)
@@ -140,8 +142,10 @@ async function cloudflareRequest<T>(
 	const payload = (await response.json()) as CloudflareApiEnvelope<T>
 	if (!response.ok || !payload.success) {
 		const errorMessage =
-			payload.errors?.map((error) => error.message).filter(Boolean).join("; ") ||
-			`${response.status} ${response.statusText}`
+			payload.errors
+				?.map((error) => error.message)
+				.filter(Boolean)
+				.join("; ") || `${response.status} ${response.statusText}`
 		throw new Error(`Cloudflare API request failed for ${path}: ${errorMessage}`)
 	}
 
@@ -151,7 +155,7 @@ async function cloudflareRequest<T>(
 export async function reconcileQueueConsumers(options: ReconcileOptions = {}) {
 	const apply = options.apply ?? false
 	const env = options.env ?? process.env
-	const fetchFn = options.fetchFn ?? fetch
+	const fetchFn = options.fetchFn ?? ((input, init) => fetch(input, init))
 	const log = options.log ?? console
 	const wranglerTomlPath = options.wranglerTomlPath ?? "wrangler.toml"
 	const readTextFile =
